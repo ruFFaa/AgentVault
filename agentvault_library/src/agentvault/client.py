@@ -7,8 +7,8 @@ import json
 import logging
 import httpx
 import typing
-import uuid # Added import
-import pydantic # Added import
+import uuid
+import pydantic
 from typing import Optional, Dict, Any, Union, AsyncGenerator
 
 # Import local models
@@ -76,7 +76,8 @@ class AgentVaultClient:
             logger.debug("Using provided httpx.AsyncClient instance.")
         else:
             logger.debug(f"Creating internal httpx.AsyncClient instance with timeout {default_timeout}s.")
-            self._http_client = httpx.AsyncClient(timeout=default_timeout)
+            # Pass through standard httpx arguments like follow_redirects
+            self._http_client = httpx.AsyncClient(timeout=default_timeout, follow_redirects=True)
             self._should_close_client = True
 
     async def close(self) -> None:
@@ -131,7 +132,7 @@ class AgentVaultClient:
             # 1. Get Authentication Headers
             auth_headers = self._get_auth_headers(agent_card, key_manager)
 
-            # 2. Prepare Message (handle potential immutability and MCP context)
+            # 2. Prepare Message
             message_to_send = initial_message
             if mcp_context:
                 current_metadata = message_to_send.metadata or {}
@@ -139,7 +140,7 @@ class AgentVaultClient:
                 message_to_send = message_to_send.model_copy(update={'metadata': updated_metadata})
                 logger.debug("Embedded MCP context into message metadata.")
 
-            # 3. Construct Parameters (id=None for initiation)
+            # 3. Construct Parameters
             task_send_params = TaskSendParams(message=message_to_send, id=None)
 
             # 4. Construct JSON-RPC Request Payload
@@ -152,27 +153,22 @@ class AgentVaultClient:
             }
             logger.debug(f"Initiate task request payload (id: {request_id}): {request_payload}")
 
-            # 5. Make the Request (ASSUMES _make_request returns parsed dict for now)
-            # TODO: Replace placeholder call once _make_request is implemented
+            # 5. Make the Request (Now uses the implemented _make_request)
             response_data = await self._make_request(
                 'POST',
-                str(agent_card.url), # Ensure URL is string
+                str(agent_card.url),
                 headers=auth_headers,
                 json_payload=request_payload
             )
-            # Placeholder logic is inside _make_request for now
 
-            # 6. Parse and Validate Response
-            if not isinstance(response_data, dict):
-                 raise A2AMessageError(f"Invalid response format: Expected dictionary, got {type(response_data)}")
-
+            # 6. Parse and Validate Response (response_data is now guaranteed dict if no exception)
             if "error" in response_data:
                 error_data = response_data["error"]
                 logger.error(f"Agent returned error during task initiation: {error_data}")
                 err_code = error_data.get("code", -1)
                 err_msg = error_data.get("message", "Unknown remote agent error")
                 err_data = error_data.get("data")
-                raise A2ARemoteAgentError(message=err_msg, status_code=err_code, response_body=err_data) # Using status_code for JSON-RPC code
+                raise A2ARemoteAgentError(message=err_msg, status_code=err_code, response_body=err_data)
 
             if "result" not in response_data:
                 raise A2AMessageError("Invalid response format: missing 'result' key.")
@@ -189,16 +185,13 @@ class AgentVaultClient:
             logger.info(f"Task successfully initiated with agent {agent_card.human_readable_id}. Task ID: {task_id}")
             return task_id
 
-        except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError) as e:
-            # Re-raise specific A2A errors
+        except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e:
             logger.error(f"A2A error during task initiation: {e}")
             raise
         except KeyManagementError as e:
-             # Convert KeyManager errors to A2AAuthenticationError
              logger.error(f"Key management error during task initiation: {e}")
              raise A2AAuthenticationError(f"Authentication failed: {e}") from e
         except Exception as e:
-            # Catch any other unexpected errors
             logger.exception(f"Unexpected error during task initiation with agent {agent_card.human_readable_id}: {e}")
             raise A2AError(f"An unexpected error occurred during task initiation: {e}") from e
 
@@ -244,7 +237,7 @@ class AgentVaultClient:
                 message_to_send = message_to_send.model_copy(update={'metadata': updated_metadata})
                 logger.debug("Embedded MCP context into message metadata.")
 
-            # 3. Construct Parameters (with existing task_id)
+            # 3. Construct Parameters
             task_send_params = TaskSendParams(message=message_to_send, id=task_id)
 
             # 4. Construct JSON-RPC Request Payload
@@ -257,20 +250,15 @@ class AgentVaultClient:
             }
             logger.debug(f"Send message request payload (id: {request_id}): {request_payload}")
 
-            # 5. Make the Request (ASSUMES _make_request returns parsed dict for now)
-            # TODO: Replace placeholder call once _make_request is implemented
+            # 5. Make the Request
             response_data = await self._make_request(
                 'POST',
                 str(agent_card.url),
                 headers=auth_headers,
                 json_payload=request_payload
             )
-            # Placeholder logic is inside _make_request for now
 
             # 6. Parse and Validate Response
-            if not isinstance(response_data, dict):
-                 raise A2AMessageError(f"Invalid response format: Expected dictionary, got {type(response_data)}")
-
             if "error" in response_data:
                 error_data = response_data["error"]
                 logger.error(f"Agent returned error sending message to task {task_id}: {error_data}")
@@ -291,7 +279,7 @@ class AgentVaultClient:
             logger.info(f"Message successfully sent to task {task_id} on agent {agent_card.human_readable_id}.")
             return True # Successful acknowledgement
 
-        except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError) as e:
+        except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e:
             # Re-raise specific A2A errors
             logger.error(f"A2A error sending message to task {task_id}: {e}")
             raise
@@ -302,6 +290,9 @@ class AgentVaultClient:
         except Exception as e:
             # Catch any other unexpected errors and return False as per requirement
             logger.exception(f"Unexpected error sending message to task {task_id} on agent {agent_card.human_readable_id}: {e}")
+            # According to REQ-LIB-A2ACLIENT-003, we should return False here.
+            # Consider if re-raising a generic A2AError might be better for callers.
+            # For now, adhering strictly to the requirement.
             return False
 
 
@@ -464,8 +455,8 @@ class AgentVaultClient:
         url: str,
         headers: Optional[Dict[str, str]] = None,
         json_payload: Optional[Dict[str, Any]] = None,
-        stream: bool = False # Added for potential SSE use
-    ) -> Union[Dict[str, Any], AsyncGenerator[bytes, None]]: # Changed return type to Dict for non-stream
+        stream: bool = False
+    ) -> Union[Dict[str, Any], AsyncGenerator[bytes, None]]:
         """
         Internal helper to make HTTP requests using the client's httpx instance
         and handle common errors, converting them to A2A exceptions.
@@ -475,7 +466,7 @@ class AgentVaultClient:
             url: The target URL.
             headers: Request headers.
             json_payload: Dictionary to be sent as JSON body (for POST/PUT etc.).
-            stream: Whether to return a streaming response.
+            stream: Whether to return a streaming response (e.g., for SSE).
 
         Returns:
             A dictionary representing the parsed JSON response for regular requests,
@@ -488,23 +479,84 @@ class AgentVaultClient:
             A2AMessageError: If the response body cannot be parsed as JSON (for non-stream).
             A2AError: For other unexpected httpx errors.
         """
-        # TODO: Implement this method properly using self._http_client
-        logger.warning(f"_make_request called (method={method}, url={url}, stream={stream}) - Returning placeholder/raising error.")
-        if stream:
-             # Placeholder for async generator
-             async def _dummy_stream():
-                  yield b'data: {"event": "placeholder"}\n\n' # pragma: no cover
-             return _dummy_stream()
-        else:
-             # Placeholder for regular response - return a dummy success dict
-             req_id = json_payload.get("id", "unknown") if json_payload else "unknown"
-             # Simulate successful JSON-RPC response (TaskSendResult might just be confirmation)
-             return {
-                 "jsonrpc": "2.0",
-                 "result": {"id": json_payload.get("params", {}).get("id", f"task-placeholder-{uuid.uuid4()}")}, # Echo task ID if present, else generate placeholder
-                 "id": req_id
-             }
-             # raise NotImplementedError("_make_request is not fully implemented yet.")
+        request_kwargs = {
+            "method": method,
+            "url": url,
+            "headers": headers or {},
+            "json": json_payload
+        }
+        # Add content for non-GET/HEAD methods if no json_payload, httpx handles this mostly
+        # request_kwargs["content"] = None if json_payload else ""
+
+        log_payload_str = f" Payload: {json_payload}" if json_payload else ""
+        logger.debug(f"Making A2A request: {method} {url}{log_payload_str}")
+
+        try:
+            if stream:
+                # Open a stream connection
+                response = await self._http_client.stream(**request_kwargs) # type: ignore[arg-type]
+                try:
+                    # Check status immediately after receiving headers
+                    response.raise_for_status()
+                    logger.debug(f"Stream request successful ({response.status_code}), returning byte stream.")
+                    # Return the async generator for the body
+                    return response.aiter_bytes()
+                except httpx.HTTPStatusError as e:
+                    # Consume body before raising to avoid resource leaks if possible
+                    await response.aread()
+                    await response.aclose()
+                    logger.error(f"HTTP error on stream request {method} {url}: {e.response.status_code}")
+                    raise A2ARemoteAgentError(
+                        message=f"HTTP error {e.response.status_code} for {url}: {e.response.text}",
+                        status_code=e.response.status_code,
+                        response_body=e.response.text
+                    ) from e
+                except Exception:
+                     # Ensure stream is closed on any error during initial check/aiter setup
+                     await response.aclose()
+                     raise
+
+            else: # Regular, non-streaming request
+                response = await self._http_client.request(**request_kwargs) # type: ignore[arg-type]
+                # Check for HTTP errors
+                response.raise_for_status() # Raises HTTPStatusError for 4xx/5xx
+
+                # Attempt to parse JSON
+                try:
+                    response_data = response.json()
+                    logger.debug(f"Request successful ({response.status_code}). Response JSON: {response_data}")
+                    return response_data
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to decode JSON response from {method} {url}: {e}. Response text: {response.text[:200]}...")
+                    raise A2AMessageError(
+                        f"Failed to decode JSON response from {url}. Status: {response.status_code}. Body: {response.text[:200]}..."
+                    ) from e
+
+        except httpx.TimeoutException as e:
+            logger.error(f"Request timeout for {method} {url}: {e}")
+            raise A2ATimeoutError(f"Request timed out: {e}") from e
+        except httpx.ConnectError as e:
+            logger.error(f"Connection error for {method} {url}: {e}")
+            raise A2AConnectionError(f"Connection failed: {e}") from e
+        except httpx.NetworkError as e:
+            logger.error(f"Network error for {method} {url}: {e}")
+            raise A2AConnectionError(f"Network error: {e}") from e
+        except httpx.HTTPStatusError as e:
+             # This catches errors from raise_for_status in non-stream case
+             logger.error(f"HTTP error on request {method} {url}: {e.response.status_code}")
+             raise A2ARemoteAgentError(
+                 message=f"HTTP error {e.response.status_code} for {url}: {e.response.text}",
+                 status_code=e.response.status_code,
+                 response_body=e.response.text
+             ) from e
+        except httpx.RequestError as e:
+            # Catch other httpx request-related errors
+            logger.error(f"HTTP request error for {method} {url}: {e}")
+            raise A2AConnectionError(f"HTTP request failed: {e}") from e
+        except Exception as e:
+            # Catch any other unexpected errors
+            logger.exception(f"Unexpected error during request {method} {url}: {e}")
+            raise A2AError(f"An unexpected error occurred during the request: {e}") from e
 
 
 #
