@@ -1,6 +1,6 @@
 # AgentVault Registry API - Terms of Service
 
-**Last Updated:** [Insert Date - e.g., April 12, 2025]
+**Last Updated:** [April 12, 2025]
 
 **PLEASE READ THESE TERMS OF SERVICE CAREFULLY.** By accessing or using the AgentVault Registry API (the "Service"), provided by the AgentVault Project Maintainers ("we", "us", "our"), you ("Developer", "you") agree to be bound by these Terms of Service ("Terms"). If you do not agree to these Terms, do not use the Service.
 
@@ -63,7 +63,7 @@ TO THE FULLEST EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE AGENTVA
 
 **9. Governing Law**
 
-These Terms shall be governed by and construed in accordance with the laws of [Insert Jurisdiction - e.g., State of California, USA], without regard to its conflict of law principles.
+These Terms shall be governed by and construed in accordance with the laws of [Bavaria, Germany], without regard to its conflict of law principles.
 
 **10. Changes to Terms**
 
@@ -71,4 +71,4 @@ We reserve the right to modify these Terms at any time. If we make changes, we w
 
 **11. Contact Information**
 
-For questions about these Terms of Service, please contact `legal@agentvault.example.com` (*Note: Replace domain before production*).
+For questions about these Terms of Service, please contact `AgentVault@proton.me` (*Note: Replace domain before production*).

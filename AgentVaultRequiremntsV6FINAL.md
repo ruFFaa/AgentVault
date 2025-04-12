@@ -58,7 +58,7 @@ Tests Root: `tests/library/`
     *   **Goal:** Create `agentvault_library/pyproject.toml` and basic directory structure.
     *   **Details:**
         *   Run `poetry init` within `agentvault_library/` (or generate file manually).
-        *   Set package name: `agentvault`. Version: `0.1.0`. Description: "Core Python client library for A2A protocol, MCP, and secure local key management.". Author: [Your Name/Email]. License: Apache-2.0. Python: `>=3.10,<3.12`.
+        *   Set package name: `agentvault`. Version: `0.1.0`. Description: "Core Python client library for A2A protocol, MCP, and secure local key management.". Author: [{ name = "Raphael Zbiniew Jeziorny", email = "AgentVault@proton.me" }]. License: Apache-2.0. Python: `>=3.10,<3.12`.
         *   Package structure: `packages = [{include = "agentvault", from = "src"}]`.
         *   Core Dependencies: `python = ">=3.10,<3.12"`, `httpx = {extras = ["http2", "brotli"], version = ">=0.27,<0.28"}`, `pydantic = ">=2.0,<3.0"`, `python-dotenv = ">=1.0,<2.0"`.
         *   Optional Dependency Group: `keyring = { version = ">=24,<25", optional = true }` -> Add `[tool.poetry.extras] os_keyring = ["keyring"]`.

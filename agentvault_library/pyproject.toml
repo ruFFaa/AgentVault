@@ -3,7 +3,7 @@
         name = "agentvault"
         version = "0.1.0"
         description = "Core Python client library for A2A protocol, MCP, and secure local key management." # Added description
-        authors = [{ name = "Your Name", email = "you@example.com" }] # Replace with actual details
+        authors = [{ name = "Raphael Zbiniew Jeziorny", email = "AgentVault@proton.me" }] # Replace with actual details
         license = "Apache-2.0" # Added license field
         readme = "README.md" # Added readme field
 
@@ -40,7 +40,7 @@
     name = "agentvault"
     version = "0.1.0"
     description = "Core Python client library for A2A protocol, MCP, and secure local key management."
-    authors = ["Your Name <you@example.com>"] # Replace with actual details
+    authors = ["Raphael Zbigniew Jeziorny <AgentVault@proton.me>"] # Replace with actual details
     license = "Apache-2.0"
     readme = "README.md"
     packages = [{include = "agentvault", from = "src"}]

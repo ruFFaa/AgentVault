@@ -24,7 +24,7 @@ We appreciate responsible disclosure. Please report any suspected security vulne
 
 **Alternative Method:**
 
-*   **Email:** If you cannot use GitHub's reporting feature, you can email your report to `security@agentvault.example.com` (***Please replace `agentvault.example.com` with the actual project domain/contact later***). Use a clear subject line like "Security Vulnerability Report: AgentVault [Component Name]". **Please use this email address for vulnerability reports ONLY.** Other inquiries will not be addressed here.
+*   **Email:** If you cannot use GitHub's reporting feature, you can email your report to `AgentVault@proton.me` . Use a clear subject line like "Security Vulnerability Report: AgentVault [Component Name]". **Please use this email address for vulnerability reports ONLY.** Other inquiries will not be addressed here.
 
 **What to Include:**
 

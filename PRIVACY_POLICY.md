@@ -1,12 +1,12 @@
 # AgentVault Registry API - Privacy Policy
 
-**Last Updated:** [Insert Date - e.g., April 12, 2025]
+**Last Updated:** [April 12, 2025]
 
 This Privacy Policy describes how the AgentVault Project Maintainers ("we", "us", "our") collect, use, and handle information in connection with your use of the AgentVault Registry API (the "Service").
 
 **1. Data Controller**
 
-The data controller for the information processed via the Service is The AgentVault Project Maintainers. You can contact us regarding privacy matters at `privacy@agentvault.example.com` (*Note: Replace domain before production*).
+The data controller for the information processed via the Service is The AgentVault Project Maintainers. You can contact us regarding privacy matters at `AgentVault@proton.me` (*Note: Replace domain before production*).
 
 **2. Information We Collect**
 
@@ -61,7 +61,7 @@ Depending on your location, you may have certain rights regarding your personal 
 *   The right to object to or restrict processing of your personal information.
 *   The right to data portability.
 
-To exercise these rights, please contact us at `privacy@agentvault.example.com` (*Note: Replace domain before production*). We will respond to your request consistent with applicable law.
+To exercise these rights, please contact us at `AgentVault@proton.me` (*Note: Replace domain before production*). We will respond to your request consistent with applicable law.
 
 **8. International Data Transfers**
 
@@ -77,4 +77,4 @@ We may update this Privacy Policy from time to time. If we make material changes
 
 **11. Contact Us**
 
-If you have any questions about this Privacy Policy, please contact us at `privacy@agentvault.example.com` (*Note: Replace domain before production*).
+If you have any questions about this Privacy Policy, please contact us at `AgentVault@proton.me` (*Note: Replace domain before production*).

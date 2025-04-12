@@ -37,7 +37,7 @@ Agent Card metadata submitted to the registry must not:
 
 Users who encounter Agent Cards that appear to violate the Content Guidelines, are misleading, link to non-functional or malicious endpoints, or represent agents engaging in harmful activities are encouraged to report them.
 
-*   **How to Report:** Please send a detailed report including the Agent Card ID (the UUID) and a description of the issue to: `registry-reports@agentvault.example.com` (*Note: Replace domain before production*).
+*   **How to Report:** Please send a detailed report including the Agent Card ID (the UUID) and a description of the issue to: `AgentVault@proton.me` (*Note: Replace domain before production*).
 *   **Review Process:** Reports will be reviewed by the AgentVault maintainers based on this policy.
 
 ## 6. Enforcement
