@@ -1,0 +1,6 @@
+# Exclude files specific to library development if necessary,
+# although the top-level .gitignore should cover most cases.
+# Example: Might exclude generated test artifacts specific to library.
+/dist/
+/build/
+/.eggs/

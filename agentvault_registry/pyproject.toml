@@ -1,0 +1,23 @@
+[project]
+name = "agentvault-registry-api"
+version = "0.1.0"
+description = ""
+authors = [{ name = "Your Name", email = "you@example.com" }]
+requires-python = ">=3.10,<3.12"
+dependencies = [
+    "fastapi>=0.111,<0.112",
+    "pydantic>=2.0,<3.0"
+]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.0.0"
+# You can add more dev tools here, e.g.:
+# flake8 = "^6.0.0"
+# black = "^23.0.0"
+
+[tool.poetry]
+packages = [{include = "agentvault_registry", from = "src"}]

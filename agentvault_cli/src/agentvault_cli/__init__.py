@@ -1,0 +1,1 @@
+# AgentVault CLI Client Tool

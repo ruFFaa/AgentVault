@@ -1,0 +1,4 @@
+# Exclude files specific to CLI development
+/dist/
+/build/
+/.eggs/

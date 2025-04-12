@@ -1,0 +1,9 @@
+# Exclude files specific to registry API development
+# Example: Local test database files, generated certs
+local_registry.db
+*.pem
+/instance/
+/dist/
+/build/
+/.eggs/
+/.env # Exclude local env file
