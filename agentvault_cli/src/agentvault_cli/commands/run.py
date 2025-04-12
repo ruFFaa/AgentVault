@@ -3,7 +3,8 @@ import httpx
 import pathlib
 import logging
 import asyncio
-import json # For parsing context file
+import json
+import signal # For Ctrl+C handling
 from typing import Optional, Dict, Any
 
 # Import local utilities
@@ -14,44 +15,54 @@ try:
     from agentvault import agent_card_utils
     from agentvault import exceptions as av_exceptions
     from agentvault import models as av_models
-    from agentvault import key_manager # Needed now
-    from agentvault import client as av_client # Needed later
+    from agentvault import key_manager
+    from agentvault import client as av_client # Import the client class
     _agentvault_lib_imported = True
 except ImportError as e:
-    # Display error immediately if core lib is missing
-    # This check might need refinement depending on how __main__ is structured
-    # But it's useful for development.
     import sys
     click.secho(f"FATAL: Failed to import core 'agentvault' library: {e}", fg='red', err=True)
     click.secho("Please ensure 'agentvault_library' is installed correctly (e.g., `poetry install` in root).", err=True)
-    # Set placeholders to allow CLI structure to load, but commands will fail
-    agent_card_utils = None # type: ignore
-    av_exceptions = None # type: ignore
-    av_models = None # type: ignore
-    key_manager = None # type: ignore
-    av_client = None # type: ignore
+    agent_card_utils = None
+    av_exceptions = None
+    av_models = None
+    key_manager = None
+    av_client = None
     _agentvault_lib_imported = False
-    # Exit here if the library is critical for the CLI to even load commands
-    # sys.exit(1) # Or handle more gracefully depending on structure
+    # Keep CLI loadable, but command will fail later if lib missing
 
 # Import default registry URL from discover command
 try:
     from .discover import DEFAULT_REGISTRY_URL
 except ImportError:
-    # Fallback if discover isn't created yet (shouldn't happen in sequence)
-    DEFAULT_REGISTRY_URL = "http://localhost:8000"
+    DEFAULT_REGISTRY_URL = "http://localhost:8000" # Fallback
+
+# Rich imports for better output
+from rich.panel import Panel
+from rich.syntax import Syntax
 
 logger = logging.getLogger(__name__)
 
-# --- Helper for Agent Card Loading ---
+# --- Flag for Ctrl+C Handling ---
+terminate_requested = False
 
+def handle_interrupt(sig, frame):
+    """Signal handler to request termination."""
+    global terminate_requested
+    if not terminate_requested: # Prevent multiple messages if Ctrl+C pressed again
+        utils.display_warning("\nTermination requested (Ctrl+C). Attempting to cancel task...")
+        terminate_requested = True
+    else:
+        utils.display_warning("Termination already in progress...")
+
+
+# --- Helper for Agent Card Loading ---
 async def _load_agent_card(
     agent_ref: str, registry_url: str, ctx: click.Context
 ) -> Optional[av_models.AgentCard]:
     """Loads agent card from ID, URL, or file."""
     if not _agentvault_lib_imported or agent_card_utils is None:
          utils.display_error("AgentVault library not available for loading agent card.")
-         return None # Cannot proceed
+         return None
 
     utils.display_info(f"Attempting to load agent card from reference: {agent_ref}")
     agent_card: Optional[av_models.AgentCard] = None
@@ -62,12 +73,11 @@ async def _load_agent_card(
             agent_card = await agent_card_utils.fetch_agent_card_from_url(agent_ref)
         else:
             agent_path = pathlib.Path(agent_ref)
-            # Check if it's a file first, even without .json extension
             is_file = False
             try:
                 if agent_path.is_file():
                     is_file = True
-            except OSError: # Handle potential errors like path too long
+            except OSError:
                  pass
 
             if is_file:
@@ -77,14 +87,10 @@ async def _load_agent_card(
                      utils.display_warning(f"Reference is a file but not '.json'. Attempting to load anyway: {agent_ref}")
                 agent_card = agent_card_utils.load_agent_card_from_file(agent_path)
             else:
-                # Assume it's an ID to look up in the registry
                 utils.display_info(f"Reference looks like an ID, querying registry: {registry_url}")
-                # --- MODIFIED REGISTRY LOOKUP ---
                 # Assume registry API has a direct lookup endpoint /api/v1/agent-cards/id/{humanReadableId}
-                # Or adapt if it only supports search
-                # Let's try direct lookup first, fallback to search might be complex here
-                # Note: URL encoding might be needed for the ID if it contains special chars
-                encoded_id = httpx.URL(path=agent_ref).path # Basic encoding for path part
+                # Note: URL encoding might be needed for the ID
+                encoded_id = httpx.URL(path=agent_ref).path # Basic encoding
                 lookup_url = f"{registry_url.rstrip('/')}/api/v1/agent-cards/id/{encoded_id}"
                 utils.display_info(f"Attempting direct lookup: {lookup_url}")
 
@@ -93,7 +99,7 @@ async def _load_agent_card(
 
                 if response.status_code == 200:
                     card_full_data = response.json()
-                    # The detail endpoint should return the full card structure including card_data
+                    # The detail endpoint returns AgentCardRead schema which contains card_data
                     agent_card = agent_card_utils.parse_agent_card_from_dict(card_full_data.get("card_data", {}))
                     if not agent_card:
                          raise av_exceptions.AgentCardError("Registry returned success but card_data was missing or invalid in response.")
@@ -101,7 +107,6 @@ async def _load_agent_card(
                      raise av_exceptions.AgentCardError(f"Agent ID '{agent_ref}' not found in registry at {registry_url}.")
                 else:
                      raise av_exceptions.AgentCardFetchError(f"Registry API error looking up agent ID '{agent_ref}' (Status {response.status_code})", status_code=response.status_code, response_body=response.text)
-                # --- END MODIFIED REGISTRY LOOKUP ---
 
     except av_exceptions.AgentCardError as e:
         utils.display_error(f"Failed to load agent card: {e}")
@@ -139,8 +144,15 @@ async def run_command(
     """
     Run a task on a specified remote agent using the A2A protocol.
     """
+    global terminate_requested # Allow modification by signal handler
+    terminate_requested = False # Reset flag at start of command
+
     if not _agentvault_lib_imported:
-        # Error already displayed during import attempt
+        utils.display_error("Cannot run task: Core 'agentvault' library failed to import.")
+        ctx.exit(1)
+    # Check for essential components loaded from library
+    if not all([agent_card_utils, av_exceptions, av_models, key_manager, av_client]):
+        utils.display_error("Cannot run task: Core 'agentvault' library components missing.")
         ctx.exit(1)
 
     # 1. Load Agent Card
@@ -164,7 +176,7 @@ async def run_command(
         except (IOError, OSError) as e:
             utils.display_error(f"Failed to read input file {input_file_path}: {e}")
             ctx.exit(1)
-        except Exception as e: # Catch other potential errors
+        except Exception as e:
              utils.display_error(f"An unexpected error occurred reading input file {input_file_path}: {e}")
              ctx.exit(1)
     else:
@@ -193,17 +205,16 @@ async def run_command(
     # 4. Load Keys
     api_key: Optional[str] = None
     service_id: Optional[str] = None
-    requires_auth = True # Assume auth needed unless 'none' scheme found
+    requires_auth = True
+    manager: Optional[key_manager.KeyManager] = None # Define manager in broader scope
 
     try:
-        manager = key_manager.KeyManager(use_keyring=True) # Enable all sources
+        manager = key_manager.KeyManager(use_keyring=True)
 
-        # Determine required service ID
         if key_service_override:
             service_id = key_service_override
             utils.display_info(f"Using overridden service ID for key lookup: '{service_id}'")
         else:
-            # Find the first supported auth scheme (prioritize apiKey)
             api_key_scheme = next((s for s in agent_card.auth_schemes if s.scheme == 'apiKey'), None)
             none_scheme = next((s for s in agent_card.auth_schemes if s.scheme == 'none'), None)
 
@@ -214,22 +225,18 @@ async def run_command(
             elif none_scheme:
                 utils.display_info("Agent supports 'none' authentication scheme. No API key needed.")
                 requires_auth = False
-                service_id = None # No service ID needed if auth is none
+                service_id = None
             else:
-                # Handle other schemes if added later (e.g., bearer, oauth2)
                 utils.display_warning(f"Agent does not explicitly support 'apiKey' or 'none' auth schemes. Supported: {[s.scheme for s in agent_card.auth_schemes]}. Key lookup might fail.")
-                # Attempt to use the first scheme's identifier as a fallback guess
                 if agent_card.auth_schemes:
                      first_scheme = agent_card.auth_schemes[0]
                      service_id = first_scheme.service_identifier or agent_card.human_readable_id
                      utils.display_warning(f"Attempting key lookup using service ID from first scheme ('{first_scheme.scheme}'): '{service_id}'")
-                     requires_auth = True # Assume auth needed if not 'none'
+                     requires_auth = True
                 else:
-                     # Should be caught by card validation, but handle defensively
                      utils.display_error("Agent card has no authentication schemes defined.")
                      ctx.exit(1)
 
-        # Get the API key if required and not overridden
         if requires_auth:
             if auth_key_override:
                 api_key = auth_key_override
@@ -244,32 +251,169 @@ async def run_command(
                     utils.display_info("Use 'agentvault config set' to configure the key using --env, --file, or --keyring.")
                     ctx.exit(1)
             else:
-                # This case should ideally be caught earlier if auth is required but no service_id found
                 utils.display_error("Authentication is required, but could not determine the service ID for key lookup.")
                 ctx.exit(1)
         else:
-             api_key = None # Explicitly set to None if no auth required
+             api_key = None
 
     except Exception as e:
         utils.display_error(f"An unexpected error occurred during key loading: {e}")
         logger.exception("Unexpected error in key loading section")
         ctx.exit(1)
 
+    # Ensure manager is instantiated if needed later
+    if manager is None:
+        manager = key_manager.KeyManager(use_keyring=True) # Should have been created, but safety
 
-    # 5. Prepare Initial Message (Placeholder for REQ-CLI-RUN-003)
-    # TODO: Create av_models.Message with TextPart from processed_input_text
-    utils.display_info("Message preparation logic to be implemented...")
-    # Example placeholder:
-    # initial_message = av_models.Message(role="user", parts=[av_models.TextPart(content=processed_input_text)])
+    # 5. Prepare Initial Message
+    try:
+        initial_message = av_models.Message(
+            role="user",
+            parts=[av_models.TextPart(content=processed_input_text)]
+        )
+    except Exception as e:
+        utils.display_error(f"Failed to create initial message structure: {e}")
+        ctx.exit(1)
+
+    # 6. Instantiate Client and Run Task
+    task_id: Optional[str] = None
+    final_task_state: Optional[av_models.TaskState] = None
+    original_sigint_handler = signal.getsignal(signal.SIGINT) # Store original handler
+    signal.signal(signal.SIGINT, handle_interrupt) # Register custom handler
+
+    try:
+        async with av_client.AgentVaultClient() as client:
+            try:
+                utils.display_info("Initiating task with agent...")
+                task_id = await client.initiate_task(
+                    agent_card=agent_card,
+                    initial_message=initial_message,
+                    key_manager=manager, # Pass the instantiated manager
+                    mcp_context=mcp_context_data
+                )
+                utils.display_success(f"Task initiated successfully. Task ID: {task_id}")
+                utils.display_info("Waiting for events... (Press Ctrl+C to request cancellation)")
+
+                # Handle SSE stream
+                async for event in client.receive_messages(
+                    agent_card=agent_card, task_id=task_id, key_manager=manager
+                ):
+                    if terminate_requested:
+                        utils.display_info(f"Attempting to terminate task {task_id}...")
+                        try:
+                            await client.terminate_task(agent_card, task_id, manager)
+                            utils.display_success(f"Termination request acknowledged for task {task_id}.")
+                        except av_exceptions.A2AError as term_err:
+                            utils.display_error(f"Failed to send termination request: {term_err}")
+                        final_task_state = av_models.TaskState.CANCELLED # Assume cancelled on request
+                        break # Exit event loop
+
+                    # Process different event types
+                    if isinstance(event, av_models.TaskStatusUpdateEvent):
+                        final_task_state = event.state
+                        status_msg = f"Task Status: {event.state.value}"
+                        if event.message:
+                            status_msg += f" - {event.message}"
+                        utils.display_info(status_msg)
+                        if event.state in [av_models.TaskState.COMPLETED, av_models.TaskState.FAILED, av_models.TaskState.CANCELLED]:
+                            utils.display_info("Task reached terminal state.")
+                            break # Exit event loop
+
+                    elif isinstance(event, av_models.TaskMessageEvent):
+                        role = event.message.role
+                        content_parts = []
+                        for part in event.message.parts:
+                            if isinstance(part, av_models.TextPart):
+                                content_parts.append(part.content)
+                            elif isinstance(part, av_models.FilePart):
+                                content_parts.append(f"[File: {part.filename or part.url} ({part.media_type or 'unknown'})]")
+                            elif isinstance(part, av_models.DataPart):
+                                # Pretty print JSON data part
+                                try:
+                                     content_parts.append(f"[Data ({part.media_type}):\n{json.dumps(part.content, indent=2)}]")
+                                except Exception:
+                                     content_parts.append(f"[Data ({part.media_type}): {part.content}]")
+                            else:
+                                 content_parts.append("[Unknown message part type]")
+
+                        full_content = "\n".join(content_parts)
+                        title = f"Message from {role.capitalize()}"
+                        if role == "assistant":
+                            utils.console.print(Panel(full_content, title=title, border_style="blue"))
+                        elif role == "tool":
+                             utils.console.print(Panel(full_content, title=title, border_style="yellow"))
+                        else: # user, system
+                             utils.console.print(Panel(full_content, title=title, border_style="dim"))
 
 
-    # 6. Instantiate Client and Run Task (Placeholder for REQ-CLI-RUN-003)
-    # TODO: Use async with av_client.AgentVaultClient() as client: ...
-    # TODO: Call client.initiate_task(...) using agent_card, initial_message, manager (or maybe just api_key?), mcp_context_data
-    # TODO: Loop through client.receive_messages(...) and display events
-    # TODO: Add Ctrl+C handler to call client.terminate_task(...)
-    utils.display_info("A2A client interaction logic to be implemented...")
-    utils.display_warning("Run command implementation is incomplete.")
+                    elif isinstance(event, av_models.TaskArtifactUpdateEvent):
+                        artifact = event.artifact
+                        utils.display_info(f"Artifact Update: ID={artifact.id}, Type={artifact.type}")
+                        if artifact.url:
+                            utils.display_info(f"  URL: {artifact.url}")
+                        if artifact.content:
+                             # Display content nicely if possible (e.g., syntax highlight code)
+                             content_str = str(artifact.content)
+                             if isinstance(artifact.content, (dict, list)):
+                                 try: content_str = json.dumps(artifact.content, indent=2)
+                                 except Exception: pass # Keep original string if dump fails
+                             # Basic check for code-like content
+                             lang = artifact.media_type.split('/')[-1] if artifact.media_type and '/' in artifact.media_type else "text"
+                             if lang in ["python", "json", "yaml", "javascript", "html", "css", "markdown"]:
+                                  syntax = Syntax(content_str, lang, theme="default", line_numbers=True)
+                                  utils.console.print(Panel(syntax, title=f"Artifact Content ({artifact.id})"))
+                             else:
+                                  utils.display_info(f"  Content: {content_str[:200]}{'...' if len(content_str) > 200 else ''}")
+                        if artifact.metadata:
+                             utils.display_info(f"  Metadata: {artifact.metadata}")
 
-    # Simulate completion for now
-    await asyncio.sleep(0.1) # Allow other tasks to run if any
+                    else:
+                        utils.display_warning(f"Received unknown event type: {type(event)}")
+
+                # End of event loop
+
+            except av_exceptions.A2AError as e:
+                utils.display_error(f"A2A communication error: {e}")
+                logger.exception("A2AError during task execution")
+                ctx.exit(1)
+            except Exception as e:
+                 utils.display_error(f"An unexpected error occurred during task execution: {e}")
+                 logger.exception("Unexpected error during task execution")
+                 ctx.exit(1)
+            finally:
+                 # Fetch final status if task ID was obtained and loop finished/broke
+                 if task_id:
+                     utils.display_info("-" * 20)
+                     utils.display_info("Fetching final task status...")
+                     try:
+                         final_task = await client.get_task_status(agent_card, task_id, manager)
+                         final_task_state = final_task.state
+                         utils.display_info(f"Final Task State: {final_task.state.value}")
+                         # Optionally display final messages/artifacts here if needed
+                     except av_exceptions.A2AError as e:
+                         utils.display_error(f"Could not fetch final task status: {e}")
+                     except Exception as e:
+                          utils.display_error(f"Unexpected error fetching final status: {e}")
+
+                 # Restore original signal handler
+                 signal.signal(signal.SIGINT, original_sigint_handler)
+
+                 # Determine final exit code based on state
+                 if final_task_state == av_models.TaskState.COMPLETED:
+                     utils.display_success("Task completed.")
+                     ctx.exit(0)
+                 elif final_task_state == av_models.TaskState.FAILED:
+                     utils.display_error("Task failed.")
+                     ctx.exit(1)
+                 elif final_task_state == av_models.TaskState.CANCELLED:
+                     utils.display_warning("Task cancelled.")
+                     ctx.exit(2) # Use different exit code for cancellation
+                 else:
+                     utils.display_warning(f"Task finished with non-terminal state: {final_task_state}")
+                     ctx.exit(1) # Treat unexpected non-terminal state as error
+
+
+    except Exception as e: # Catch errors during client instantiation
+        utils.display_error(f"Failed to initialize A2A client: {e}")
+        logger.exception("Error initializing AgentVaultClient")
+        ctx.exit(1)
