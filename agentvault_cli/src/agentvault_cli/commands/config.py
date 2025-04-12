@@ -1,7 +1,7 @@
 import click
 import logging
 import pathlib
-from typing import Optional # Added Optional
+from typing import Optional
 
 # Import AgentVault library components
 try:
@@ -62,7 +62,9 @@ def set_key(
 
     # --- Provide Guidance or Set Key ---
     if env_var:
-        env_var_name = f"{key_manager.KeyManager.env_prefix if key_manager else 'AGENTVAULT_KEY_'}{service_id.upper()}"
+        # Use the default prefix from KeyManager if available, otherwise fallback
+        prefix = key_manager.KeyManager.env_prefix if key_manager else 'AGENTVAULT_KEY_'
+        env_var_name = f"{prefix}{service_id.upper()}"
         utils.display_info(f"Guidance: To use an environment variable for '{service_id}', set the following variable:")
         utils.display_info(f"  {env_var_name}=<your_api_key>")
         utils.display_info("Ensure this variable is set in your shell environment before running AgentVault commands.")
@@ -107,3 +109,48 @@ def set_key(
             utils.display_error(f"An unexpected error occurred while setting key in keyring: {e}")
             logger.exception("Unexpected error in config set --keyring") # Log traceback for debug
             ctx.exit(1)
+
+
+@config_group.command("get")
+@click.argument("service_id", type=str)
+@click.option("--show-key", is_flag=True, help="Display the first few characters of the key (use with caution).")
+@click.pass_context
+def get_key(ctx: click.Context, service_id: str, show_key: bool):
+    """
+    Check how the API key for a specific service is being sourced.
+
+    Checks environment variables, configured key files, and the OS keyring (if enabled).
+    SERVICE_ID: The identifier for the service (e.g., 'openai', 'anthropic', 'agent-id').
+    """
+    if not _agentvault_lib_imported or key_manager is None:
+        utils.display_error("Cannot get key source: Failed to import the 'agentvault' library or KeyManager.")
+        ctx.exit(1)
+
+    try:
+        # Instantiate KeyManager, enabling keyring to check all potential sources
+        # We don't need to specify a key_file_path here unless we want to *only* check that specific file.
+        # By default, it checks env vars first, then attempts keyring if enabled and needed.
+        # The get_key_source method relies on the internal state after get_key is called.
+        manager = key_manager.KeyManager(use_keyring=True)
+
+        key_value = manager.get_key(service_id)
+        source = manager.get_key_source(service_id) # Get source after get_key potentially loads it
+
+        if key_value is None:
+            utils.display_warning(f"No key found for service '{service_id}' in any configured source (Env, File, Keyring).")
+            utils.display_info("Use 'config set' to configure a key source or store the key.")
+        else:
+            utils.display_info(f"Key for service '{service_id}' found.")
+            utils.display_info(f"  Source: {source.upper() if source else 'Unknown'}") # Source should be known if key_value exists
+
+            if show_key:
+                # Mask the key for display
+                masked_key = key_value[:4] + '...' * (len(key_value) > 4)
+                utils.display_info(f"  Value (masked): {masked_key}")
+            else:
+                 utils.display_info("  (Use --show-key to display a masked version of the key)")
+
+    except Exception as e:
+        utils.display_error(f"An unexpected error occurred while getting key source: {e}")
+        logger.exception(f"Unexpected error in config get for service '{service_id}'")
+        ctx.exit(1)
