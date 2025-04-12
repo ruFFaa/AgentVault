@@ -1,72 +1,59 @@
-# --- ADDED [project] section for PEP 621 compatibility ---
-    [project]
-        name = "agentvault-registry-api"
-        version = "0.1.0"
-        description = "Backend API for the AgentVault Central Registry"
-        authors = [{ name = "AgentVault Contributors", email = "agentvault@proton.me" }]
-        license = "Apache-2.0"
-        readme = "README.md"
-        requires-python = ">=3.10,<3.12"
-
-        dependencies = [
-            "fastapi>=0.111,<0.112",
-            "uvicorn[standard]>=0.29,<0.35",
-            "sqlalchemy>=2.0,<2.1",
-            "asyncpg>=0.29,<0.30",
-            "alembic>=1.13,<1.14",
-            "pydantic>=2.0,<3.0",
-            "pydantic-settings>=2.0,<2.4",
-            "passlib[bcrypt]>=1.7,<1.8",
-            "python-dotenv>=1.0,<2.0",
-            "slowapi>=0.1.9,<0.2.0",
-        ]
-
-        [project.optional-dependencies]
-        dev = [
-            "pytest>=7.0,<9.0",
-            "pytest-asyncio>=0.23,<0.24",
-            "httpx>=0.27,<0.29", # Ensure httpx is here for tests
-        ]
-    # --- END ADDED [project] section ---
-
-    [build-system]
-    requires = ["poetry-core>=1.0.0"]
-    build-backend = "poetry.core.masonry.api"
-
-    # --- Poetry Specific Configuration ---
-    [tool.poetry]
+# Using standard PEP 621 [project] table primarily
+[project]
     name = "agentvault-registry-api"
     version = "0.1.0"
     description = "Backend API for the AgentVault Central Registry"
-    authors = ["AgentVault Contributors <agentvault@proton.me>"] # Placeholder - update as needed
-    license = "Apache-2.0"
+    authors = [{ name = "Raphael Zbiniew Jeziorny", email = "AgentVault@proton.me" }]
+    license = { text = "Apache-2.0" }
     readme = "README.md"
-    packages = [{include = "agentvault_registry", from = "src"}]
+    requires-python = ">=3.10,<3.12"
 
-    [tool.poetry.dependencies]
-    python = ">=3.10,<3.12"
-    fastapi = ">=0.111,<0.112"
-    uvicorn = {extras = ["standard"], version = ">=0.29,<0.35"} # Pinned uvicorn to avoid recent breaking changes if any
-    sqlalchemy = ">=2.0,<2.1"
-    # Use asyncpg for async database access with FastAPI/SQLAlchemy
-    asyncpg = ">=0.29,<0.30"
-    # psycopg2-binary = ">=2.9,<2.10" # Alternative if using synchronous SQLAlchemy sessions
-    alembic = ">=1.13,<1.14"
-    pydantic = ">=2.0,<3.0"
-    pydantic-settings = ">=2.0,<2.4"
-    passlib = {extras = ["bcrypt"], version = ">=1.7,<1.8"}
-    python-dotenv = ">=1.0,<2.0"
-    slowapi = ">=0.1.9,<0.2.0" # Added rate limiting library
-    # Add agentvault library dependency later if needed for schema validation directly
-    # agentvault = {path = "../agentvault_library", develop = true}
+    dependencies = [
+        "fastapi>=0.111,<0.112",
+        "uvicorn[standard]>=0.29,<0.35",
+        "sqlalchemy>=2.0,<2.1",
+        "asyncpg>=0.29,<0.30",
+        "alembic>=1.13,<1.14",
+        "pydantic>=2.0,<3.0",
+        "pydantic-settings>=2.0,<2.4",
+        "passlib[bcrypt]>=1.7,<1.8",
+        "python-dotenv>=1.0,<2.0",
+        "slowapi>=0.1.9,<0.2.0",
+    ]
 
-    [tool.poetry.group.dev.dependencies]
-    pytest = ">=7.0,<9.0" # Align with library
-    pytest-asyncio = ">=0.23,<0.24" # Align with library
-    httpx = ">=0.27,<0.29" # Align with library for testing client interactions
+    [project.optional-dependencies]
+    dev = [
+        "pytest>=7.0,<9.0", # Reduced upper bound
+        "pytest-asyncio>=0.23,<0.24",
+        "httpx>=0.27,<0.29", # Reduced upper bound
+    ]
 
-    # Optional: Add project URLs, classifiers etc. later
-    # [tool.poetry.urls]
-    # Homepage = "https://github.com/your-org/agentvault"
-    # Documentation = "https://your-org.github.io/agentvault"
-    # Repository = "https://github.com/your-org/agentvault"
+# Build System (unchanged)
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+# Poetry Specific Configuration (Minimal)
+[tool.poetry]
+# name, version, description, authors, license, readme are now primarily in [project]
+packages = [{include = "agentvault_registry", from = "src"}]
+
+# Dependencies defined here are used by Poetry's resolver but [project] is canonical
+[tool.poetry.dependencies]
+python = ">=3.10,<3.12"
+fastapi = ">=0.111,<0.112"
+uvicorn = {extras = ["standard"], version = ">=0.29,<0.35"}
+sqlalchemy = ">=2.0,<2.1"
+asyncpg = ">=0.29,<0.30"
+alembic = ">=1.13,<1.14"
+pydantic = ">=2.0,<3.0"
+pydantic-settings = ">=2.0,<2.4"
+passlib = {extras = ["bcrypt"], version = ">=1.7,<1.8"}
+python-dotenv = ">=1.0,<2.0"
+slowapi = ">=0.1.9,<0.2.0"
+
+# Dev dependencies defined here are used by Poetry but [project.optional-dependencies] is canonical
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.0,<9.0"
+pytest-asyncio = ">=0.23,<0.24"
+httpx = ">=0.27,<0.29"

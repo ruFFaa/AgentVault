@@ -1,66 +1,56 @@
-# --- ADDED [project] section for PEP 621 compatibility ---
-    [project]
-        name = "agentvault"
-        version = "0.1.0"
-        description = "Core Python client library for A2A protocol, MCP, and secure local key management." # Added description
-        authors = [{ name = "Raphael Zbiniew Jeziorny", email = "AgentVault@proton.me" }] # Replace with actual details
-        license = "Apache-2.0" # Added license field
-        readme = "README.md" # Added readme field
-
-        requires-python = ">=3.10,<3.12"
-
-        # Core Dependencies
-        dependencies = [
-            # httpx extras specified here for standard build if needed
-            "httpx[http2,brotli]>=0.27,<0.28",
-            "pydantic>=2.0,<3.0",
-            "python-dotenv>=1.0,<2.0"
-            # keyring is optional, handled via extras
-        ]
-
-        # Optional dependencies defined as extras
-        [project.optional-dependencies]
-        os_keyring = ["keyring>=24,<25"]
-        # --- ADDED dev extra for pip install -e .[dev] ---
-        dev = [
-            "pytest>=7.0,<9.0",
-            "pytest-asyncio>=0.23,<0.24",
-            "pytest-mock>=3.12,<4.0",
-            "respx>=0.20,<0.21",
-        ]
-        # --- END ADDED dev extra ---
-
-    # --- Build System ---
-    [build-system]
-    requires = ["poetry-core>=1.0.0"]
-    build-backend = "poetry.core.masonry.api"
-
-    # --- Poetry Specific Configuration ---
-    [tool.poetry]
+# Using standard PEP 621 [project] table primarily
+[project]
     name = "agentvault"
     version = "0.1.0"
     description = "Core Python client library for A2A protocol, MCP, and secure local key management."
-    authors = ["Raphael Zbigniew Jeziorny <AgentVault@proton.me>"] # Replace with actual details
-    license = "Apache-2.0"
+    authors = [{ name = "Raphael Zbiniew Jeziorny", email = "AgentVault@proton.me" }]
+    license = { text = "Apache-2.0" } # Standard license expression
     readme = "README.md"
-    packages = [{include = "agentvault", from = "src"}]
+    requires-python = ">=3.10,<3.12"
 
-    [tool.poetry.dependencies]
-    python = ">=3.10,<3.12"
-    httpx = {version = ">=0.27,<0.28", extras = ["http2", "brotli"]}
-    pydantic = ">=2.0,<3.0"
-    python-dotenv = ">=1.0,<2.0"
-    keyring = {version = ">=24,<25", optional = true} # Define optional dep here
+    # Core Dependencies defined directly
+    dependencies = [
+        "httpx[http2,brotli]>=0.27,<0.28",
+        "pydantic>=2.0,<3.0",
+        "python-dotenv>=1.0,<2.0",
+        # keyring is optional
+    ]
 
-    # Define extras for Poetry
-    [tool.poetry.extras]
-    os_keyring = ["keyring"]
+    # Optional dependencies defined using standard syntax
+    [project.optional-dependencies]
+    os_keyring = ["keyring>=24,<25"]
+    dev = [
+        "pytest>=7.0,<9.0", # Reduced upper bound to match lock file
+        "pytest-asyncio>=0.23,<0.24",
+        "pytest-mock>=3.12,<4.0",
+        "respx>=0.20,<0.21", # Reduced upper bound to match lock file
+    ]
 
-    # Development dependencies
-    [tool.poetry.group.dev.dependencies]
-    pytest = ">=7.0,<9.0" # Align with library
-    pytest-asyncio = ">=0.23,<0.24" # Ensure this is present
-    pytest-mock = ">=3.12,<4.0" # Align with library
-    respx = ">=0.20,<0.21" # Ensure this is present
+# Build System (unchanged)
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
 
-    #
+# Poetry Specific Configuration (Minimal - Only what's needed beyond [project])
+[tool.poetry]
+# name, version, description, authors, license, readme are now primarily in [project]
+packages = [{include = "agentvault", from = "src"}]
+
+# Dependencies defined here are used by Poetry's resolver but [project] is canonical
+[tool.poetry.dependencies]
+python = ">=3.10,<3.12"
+httpx = {version = ">=0.27,<0.28", extras = ["http2", "brotli"]}
+pydantic = ">=2.0,<3.0"
+python-dotenv = ">=1.0,<2.0"
+keyring = {version = ">=24,<25", optional = true}
+
+# Extras defined here are used by Poetry but [project.optional-dependencies] is canonical
+[tool.poetry.extras]
+os_keyring = ["keyring"]
+
+# Dev dependencies defined here are used by Poetry but [project.optional-dependencies] is canonical
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.0,<9.0"
+pytest-asyncio = ">=0.23,<0.24"
+pytest-mock = ">=3.12,<4.0"
+respx = ">=0.20,<0.21"

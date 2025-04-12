@@ -69,24 +69,113 @@ AgentVault prioritizes user control over API keys, but operating within a decent
 
 ## Getting Started (Using the CLI)
 
-*(Content of Getting Started section remains the same)*
-
 ### Prerequisites
-...
+
+*   Python >= 3.10, < 3.12
+*   [pip](https://pip.pypa.io/en/stable/installation/) (Python package installer)
+*   [Git](https://git-scm.com/downloads) (Optional, for installing from source)
+
 ### Installation
-...
+
+*(Note: Assumes `agentvault-cli` is published to PyPI. Until then, installation would be from source using the Development Setup instructions below).*
+
+```bash
+# Install the CLI tool (this will also install the agentvault library)
+pip install agentvault-cli
+
+# Verify installation
+agentvault_cli --version
+```
+
 ### Configuration: Setting Up Your Local API Keys
-...
+
+The CLI needs access to API keys required by the remote agents you want to use. Keys are identified by a `service_id` (e.g., `openai`, `anthropic`, or a specific agent's ID like `premium-weather-agent`).
+
+**Recommended Methods:**
+
+1.  **OS Keyring (Most Secure - If Available):**
+    *   Requires the `keyring` library and its backends to be installed and configured on your OS. Install the extra: `pip install agentvault-library[os_keyring]` (or `pip install agentvault[os_keyring]` if installing the combined package later).
+    *   Set a key:
+        ```bash
+        # You will be prompted securely for the key value
+        agentvault_cli config set <service_id> --keyring
+        ```
+2.  **Environment Variables (Good Security):**
+    *   Set an environment variable **before** running the CLI:
+        ```bash
+        # PowerShell Example
+        $env:AGENTVAULT_KEY_<SERVICE_ID_UPPERCASE> = "your_api_key_value"
+
+        # Bash/Zsh Example
+        export AGENTVAULT_KEY_<SERVICE_ID_UPPERCASE>="your_api_key_value"
+        ```
+        *   Replace `<SERVICE_ID_UPPERCASE>` with the service ID in uppercase (e.g., `AGENTVAULT_KEY_OPENAI`). The default prefix is `AGENTVAULT_KEY_`.
+    *   The library will automatically pick these up. You can optionally run `agentvault_cli config set <service_id> --env` to get guidance.
+3.  **Secure File (Use with Caution):**
+    *   Create a file (e.g., `~/.config/agentvault/keys.env` or `~/.agentvault_keys.json`).
+    *   **IMPORTANT: Secure this file! `chmod 600 ~/.config/agentvault/keys.env`**
+    *   Add keys in `.env` format (`SERVICE_ID=key_value`) or JSON (`{"service_id": "key_value"}`).
+    *   You can optionally run `agentvault_cli config set <service_id> --file <path_to_your_file>` to get guidance. The library needs to be initialized pointing to this file (currently requires code change or future config option).
+
+**Checking Configuration:**
+
+```bash
+# See how the key for a specific service is being sourced
+agentvault_cli config get <service_id>
+
+# List services found via file/env methods (keyring keys only show if accessed)
+agentvault_cli config list
+```
+
 ## Usage (`agentvault-cli`)
-...
+
 ### Discovering Agents
-...
+
+```bash
+# List all agents from the default registry (paginated)
+agentvault_cli discover
+
+# Search agents mentioning "weather"
+agentvault_cli discover "weather"
+
+# Search using a specific registry URL and limit results
+agentvault_cli discover --registry https://my-private-registry.com/api --limit 10 "database"
+```
+
 ### Running an Agent Task
-...
+
+1.  **Identify the Agent:** Find the agent's ID from `discover`, or get its Agent Card URL or file path.
+2.  **Ensure Keys are Configured:** Use `agentvault_cli config get <service_id>` to check if the key needed for the agent's authentication (check its Agent Card `authSchemes`) is set up locally.
+3.  **Run the Task:**
+
+    ```bash
+    # Run using agent ID found via discover
+    agentvault_cli run --agent <agent_card_id> --input "What is the weather in London?"
+
+    # Run using agent card URL
+    # Note: Use '--agent' for ID, URL, or File Path
+    agentvault_cli run --agent https://some-agent.com/agent-card.json --input "Summarize this text: ..."
+
+    # Run using local agent card file
+    agentvault_cli run --agent ./path/to/downloaded-card.json --input "Translate to French: Hello"
+
+    # Run with input from a file (prefix path with '@')
+    agentvault_cli run --agent <agent_id> --input @./my_document.txt
+
+    # Run with MCP context from a JSON file (Syntax TBC based on MCP implementation)
+    # agentvault_cli run --agent <agent_id> --input "Analyze this data" --context-file ./context.json
+    ```
+
+The CLI will connect to the remote agent, initiate the task using the A2A protocol via the `agentvault` library, display status updates, and show the final result or artifact.
 
 ## For Agent Developers
 
-*(Content remains the same)*
+1.  **Build Your Agent:** Create your agent logic using any language/framework.
+2.  **Expose an A2A Endpoint:** Create an HTTPS web server endpoint that understands and responds to A2A protocol messages (JSON-RPC requests like `tasks/send`, `tasks/get`, etc., potentially serving SSE for `tasks/sendSubscribe`). Implement your chosen authentication mechanism(s).
+3.  **Create Agent Card:** Generate a JSON file matching the A2A Agent Card schema, accurately describing your agent, its capabilities, the A2A endpoint URL, and required authentication schemes.
+4.  **Publish (Phase 1):** Use the AgentVault Registry API (e.g., via `curl` or a custom script) to submit your `agent-card.json`. You will need to obtain a Developer API Key from the registry administrators first. Authenticate your API requests using the `X-Api-Key` header.
+
+*(Reference server implementations and detailed developer guides are planned for future phases).*
 
 ## Development Setup
 
@@ -125,7 +214,7 @@ If you want to contribute to AgentVault itself:
     # Install common dev dependencies manually
     pip install pytest pytest-asyncio pytest-mock httpx respx uvicorn slowapi alembic passlib[bcrypt] pydantic-settings asyncpg psycopg2-binary click rich
     ```
-    *(Note: This manual installation of dev dependencies might need adjustment if specific versions are critical. Using Poetry lock files across components is complex without workspace tools).*
+    *(Note: This manual installation of dev dependencies might need adjustment if specific versions are critical.)*
 7.  **Set up Services:** Configure your local PostgreSQL database and create a `.env` file in `agentvault_registry/` as described in its README.
 8.  **Run Migrations:**
     ```bash

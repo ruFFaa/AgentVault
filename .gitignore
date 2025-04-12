@@ -51,13 +51,13 @@ coverage.xml
 # Translations
 *.mo
 *.pot
-*.log
+# *.log # Covered below
 
 # Django stuff:
-*.log
+# *.log # Covered below
 local_settings.py
-db.sqlite3
-db.sqlite3-journal
+# db.sqlite3 # Covered by *.db below
+# db.sqlite3-journal # Covered by *.db below
 
 # Flask stuff:
 instance/
@@ -84,7 +84,7 @@ ipython_config.py
 .env
 .env.*
 !/.env.example # Allow example env files
-.venv
+.venv/ # Explicitly ignore root venv
 venv/
 ENV/
 env.bak/
@@ -145,8 +145,18 @@ local_*.db
 # Temp / Log directories
 temp/
 logs/
+*.log # General log files
 
 # Specific local key files (examples)
 *.keys.*
 my_keys.env
 keys.json
+
+# --- ADDED: Development Artifacts to Ignore ---
+# Workflow / Requirements / Scripts / Temp Output
+/Scripts/
+AgentVaultRequiremntsV6FINAL.md
+AgentVaultPhase1AdditionsV1.md # Added this specific file
+WorkflowA2A.md
+# temp/ # Already covered above, but explicit doesn't hurt
+# --- END ADDED ---
