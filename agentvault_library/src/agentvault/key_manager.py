@@ -243,7 +243,7 @@ class KeyManager:
         Retrieves a key for the given service ID.
 
         Checks loaded keys first (File > Env). If not found and keyring is
-        enabled, attempts to load from the OS keyring.
+        enabled, attempts to load from the OS keyring and caches the result.
 
         Args:
             service_id: The identifier for the service key (case-insensitive).
@@ -251,12 +251,36 @@ class KeyManager:
         Returns:
             The API key string, or None if not found.
         """
-        # Implementation will be added in REQ-LIB-KEY-005
+        normalized_id = service_id.lower()
+
+        # 1. Check already loaded/cached keys (File > Env priority handled at load time)
+        if normalized_id in self._keys:
+            source = self._key_sources.get(normalized_id, 'unknown (cached)')
+            logger.debug(f"Returning cached key for service '{normalized_id}' from source: {source}")
+            return self._keys[normalized_id]
+
+        # 2. If not cached and keyring is enabled, try loading from keyring
+        if self.use_keyring:
+            logger.debug(f"Key for service '{normalized_id}' not cached, attempting keyring load.")
+            key_value = self._load_from_keyring(normalized_id)
+            if key_value is not None:
+                # Cache the key loaded from keyring
+                self._keys[normalized_id] = key_value
+                self._key_sources[normalized_id] = 'keyring'
+                logger.debug(f"Cached key for service '{normalized_id}' loaded from keyring.")
+                return key_value
+
+        # 3. If not found anywhere
+        logger.debug(f"Key for service '{normalized_id}' not found in any configured source.")
         return None
+
 
     def get_key_source(self, service_id: str) -> Optional[str]:
         """
         Returns the source from which the key for the given service ID was loaded.
+
+        Note: This will only return the source if the key has been accessed via
+              `get_key` at least once (for keyring keys) or loaded during init.
 
         Args:
             service_id: The identifier for the service key (case-insensitive).
@@ -265,9 +289,15 @@ class KeyManager:
             A string indicating the source ('file', 'env', 'keyring'),
             or None if the key was not found or its source isn't tracked.
         """
-        # Requires enhancement in loading methods and get_key
         normalized_id = service_id.lower()
-        return self._key_sources.get(normalized_id)
+        # Check if the key exists first to ensure source is relevant
+        if normalized_id in self._keys:
+            return self._key_sources.get(normalized_id)
+        else:
+            # Attempting get_key might load it from keyring, but let's just report current state
+            logger.debug(f"Source requested for service '{normalized_id}', but key not currently loaded/cached.")
+            return None
+
 
     def set_key_in_keyring(self, service_id: str, key_value: str) -> None:
         """
