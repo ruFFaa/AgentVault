@@ -110,10 +110,11 @@ class KeyManager:
         try:
             if file_suffix == ".env":
                 logger.debug("Processing key file as .env format.")
-                # dotenv_values handles file reading and parsing
-                env_values = dotenv_values(self.key_file_path)
+                # Use stream=None to prevent warnings if file doesn't exist (already checked)
+                env_values = dotenv_values(self.key_file_path, stream=None)
                 for key, value in env_values.items():
-                    if value is not None: # dotenv_values might return None for empty values
+                    # --- FIX: Check if value is not None AND not empty string ---
+                    if value:
                         normalized_id = key.lower()
                         self._keys[normalized_id] = value
                         self._key_sources[normalized_id] = 'file'
@@ -134,7 +135,8 @@ class KeyManager:
                 for key, value in data.items():
                     normalized_id = key.lower()
                     if isinstance(value, str):
-                        if value: # Ensure value is not empty string
+                        # --- FIX: Check if value is not empty string ---
+                        if value:
                             self._keys[normalized_id] = value
                             self._key_sources[normalized_id] = 'file'
                             logger.info(f"Loaded key for service '{normalized_id}' from file.")
@@ -171,18 +173,15 @@ class KeyManager:
         loaded_count = 0
         for env_var, value in os.environ.items():
             if env_var.startswith(self.env_prefix):
-                # Extract the part after the prefix as the service ID
                 service_id_part = env_var[prefix_len:]
                 if not service_id_part:
                     logger.warning(f"Skipping environment variable '{env_var}' with empty service ID part.")
                     continue
 
-                # Normalize to lowercase for consistent key storage
                 normalized_id = service_id_part.lower()
 
-                # Respect priority: Only load if not already loaded from file
                 if normalized_id not in self._keys:
-                    if value: # Ensure the key value is not empty
+                    if value:
                         self._keys[normalized_id] = value
                         self._key_sources[normalized_id] = 'env'
                         logger.info(f"Loaded key for service '{normalized_id}' from environment variable.")
@@ -198,20 +197,12 @@ class KeyManager:
     def _load_from_keyring(self, service_id: str) -> Optional[str]:
         """
         Attempts to load a specific key from the OS keyring.
-
         Internal method called by get_key if keyring is enabled and the key
         was not found in file or environment variables.
-
-        Args:
-            service_id: The identifier for the service key (case-insensitive).
-
-        Returns:
-            The key string if found in keyring, otherwise None.
         """
         if not self.use_keyring:
             logger.debug("Keyring usage is disabled, skipping keyring load.")
             return None
-        # Check _keyring_installed again in case it failed during init but use_keyring was True
         if not _keyring_installed or keyring is None:
             logger.debug("Keyring package not available, skipping keyring load.")
             return None
@@ -225,16 +216,12 @@ class KeyManager:
 
             if key_value is not None:
                 logger.info(f"Loaded key for service '{normalized_id}' from OS keyring.")
-                # DO NOT store in self._keys here; let get_key handle caching.
                 return key_value
             else:
                 logger.debug(f"Key for service '{normalized_id}' not found in OS keyring.")
                 return None
         except Exception as e:
-            # Catch potential backend errors from keyring
             logger.error(f"Failed to get key for service '{normalized_id}' from keyring: {e}", exc_info=True)
-            # Optionally raise KeyManagementError here, but returning None might be safer
-            # raise KeyManagementError(f"Failed to get key from keyring for service '{normalized_id}': {e}") from e
             return None
 
 
@@ -253,34 +240,32 @@ class KeyManager:
         """
         normalized_id = service_id.lower()
 
-        # 1. Check already loaded/cached keys (File > Env priority handled at load time)
+        # 1. Check cache (File > Env)
         if normalized_id in self._keys:
-            source = self._key_sources.get(normalized_id, 'unknown (cached)')
-            logger.debug(f"Returning cached key for service '{normalized_id}' from source: {source}")
+            source = self._key_sources.get(normalized_id, 'cache')
+            logger.debug(f"Returning cached key for '{normalized_id}' (loaded from {source}).")
             return self._keys[normalized_id]
 
-        # 2. If not cached and keyring is enabled, try loading from keyring
+        # 2. Try loading from keyring if enabled
         if self.use_keyring:
-            logger.debug(f"Key for service '{normalized_id}' not cached, attempting keyring load.")
+            logger.debug(f"Key for '{normalized_id}' not in cache, attempting keyring load.")
             key_value = self._load_from_keyring(normalized_id)
             if key_value is not None:
-                # Cache the key loaded from keyring
+                # Cache the result from keyring
                 self._keys[normalized_id] = key_value
                 self._key_sources[normalized_id] = 'keyring'
-                logger.debug(f"Cached key for service '{normalized_id}' loaded from keyring.")
                 return key_value
 
-        # 3. If not found anywhere
+        # 3. Not found anywhere
         logger.debug(f"Key for service '{normalized_id}' not found in any configured source.")
         return None
-
 
     def get_key_source(self, service_id: str) -> Optional[str]:
         """
         Returns the source from which the key for the given service ID was loaded.
 
-        Note: This will only return the source if the key has been accessed via
-              `get_key` at least once (for keyring keys) or loaded during init.
+        Note: This only returns the source if the key has been accessed via `get_key`
+              at least once (to potentially load from keyring and update source).
 
         Args:
             service_id: The identifier for the service key (case-insensitive).
@@ -290,14 +275,8 @@ class KeyManager:
             or None if the key was not found or its source isn't tracked.
         """
         normalized_id = service_id.lower()
-        # Check if the key exists first to ensure source is relevant
-        if normalized_id in self._keys:
-            return self._key_sources.get(normalized_id)
-        else:
-            # Attempting get_key might load it from keyring, but let's just report current state
-            logger.debug(f"Source requested for service '{normalized_id}', but key not currently loaded/cached.")
-            return None
-
+        # Check the source map directly. get_key updates this map after keyring load.
+        return self._key_sources.get(normalized_id)
 
     def set_key_in_keyring(self, service_id: str, key_value: str) -> None:
         """
@@ -317,24 +296,15 @@ class KeyManager:
         if not self.use_keyring:
             raise KeyManagementError("Keyring support is not enabled for this KeyManager instance.")
         if not _keyring_installed or keyring is None:
-             # This check might be redundant if self.use_keyring already checks _keyring_installed
              raise KeyManagementError("The 'keyring' package is not installed. Cannot set key.")
 
-        # Normalize service_id for keyring service name consistency
         normalized_id = service_id.lower()
-        # Use a distinct service name for keyring to avoid conflicts with other apps
-        # Using 'agentvault' as a namespace seems reasonable.
         keyring_service_name = f"agentvault:{normalized_id}"
 
         try:
             logger.info(f"Setting key for service '{normalized_id}' in OS keyring under service name '{keyring_service_name}'.")
-            # Use normalized_id as the 'username' field in keyring for consistency
             keyring.set_password(keyring_service_name, normalized_id, key_value)
-            # Optionally update internal state if needed, though keyring is external
-            # self._keys[normalized_id] = key_value
-            # self._key_sources[normalized_id] = 'keyring'
         except Exception as e:
-            # Catch potential backend errors from keyring
             logger.error(f"Failed to set key for service '{normalized_id}' in keyring: {e}", exc_info=True)
             raise KeyManagementError(f"Failed to set key in keyring for service '{normalized_id}': {e}") from e
 
