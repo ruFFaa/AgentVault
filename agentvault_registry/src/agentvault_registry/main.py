@@ -4,6 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # Import settings - this also triggers loading from .env
 from .config import settings
+# --- ADDED IMPORT ---
+from .routers import agent_cards # Import the new router
 
 # --- Logging Setup ---
 # Basic configuration is done in config.py upon import
@@ -35,9 +37,14 @@ else:
     logger.warning("CORS middleware not configured as ALLOWED_ORIGINS is empty.")
 
 # --- API Routers ---
-# Placeholder: Import and include routers for different parts of the API later
-# from .routers import agent_cards, developers # Example
-# app.include_router(agent_cards.router, prefix=settings.API_V1_STR + "/agent-cards", tags=["Agent Cards"])
+# Include the Agent Cards router
+app.include_router(
+    agent_cards.router,
+    prefix=settings.API_V1_STR + "/agent-cards", # Set the base path for these endpoints
+    tags=["Agent Cards"] # Tag for OpenAPI documentation grouping
+)
+# Placeholder: Import and include other routers later
+# from .routers import developers # Example
 # app.include_router(developers.router, prefix=settings.API_V1_STR + "/developers", tags=["Developers"])
 
 
