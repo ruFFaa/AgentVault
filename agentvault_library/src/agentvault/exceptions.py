@@ -20,7 +20,44 @@ class AgentCardValidationError(AgentCardError):
 
 class AgentCardFetchError(AgentCardError):
     """Exception raised when fetching an Agent Card fails."""
-    pass
+    # --- ADDED __init__ ---
+    def __init__(
+        self,
+        message: str,
+        status_code: Optional[int] = None,
+        response_body: Optional[Any] = None # Can be str, dict, etc.
+    ):
+        """
+        Initializes the AgentCardFetchError.
+
+        Args:
+            message: The error message.
+            status_code: The HTTP status code returned by the remote agent, if available.
+            response_body: The body of the error response from the remote agent, if available.
+        """
+        super().__init__(message)
+        self.status_code = status_code
+        self.response_body = response_body
+
+    def __str__(self) -> str:
+        """Provides a more informative string representation."""
+        base_str = super().__str__()
+        details = []
+        if self.status_code is not None:
+            details.append(f"status_code={self.status_code}")
+        if self.response_body is not None:
+            # Truncate long response bodies for display
+            body_repr = repr(self.response_body)
+            if len(body_repr) > 100:
+                body_repr = body_repr[:100] + "..."
+            details.append(f"response_body={body_repr}")
+
+        if details:
+            return f"{base_str} ({', '.join(details)})"
+        else:
+            return base_str
+    # --- END ADDED __init__ ---
+
 
 # --- A2A Protocol Errors ---
 
