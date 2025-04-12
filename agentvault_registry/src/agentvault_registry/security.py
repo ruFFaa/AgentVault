@@ -1,6 +1,20 @@
 import secrets
 import logging
 from passlib.context import CryptContext
+from typing import Optional # Added Optional
+
+# --- FastAPI Imports ---
+from fastapi import Depends, HTTPException, status
+from fastapi.security import APIKeyHeader
+
+# --- SQLAlchemy Imports ---
+from sqlalchemy.ext.asyncio import AsyncSession
+
+# --- Local Imports ---
+from .. import models
+from ..database import get_db
+from ..crud.developer import get_developer_by_plain_api_key
+
 
 logger = logging.getLogger(__name__)
 
@@ -60,3 +74,45 @@ def generate_secure_api_key(length: int = 32) -> str:
     api_key = f"avreg_{random_part}"
     logger.info(f"Generated new secure API key (prefix added).")
     return api_key
+
+# --- FastAPI API Key Authentication Dependency ---
+
+# Define the header scheme we expect for the API key
+# auto_error=False allows us to return a custom 403 if the header is missing
+api_key_header = APIKeyHeader(name="X-Api-Key", auto_error=False)
+
+async def get_current_developer(
+    api_key: Optional[str] = Depends(api_key_header), # Use Optional here with auto_error=False
+    db: AsyncSession = Depends(get_db)
+) -> models.Developer:
+    """
+    FastAPI dependency to get the current developer based on the X-Api-Key header.
+
+    Raises:
+        HTTPException(403) if the X-Api-Key header is missing or empty.
+        HTTPException(401) if the API key is invalid.
+
+    Returns:
+        The authenticated Developer database model instance.
+    """
+    if not api_key:
+        logger.warning("Authentication attempt failed: X-Api-Key header missing.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authenticated: X-Api-Key header missing or empty"
+        )
+
+    # Use the CRUD function to find the developer by the plain key
+    # (Remembering the inefficiency note for production)
+    developer = await get_developer_by_plain_api_key(db=db, plain_key=api_key)
+
+    if developer is None:
+        logger.warning(f"Authentication attempt failed: Invalid API Key provided (Key starts with: {api_key[:6]}...).")
+        # Use 401 for invalid credentials
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid API Key"
+        )
+
+    logger.debug(f"Successfully authenticated developer ID: {developer.id}")
+    return developer
