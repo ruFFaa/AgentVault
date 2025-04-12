@@ -3,7 +3,7 @@
     name = "agentvault-cli"
     version = "0.1.0"
     description = "Command-line client for the AgentVault ecosystem."
-    authors = [{ name = "Raphael Zbiniew Jeziorny", email = "AgentVault@proton.me" }]
+    authors = [{ name = "Raphael Zbigniew Jeziorny", email = "AgentVault@proton.me" }]
     license = { text = "Apache-2.0" }
     readme = "README.md"
     requires-python = ">=3.10,<3.12"
