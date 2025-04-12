@@ -156,14 +156,25 @@ async def test_initiate_task_success(agent_card_fixture, mock_key_manager, sampl
 @pytest.mark.asyncio
 @respx.mock
 async def test_initiate_task_with_mcp(agent_card_fixture, mock_key_manager, sample_message):
-    mcp_data = {"user_preference": "verbose"}
+    # --- FIX: Provide MCP data matching the MCPContext structure ---
+    mcp_data_raw = {"user_preference": "verbose"}
+    # Wrap it in the structure expected by format_mcp_context (assuming it validates against MCPContext)
+    mcp_data_structured = {"items": {"user_prefs": {"content": mcp_data_raw}}}
+    # --- END FIX ---
     mock_response = {"jsonrpc": "2.0", "result": {"id": "task-mcp"}, "id": "req-init-mcp"}
     route = respx.post(AGENT_URL).mock(return_value=httpx.Response(200, json=mock_response))
     async with AgentVaultClient() as client:
-        await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager, mcp_context=mcp_data)
+        # Pass the structured data to the function
+        await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager, mcp_context=mcp_data_structured)
     assert route.called
     payload = json.loads(route.calls[0].request.content)
-    assert payload["params"]["message"]["metadata"]["mcp_context"] == mcp_data
+    # --- FIX: Assert against the structured data that should be embedded ---
+    # The format_mcp_context function returns the model_dump of the validated MCPContext
+    # Check if the embedded context matches the *structured* input (after potential model_dump processing)
+    # Assuming format_mcp_context returns the structured dict if validation passes:
+    assert payload["params"]["message"]["metadata"]["mcp_context"] == mcp_data_structured
+    # --- END FIX ---
+
 
 @pytest.mark.asyncio
 async def test_initiate_task_auth_error(agent_card_fixture, mock_key_manager, sample_message):

@@ -1,14 +1,25 @@
+import os
+import sys
 import pytest
 import pytest_asyncio
+import asyncio
 import uuid
 import datetime
 from typing import AsyncGenerator, Dict, Any
 from unittest.mock import MagicMock, AsyncMock
 
+# Add the src directory to the Python path to ensure imports work correctly
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../src')))
+
+# Set test environment variables BEFORE importing any app modules
+os.environ["DATABASE_URL"] = "postgresql+asyncpg://fake:fake@localhost:5432/test_db"
+os.environ["API_KEY_SECRET"] = "test_secret_key_for_testing_only"
+
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import status, HTTPException
 
-# Import the FastAPI app and dependencies to override
+# Now import the FastAPI app and dependencies
 from agentvault_registry.main import app
 from agentvault_registry.database import get_db
 from agentvault_registry.security import get_current_developer
@@ -18,16 +29,11 @@ from agentvault_registry import models
 
 @pytest.fixture(scope="session")
 def event_loop():
-    """Overrides pytest default event loop"""
-    # This is standard practice for pytest-asyncio
-    # Deprecated in pytest-asyncio 0.23+, but kept for compatibility if needed
-    # policy = asyncio.get_event_loop_policy()
-    # loop = policy.new_event_loop()
-    # yield loop
-    # loop.close()
-    # For 0.23+, just defining async fixtures is usually enough.
-    # If issues arise, uncomment the above or check pytest-asyncio docs.
-    pass # pytest-asyncio handles loop management automatically now
+    """Create and return a session-scoped event loop"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    yield loop
+    loop.close()
 
 @pytest_asyncio.fixture(scope="function") # Use function scope for client isolation
 async def async_client() -> AsyncGenerator[httpx.AsyncClient, None]:
@@ -50,10 +56,15 @@ async def mock_db_session() -> AsyncGenerator[MagicMock, None]:
     session_mock.close = AsyncMock() # Though FastAPI handles closing via context manager
 
     # Override the get_db dependency for all tests using this fixture
+    original_override = app.dependency_overrides.get(get_db) # Store original override if any
     app.dependency_overrides[get_db] = lambda: session_mock
     yield session_mock
     # Clean up override after test finishes
-    del app.dependency_overrides[get_db]
+    # Restore original or remove if it wasn't there before
+    if original_override:
+        app.dependency_overrides[get_db] = original_override
+    else:
+        del app.dependency_overrides[get_db]
 
 
 # --- Fixtures for Mock Data ---
@@ -118,25 +129,41 @@ def mock_agent_card_db_object(mock_developer: models.Developer, valid_agent_card
 @pytest_asyncio.fixture
 async def override_get_current_developer(mock_developer: models.Developer):
     """Fixture to override the authentication dependency to return a mock developer."""
+    original_override = app.dependency_overrides.get(get_current_developer) # Store original
     app.dependency_overrides[get_current_developer] = lambda: mock_developer
     yield
     # Clean up override after test finishes
-    del app.dependency_overrides[get_current_developer]
+    if original_override:
+        app.dependency_overrides[get_current_developer] = original_override
+    else:
+        del app.dependency_overrides[get_current_developer]
+
 
 @pytest_asyncio.fixture
 async def override_get_current_developer_forbidden():
     """Fixture to override the authentication dependency to raise 403."""
     async def _mock_forbidden():
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authenticated")
+    original_override = app.dependency_overrides.get(get_current_developer) # Store original
     app.dependency_overrides[get_current_developer] = _mock_forbidden
     yield
-    del app.dependency_overrides[get_current_developer]
+    # Clean up override after test finishes
+    if original_override:
+        app.dependency_overrides[get_current_developer] = original_override
+    else:
+        del app.dependency_overrides[get_current_developer]
+
 
 @pytest_asyncio.fixture
 async def override_get_current_developer_unauthorized():
     """Fixture to override the authentication dependency to raise 401."""
     async def _mock_unauthorized():
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key")
+    original_override = app.dependency_overrides.get(get_current_developer) # Store original
     app.dependency_overrides[get_current_developer] = _mock_unauthorized
     yield
-    del app.dependency_overrides[get_current_developer]
+    # Clean up override after test finishes
+    if original_override:
+        app.dependency_overrides[get_current_developer] = original_override
+    else:
+        del app.dependency_overrides[get_current_developer]

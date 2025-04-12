@@ -5,8 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Import models and security utils from parent directory/package
-from .. import models, security
+# Import models and security utils using absolute imports
+from agentvault_registry import models
+from agentvault_registry import security
 
 logger = logging.getLogger(__name__)
 

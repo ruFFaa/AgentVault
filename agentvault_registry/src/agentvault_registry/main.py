@@ -3,9 +3,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # Import settings - this also triggers loading from .env
-from .config import settings
-# --- ADDED IMPORT ---
-from .routers import agent_cards # Import the new router
+from agentvault_registry.config import settings
+# Import the router
+from agentvault_registry.routers import agent_cards
 
 # --- Logging Setup ---
 # Basic configuration is done in config.py upon import

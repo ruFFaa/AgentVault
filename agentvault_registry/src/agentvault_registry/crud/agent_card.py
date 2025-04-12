@@ -8,8 +8,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import ValidationError as PydanticValidationError # To catch validation errors
 
-# Import local models and schemas
-from .. import models, schemas
+# Import local models and schemas with absolute imports
+from agentvault_registry import models, schemas
 
 # Import the AgentCard model from the core library for validation
 try:

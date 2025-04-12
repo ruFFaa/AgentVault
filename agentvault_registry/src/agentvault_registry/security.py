@@ -11,9 +11,10 @@ from fastapi.security import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # --- Local Imports ---
-from .. import models
-from ..database import get_db
-from ..crud.developer import get_developer_by_plain_api_key
+# Fix the imports to use absolute paths instead of relative
+from agentvault_registry import models
+from agentvault_registry.database import get_db
+from agentvault_registry.crud.developer import get_developer_by_plain_api_key
 
 
 logger = logging.getLogger(__name__)

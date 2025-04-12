@@ -6,8 +6,9 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Import local dependencies
-from .. import schemas, crud, models, database, security
+# Import local dependencies with absolute imports
+from agentvault_registry import schemas, models, database, security
+from agentvault_registry.crud import agent_card
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ async def submit_agent_card(
     """
     logger.info(f"Received request to create agent card from developer ID: {current_developer.id}")
     try:
-        db_agent_card = await crud.agent_card.create_agent_card(
+        db_agent_card = await agent_card.create_agent_card(
             db=db, developer_id=current_developer.id, card_create=card_in
         )
         if db_agent_card is None:
@@ -80,7 +81,7 @@ async def list_agent_cards(
     """
     logger.info(f"Listing agent cards with skip={skip}, limit={limit}, active_only={active_only}, search='{search}'")
     try:
-        items, total_items = await crud.agent_card.list_agent_cards(
+        items, total_items = await agent_card.list_agent_cards(
             db=db, skip=skip, limit=limit, active_only=active_only, search=search
         )
 
@@ -124,7 +125,7 @@ async def get_agent_card(
     Public endpoint to retrieve a specific Agent Card.
     """
     logger.info(f"Fetching agent card with ID: {card_id}")
-    db_card = await crud.agent_card.get_agent_card(db=db, card_id=card_id)
+    db_card = await agent_card.get_agent_card(db=db, card_id=card_id)
     if db_card is None:
         logger.warning(f"Agent card with ID {card_id} not found.")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent Card not found")
@@ -152,7 +153,7 @@ async def update_agent_card(
     Validates `card_data` if provided.
     """
     logger.info(f"Received request to update agent card {card_id} from developer ID: {current_developer.id}")
-    db_card = await crud.agent_card.get_agent_card(db=db, card_id=card_id)
+    db_card = await agent_card.get_agent_card(db=db, card_id=card_id)
     if db_card is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent Card not found")
 
@@ -162,7 +163,7 @@ async def update_agent_card(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update this agent card")
 
     try:
-        updated_card = await crud.agent_card.update_agent_card(db=db, db_card=db_card, card_update=card_in)
+        updated_card = await agent_card.update_agent_card(db=db, db_card=db_card, card_update=card_in)
         if updated_card is None:
              # Should ideally not happen if ValueError is raised correctly from CRUD
              raise HTTPException(
@@ -205,7 +206,7 @@ async def delete_agent_card(
     """
     logger.info(f"Received request to deactivate agent card {card_id} from developer ID: {current_developer.id}")
     # Fetch the card first to check ownership
-    db_card = await crud.agent_card.get_agent_card(db=db, card_id=card_id)
+    db_card = await agent_card.get_agent_card(db=db, card_id=card_id)
     if db_card is None:
         # Return 404 even if it existed but belonged to someone else,
         # to avoid leaking information about ownership.
@@ -218,13 +219,13 @@ async def delete_agent_card(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete this agent card")
 
     # Proceed with soft delete
-    success = await crud.agent_card.delete_agent_card(db=db, card_id=card_id)
+    success = await agent_card.delete_agent_card(db=db, card_id=card_id)
 
     if not success:
         # This might happen if the card was deleted between the get and delete calls,
         # or if there was a DB error during the update.
         # Check if it still exists but failed to update
-        check_card = await crud.agent_card.get_agent_card(db=db, card_id=card_id)
+        check_card = await agent_card.get_agent_card(db=db, card_id=card_id)
         if check_card and check_card.is_active:
              logger.error(f"Failed to deactivate agent card {card_id} due to a database error.")
              raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to deactivate agent card")
