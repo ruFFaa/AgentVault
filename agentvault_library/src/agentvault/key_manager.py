@@ -11,7 +11,7 @@ import os
 import json
 import logging
 import pathlib
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Union, Any
 
 # Import dotenv for .env file support
 from dotenv import dotenv_values
@@ -85,9 +85,79 @@ class KeyManager:
         # Keyring is loaded lazily in get_key
 
     def _load_from_file(self) -> None:
-        """Loads keys from the specified key file (.env or .json)."""
-        # Implementation will be added in REQ-LIB-KEY-003
-        pass
+        """
+        Loads keys from the specified key file (.env or .json).
+
+        Keys loaded from the file have the highest priority and will overwrite
+        any keys previously loaded from environment variables.
+        """
+        if not self.key_file_path:
+            logger.debug("No key file path specified, skipping file loading.")
+            return
+
+        logger.debug(f"Attempting to load keys from file: {self.key_file_path}")
+
+        if not self.key_file_path.exists():
+            logger.warning(f"Key file specified but not found: {self.key_file_path}")
+            return
+        if not self.key_file_path.is_file():
+            logger.warning(f"Key file path specified but is not a file: {self.key_file_path}")
+            return
+
+        file_suffix = self.key_file_path.suffix.lower()
+        loaded_count = 0
+
+        try:
+            if file_suffix == ".env":
+                logger.debug("Processing key file as .env format.")
+                # dotenv_values handles file reading and parsing
+                env_values = dotenv_values(self.key_file_path)
+                for key, value in env_values.items():
+                    if value is not None: # dotenv_values might return None for empty values
+                        normalized_id = key.lower()
+                        self._keys[normalized_id] = value
+                        self._key_sources[normalized_id] = 'file'
+                        logger.info(f"Loaded key for service '{normalized_id}' from file.")
+                        loaded_count += 1
+                    else:
+                         logger.warning(f"Skipping empty value for key '{key}' in file '{self.key_file_path}'.")
+
+            elif file_suffix == ".json":
+                logger.debug("Processing key file as .json format.")
+                raw_content = self.key_file_path.read_text(encoding='utf-8')
+                data = json.loads(raw_content)
+
+                if not isinstance(data, dict):
+                    logger.error(f"Invalid format in JSON key file '{self.key_file_path}': Root element must be an object (dictionary).")
+                    return
+
+                for key, value in data.items():
+                    normalized_id = key.lower()
+                    if isinstance(value, str):
+                        if value: # Ensure value is not empty string
+                            self._keys[normalized_id] = value
+                            self._key_sources[normalized_id] = 'file'
+                            logger.info(f"Loaded key for service '{normalized_id}' from file.")
+                            loaded_count += 1
+                        else:
+                            logger.warning(f"Skipping empty string value for key '{key}' in JSON file '{self.key_file_path}'.")
+                    else:
+                        logger.warning(f"Skipping non-string value for key '{key}' in JSON file '{self.key_file_path}'. Value type: {type(value)}")
+
+            else:
+                logger.warning(f"Unsupported key file extension '{file_suffix}' for file: {self.key_file_path}. Only '.env' and '.json' are supported.")
+                return
+
+            logger.debug(f"Finished loading from file. Loaded {loaded_count} keys.")
+
+        except IOError as e:
+            logger.error(f"Error reading key file '{self.key_file_path}': {e}", exc_info=True)
+        except json.JSONDecodeError as e:
+            logger.error(f"Error decoding JSON from key file '{self.key_file_path}': {e}", exc_info=True)
+        except Exception as e:
+            # Catch potential errors from dotenv or other issues
+            logger.error(f"An unexpected error occurred loading key file '{self.key_file_path}': {e}", exc_info=True)
+
 
     def _load_from_env(self) -> None:
         """
