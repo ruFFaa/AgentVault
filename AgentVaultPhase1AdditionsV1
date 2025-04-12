@@ -198,3 +198,68 @@ Based on your confirmation, here is the implementation plan specifically for the
     *   **Files:** `README.md`
 
 ---
+
+
+
+---
+
+**Implementation Plan: Operations & Technical Refinements (Phase 1 Documentation & Planning)**
+
+**Overall Goal:** Document operational best practices for the registry service and acknowledge areas for future technical refinement in the library and protocols.
+
+**5. Operational Aspects (Registry)**
+
+*   **REQ-OPS-MONITOR-001: Document Monitoring & Alerting Strategy**
+    *   **Component:** Documentation (`agentvault_registry/README.md`)
+    *   **Action:** Add a new section to the registry's README outlining recommended monitoring practices for a deployed instance.
+    *   **Implementation Details:**
+        *   **Content:**
+            *   **Title:** "Operational Monitoring (Deployment)"
+            *   **Uptime:** Recommend using external uptime monitoring services (e.g., UptimeRobot, Better Uptime) to periodically check the `/health` endpoint of the deployed API.
+            *   **Logging:** Recommend configuring the deployment environment (e.g., Docker, PaaS, VM) to capture application logs (stdout/stderr from Uvicorn/FastAPI) and system logs. Suggest using centralized logging platforms (e.g., ELK stack, Grafana Loki, cloud provider services like CloudWatch Logs or Google Cloud Logging) for easier analysis and alerting.
+            *   **Alerting:** Recommend setting up basic alerts based on uptime checks (API down) and critical log messages (e.g., database connection errors, unhandled exceptions) using the chosen monitoring/logging tools.
+            *   **Disclaimer:** State that implementing robust monitoring is the responsibility of the deployer.
+    *   **Files:** `agentvault_registry/README.md`
+
+*   **REQ-OPS-BACKUP-001: Document Backup & Recovery Strategy**
+    *   **Component:** Documentation (`agentvault_registry/README.md`)
+    *   **Action:** Add a new section to the registry's README outlining recommended database backup practices.
+    *   **Implementation Details:**
+        *   **Content:**
+            *   **Title:** "Database Backup & Recovery (Deployment)"
+            *   **Importance:** Emphasize the need for regular backups of the PostgreSQL database containing registry data.
+            *   **Methods:** Suggest common approaches:
+                *   Using built-in backup features of managed database services (e.g., AWS RDS, Google Cloud SQL).
+                *   Setting up automated `pg_dump` cron jobs for self-hosted databases, storing backups securely off-server.
+            *   **Frequency:** Recommend daily backups at a minimum, with appropriate retention policies based on recovery needs.
+            *   **Testing:** Stress the importance of periodically testing the restore process from backups to ensure validity.
+            *   **Disclaimer:** State that implementing and managing backups is the responsibility of the deployer.
+    *   **Files:** `agentvault_registry/README.md`
+
+**6. Technical Refinements (Library & Protocols)**
+
+*   **REQ-TECH-A2AVERSION-001: Document A2A Protocol Versioning Approach**
+    *   **Component:** Documentation (`agentvault_library/README.md`), Code Comments
+    *   **Action:** Add notes regarding the assumed A2A protocol version and future considerations.
+    *   **Implementation Details:**
+        *   **Library README:** Add a subsection under "Key Modules (Planned)" or a new "Protocol Considerations" section. State that Phase 1 implements a specific baseline A2A version (mentioning it's based on `a2a.json.txt` or a specific draft if known). Note that future library versions will need mechanisms to handle potential protocol version negotiation or support multiple versions based on `AgentCard.capabilities.a2aVersion`.
+        *   **Code Comments:** Add comments in `agentvault/client.py` near request building logic and in `agentvault/models/a2a_protocol.py` indicating the assumed baseline protocol version for the current implementation.
+    *   **Files:** `agentvault_library/README.md`, `agentvault_library/src/agentvault/client.py`, `agentvault_library/src/agentvault/models/a2a_protocol.py`
+
+*   **REQ-TECH-MCP-001: Document MCP Implementation Status & Future**
+    *   **Component:** Documentation (`agentvault_library/README.md`), Code Comments
+    *   **Action:** Add notes clarifying the current basic MCP handling and plans for future refinement.
+    *   **Implementation Details:**
+        *   **Library README:** Add a note in the "MCP Support" or "Protocol Considerations" section. Explain that Phase 1 provides basic embedding of a context dictionary into `message.metadata` via `mcp_utils.py`. State that this utility will be updated to align with the finalized MCP specification, including more robust validation and potentially structured object mapping, in future versions.
+        *   **Code Comments:** Add comments in `agentvault/mcp_utils.py` and `agentvault/client.py` (where MCP context is handled) reiterating that the current implementation is basic and subject to change based on MCP standard evolution.
+    *   **Files:** `agentvault_library/README.md`, `agentvault_library/src/agentvault/mcp_utils.py`, `agentvault_library/src/agentvault/client.py`
+
+*   **REQ-TECH-CLIENTCONFIG-001: Document Client Configuration as Future Enhancement**
+    *   **Component:** Documentation (`agentvault_library/README.md`, `agentvault_cli/README.md`)
+    *   **Action:** Add notes to relevant READMEs mentioning client-side configuration as a potential future feature.
+    *   **Implementation Details:**
+        *   In both the library and CLI READMEs (perhaps in a "Future Enhancements" or "Roadmap" section), mention the possibility of adding support for a user configuration file (e.g., `~/.config/agentvault/config.toml`) in a future phase to allow setting defaults for registry URL, timeouts, logging levels, etc. State that Phase 1 relies on environment variables and command-line arguments.
+    *   **Files:** `agentvault_library/README.md`, `agentvault_cli/README.md`
+
+---
+
