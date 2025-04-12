@@ -426,3 +426,155 @@ Dependency: `agentvault` (Core Library)
 ---
 
 This revised document consistently uses `AgentVault` for the project and `agentvault` for the library name/package, updating paths and imports accordingly. It should now be complete and ready for you to start requesting code generation using Plate A for specific `REQ-` items.
+
+
+Additions lets call it Phase1.1
+Understood, boss. You want a consolidated list of just the **new requirements** we've added based on our discussion about security, ethics, community, legal, operations, and technical refinements, formatted similarly to the original requirements doc.
+
+Here is that consolidated list:
+
+---
+
+**`AgentVault` - Phase 1 Additions Requirements (Responsible Practices & Refinements)**
+
+**Section: Enhanced Security & Trust**
+
+*   **REQ-SEC-DEP-001: Integrate Automated Dependency Scanning**
+    *   **Component:** CI/CD (Affects all components indirectly)
+    *   **Type:** ci_cd_integration
+    *   **Goal:** Add automated checks for known vulnerabilities in project dependencies.
+    *   **Details:** Integrate `pip-audit` or GitHub Dependabot into the CI workflow. Configure it to scan `poetry.lock` files for all components (`agentvault_library`, `agentvault_registry`, `agentvault_cli`). Fail the build on high/critical severity vulnerabilities.
+    *   **Files:** CI configuration files (e.g., `.github/workflows/ci.yml`)
+
+*   **REQ-SEC-DEP-002: Document Dependency Update Policy**
+    *   **Component:** Documentation (Project Root)
+    *   **Type:** documentation
+    *   **Goal:** Define how vulnerable dependencies are handled.
+    *   **Details:** Add a section to `CONTRIBUTING.md` outlining the scanning process, prioritization (critical/high), update attempts, risk assessment, and contributor expectations regarding dependency updates.
+    *   **Files:** `CONTRIBUTING.md`
+
+*   **REQ-SEC-DISC-001: Create SECURITY.md File**
+    *   **Component:** Documentation (Project Root)
+    *   **Type:** documentation
+    *   **Goal:** Establish a clear process for responsible vulnerability disclosure.
+    *   **Details:** Create `SECURITY.md` outlining the scope, preferred reporting methods (GitHub Private Reporting / dedicated email), information to include, response expectations, and a safe harbor statement.
+    *   **Files:** `SECURITY.md`
+
+*   **REQ-REG-SEC-001: Implement Rate Limiting**
+    *   **Component:** `agentvault-registry`
+    *   **Type:** function_impl
+    *   **Goal:** Protect the registry API against abuse.
+    *   **Details:** Add `slowapi` dependency. Configure and apply `Limiter` middleware in `main.py`. Use remote IP as the default key. Consider different limits for public vs. authenticated endpoints.
+    *   **Files:** `agentvault_registry/pyproject.toml`, `agentvault_registry/src/agentvault_registry/main.py`
+
+*   **REQ-REG-SEC-002: Enhance Query Parameter Validation**
+    *   **Component:** `agentvault-registry`
+    *   **Type:** function_impl
+    *   **Goal:** Prevent overly long search queries.
+    *   **Details:** In `routers/agent_cards.py`, add `max_length` validation (e.g., 100) to the `search` query parameter in the `list_agent_cards` endpoint using `fastapi.Query`.
+    *   **Files:** `agentvault_registry/src/agentvault_registry/routers/agent_cards.py`
+
+*   **REQ-DOC-SEC-001: Enhance README Security Section**
+    *   **Component:** Documentation (Project Root)
+    *   **Type:** documentation
+    *   **Goal:** Increase user awareness of the trust model and risks.
+    *   **Details:** Expand the "Security Model" section in the main `README.md`. Add a "Trusting Remote Agents" subsection. Emphasize user responsibility, checking provider policies. Link to `SECURITY.md`, `REGISTRY_POLICY.md`, `TERMS_OF_SERVICE.md`, `PRIVACY_POLICY.md`.
+    *   **Files:** `README.md`
+
+*   **REQ-CLI-SEC-001: Add CLI Warning for New Agents (Optional - Phase 1.5)**
+    *   **Component:** `agentvault-cli`
+    *   **Type:** cli_command_enhancement
+    *   **Goal:** Warn users before running unknown agents for the first time.
+    *   **Details:** (Deferred slightly) Modify `run` command. Implement simple storage for known agent IDs. Check ID before running. If unknown, display warning about trust and require confirmation (`click.confirm` or `--yes` flag). Add ID to known list upon confirmation.
+    *   **Files:** `agentvault_cli/src/agentvault_cli/commands/run.py`
+
+**Section: Ethical Considerations & Registry Governance**
+
+*   **REQ-ETHICS-REG-001: Create Registry Policy Document**
+    *   **Component:** Documentation (Project Root)
+    *   **Type:** documentation
+    *   **Goal:** Define the scope, rules, and vetting level of the registry.
+    *   **Details:** Create `REGISTRY_POLICY.md`. Define purpose (discovery only), submission rules, vetting process (minimal/automated), content guidelines (summary), reporting mechanism for problematic cards, and enforcement actions (deactivation). Include disclaimers.
+    *   **Files:** `REGISTRY_POLICY.md`
+
+**Section: Community & Contribution**
+
+*   **REQ-COMMUNITY-COC-001: Create Code of Conduct**
+    *   **Component:** Documentation (Project Root)
+    *   **Type:** documentation
+    *   **Goal:** Foster a positive and inclusive community environment.
+    *   **Details:** Create `CODE_OF_CONDUCT.md`. Adopt standard text (e.g., Contributor Covenant v2.1). Fill in project name and reporting contact email.
+    *   **Files:** `CODE_OF_CONDUCT.md`
+
+*   **REQ-COMMUNITY-CONTRIB-001: Enhance Contribution Guidelines**
+    *   **Component:** Documentation (Project Root)
+    *   **Type:** documentation
+    *   **Goal:** Provide clear instructions for contributors.
+    *   **Details:** Update `CONTRIBUTING.md`. Link to `CODE_OF_CONDUCT.md`. Briefly mention current governance model. Refine sections on setup, PR process, coding style, and dependency management.
+    *   **Files:** `CONTRIBUTING.md`
+
+**Section: Legal & Compliance**
+
+*   **REQ-LEGAL-LIC-DEPS-001: Document Dependency License Check (Internal/README)**
+    *   **Component:** Documentation (Project Root / Internal)
+    *   **Type:** documentation
+    *   **Goal:** Ensure license compatibility of dependencies.
+    *   **Details:** Perform license review using tools/manual checks. Add statement to root `README.md` confirming compatibility review. Optionally generate and store/track a detailed dependency license list.
+    *   **Files:** `README.md`, (Optional) `DEPENDENCY_LICENSES.md`
+
+*   **REQ-LEGAL-REG-TOS-001: Create Registry Terms of Service**
+    *   **Component:** Documentation (Project Root)
+    *   **Type:** documentation
+    *   **Goal:** Define legal terms for using the registry API.
+    *   **Details:** Create `TERMS_OF_SERVICE.md`. Include sections on service definition, developer accounts/keys, submissions, prohibited use, **disclaimers (especially regarding third-party agents)**, IP, termination, liability limits, governing law, changes, contact. **Requires legal review.**
+    *   **Files:** `TERMS_OF_SERVICE.md`
+
+*   **REQ-LEGAL-REG-PP-001: Create Registry Privacy Policy**
+    *   **Component:** Documentation (Project Root)
+    *   **Type:** documentation
+    *   **Goal:** Inform users how data is handled by the registry API.
+    *   **Details:** Create `PRIVACY_POLICY.md`. Include sections on data controller, information collected (developer info, logs), usage, sharing, security, retention, user rights (GDPR), international transfers, children's privacy, policy updates, contact. **Requires legal review.**
+    *   **Files:** `PRIVACY_POLICY.md`
+
+**Section: Operational Aspects (Registry)**
+
+*   **REQ-OPS-MONITOR-001: Document Monitoring & Alerting Strategy**
+    *   **Component:** Documentation (`agentvault_registry/README.md`)
+    *   **Type:** documentation
+    *   **Goal:** Guide deployers on monitoring the registry service.
+    *   **Details:** Add section to registry README recommending uptime checks (`/health`), centralized logging, and alerting based on errors/downtime. Emphasize deployer responsibility.
+    *   **Files:** `agentvault_registry/README.md`
+
+*   **REQ-OPS-BACKUP-001: Document Backup & Recovery Strategy**
+    *   **Component:** Documentation (`agentvault_registry/README.md`)
+    *   **Type:** documentation
+    *   **Goal:** Guide deployers on backing up registry data.
+    *   **Details:** Add section to registry README recommending regular, automated database backups (managed service features or `pg_dump`), secure off-site storage, and periodic restore testing. Emphasize deployer responsibility.
+    *   **Files:** `agentvault_registry/README.md`
+
+**Section: Technical Refinements (Library & Protocols)**
+
+*   **REQ-TECH-A2AVERSION-001: Document A2A Protocol Versioning Approach**
+    *   **Component:** Documentation (`agentvault_library/README.md`), Code Comments
+    *   **Type:** documentation
+    *   **Goal:** Clarify current protocol scope and future plans.
+    *   **Details:** Add notes to library README and comments in `client.py`/`models/a2a_protocol.py` stating the baseline version used and the need for future handling of different versions based on `AgentCard.capabilities.a2aVersion`.
+    *   **Files:** `agentvault_library/README.md`, `agentvault_library/src/agentvault/client.py`, `agentvault_library/src/agentvault/models/a2a_protocol.py`
+
+*   **REQ-TECH-MCP-001: Document MCP Implementation Status & Future**
+    *   **Component:** Documentation (`agentvault_library/README.md`), Code Comments
+    *   **Type:** documentation
+    *   **Goal:** Clarify current MCP handling and future plans.
+    *   **Details:** Add notes to library README and comments in `mcp_utils.py`/`client.py` explaining the current basic metadata embedding and the plan to align with the finalized MCP specification later.
+    *   **Files:** `agentvault_library/README.md`, `agentvault_library/src/agentvault/mcp_utils.py`, `agentvault_library/src/agentvault/client.py`
+
+*   **REQ-TECH-CLIENTCONFIG-001: Document Client Configuration as Future Enhancement**
+    *   **Component:** Documentation (`agentvault_library/README.md`, `agentvault_cli/README.md`)
+    *   **Type:** documentation
+    *   **Goal:** Note potential future client configuration options.
+    *   **Details:** Add notes to library and CLI READMEs mentioning the possibility of a future user configuration file (`config.toml`) for defaults (registry URL, timeouts).
+    *   **Files:** `agentvault_library/README.md`, `agentvault_cli/README.md`
+
+---
+
+This list covers all the additions we discussed and implemented or planned for documentation. Ready to proceed with **REQ-LIB-A2ACLIENT-002: Implement `initiate_task` Method**?
