@@ -1,5 +1,8 @@
 """
 Provides the AgentVaultClient for interacting with remote agents via the A2A protocol.
+
+Note: Assumes a baseline A2A protocol version inspired by early drafts.
+Future versions will need more robust version handling based on AgentCard capabilities.
 """
 
 import asyncio
@@ -25,9 +28,9 @@ from .exceptions import (
 )
 # Import KeyManager
 from .key_manager import KeyManager
-# --- ADDED IMPORT ---
+# Import MCP Utils
 from .mcp_utils import format_mcp_context
-# --- END ADDED IMPORT ---
+
 
 logger = logging.getLogger(__name__)
 A2AEvent = Union[TaskStatusUpdateEvent, TaskMessageEvent, TaskArtifactUpdateEvent]
@@ -68,11 +71,34 @@ class AgentVaultClient:
         self, agent_card: AgentCard, initial_message: Message, key_manager: KeyManager,
         mcp_context: Optional[Dict[str, Any]] = None
     ) -> str:
+        """
+        Initiates a new task with the remote agent.
+
+        Args:
+            agent_card: The validated AgentCard of the target agent.
+            initial_message: The first message to send (typically from the user).
+            key_manager: The KeyManager instance for retrieving authentication keys.
+            mcp_context: Optional dictionary representing MCP context data.
+
+        Returns:
+            The unique ID assigned to the newly created task by the agent.
+
+        Raises:
+            A2AAuthenticationError: If authentication fails.
+            A2AConnectionError: If connection to the agent fails.
+            A2ARemoteAgentError: If the agent returns a specific error.
+            A2AMessageError: If request/response formatting is invalid.
+            A2ATimeoutError: If the request times out.
+            A2AError: For other A2A related issues.
+            AgentVaultError: For unexpected library errors.
+        """
         logger.info(f"Initiating task with agent: {agent_card.human_readable_id}")
         try:
             auth_headers = self._get_auth_headers(agent_card, key_manager)
             message_to_send = initial_message
-            # --- MODIFIED MCP HANDLING ---
+            # --- MCP Handling (Basic Embedding) ---
+            # Note: This basic implementation embeds the formatted context dict.
+            # Future versions should align with finalized MCP spec.
             if mcp_context:
                 formatted_mcp = format_mcp_context(mcp_context)
                 if formatted_mcp is not None:
@@ -84,8 +110,9 @@ class AgentVaultClient:
                 else:
                     # Log warning if formatting failed, but proceed without MCP context
                     logger.warning("Failed to format provided MCP context data. Proceeding without embedding it.")
-            # --- END MODIFIED MCP HANDLING ---
+            # --- END MCP Handling ---
 
+            # Note: Assumes baseline A2A 'tasks/send' method for initiation when id is null.
             task_send_params = TaskSendParams(message=message_to_send, id=None)
             request_id = f"req-init-{uuid.uuid4()}"
             request_params = task_send_params.model_dump(mode='json', exclude_none=True, by_alias=True)
@@ -118,11 +145,35 @@ class AgentVaultClient:
         self, agent_card: AgentCard, task_id: str, message: Message, key_manager: KeyManager,
         mcp_context: Optional[Dict[str, Any]] = None
     ) -> bool:
+        """
+        Sends a subsequent message to an existing task.
+
+        Args:
+            agent_card: The validated AgentCard of the target agent.
+            task_id: The ID of the existing task to send the message to.
+            message: The message to send.
+            key_manager: The KeyManager instance for retrieving authentication keys.
+            mcp_context: Optional dictionary representing MCP context data.
+
+        Returns:
+            True if the message was successfully acknowledged by the agent, False otherwise.
+
+        Raises:
+            A2AAuthenticationError: If authentication fails.
+            A2AConnectionError: If connection to the agent fails.
+            A2ARemoteAgentError: If the agent returns a specific error (e.g., task not found).
+            A2AMessageError: If request/response formatting is invalid.
+            A2ATimeoutError: If the request times out.
+            A2AError: For other A2A related issues.
+            AgentVaultError: For unexpected library errors.
+        """
         logger.info(f"Sending message to task {task_id} on agent: {agent_card.human_readable_id}")
         try:
             auth_headers = self._get_auth_headers(agent_card, key_manager)
             message_to_send = message
-            # --- MODIFIED MCP HANDLING ---
+            # --- MCP Handling (Basic Embedding) ---
+            # Note: This basic implementation embeds the formatted context dict.
+            # Future versions should align with finalized MCP spec.
             if mcp_context:
                 formatted_mcp = format_mcp_context(mcp_context)
                 if formatted_mcp is not None:
@@ -134,8 +185,9 @@ class AgentVaultClient:
                 else:
                     # Log warning if formatting failed, but proceed without MCP context
                     logger.warning("Failed to format provided MCP context data. Proceeding without embedding it.")
-            # --- END MODIFIED MCP HANDLING ---
+            # --- END MCP Handling ---
 
+            # Note: Assumes baseline A2A 'tasks/send' method.
             task_send_params = TaskSendParams(message=message_to_send, id=task_id)
             request_id = f"req-send-{uuid.uuid4()}"
             request_params = task_send_params.model_dump(mode='json', exclude_none=True, by_alias=True)
@@ -148,7 +200,7 @@ class AgentVaultClient:
                 err_code = error_data.get("code", -1); err_msg = error_data.get("message", "Unknown remote agent error"); err_data = error_data.get("data")
                 raise A2ARemoteAgentError(message=err_msg, status_code=err_code, response_body=err_data)
             if "result" not in response_data: raise A2AMessageError("Invalid response format: missing 'result' key.")
-            try: TaskSendResult.model_validate(response_data["result"])
+            try: TaskSendResult.model_validate(response_data["result"]) # Validate structure even if simple
             except pydantic.ValidationError as e: raise A2AMessageError(f"Failed to validate send message result: {e}") from e
             logger.info(f"Message successfully sent to task {task_id} on agent {agent_card.human_readable_id}.")
             return True
@@ -160,9 +212,12 @@ class AgentVaultClient:
              raise A2AAuthenticationError(f"Authentication failed: {e}") from e
         except Exception as e:
             logger.exception(f"Unexpected error sending message to task {task_id} on agent {agent_card.human_readable_id}: {e}")
-            return False # Return False on unexpected errors
+            # Return False for unexpected errors during send, as success is unknown
+            return False
 
     async def _process_sse_stream(self, byte_stream: AsyncGenerator[bytes, None]) -> AsyncGenerator[Dict[str, Any], None]:
+        """Processes a Server-Sent Event byte stream into event dictionaries."""
+        # Implementation unchanged...
         buffer = ""; current_event_type = None; data_buffer = ""
         try:
             async for chunk in byte_stream:
@@ -190,11 +245,36 @@ class AgentVaultClient:
         finally: logger.debug("SSE byte stream processing finished.")
 
     async def receive_messages(self, agent_card: AgentCard, task_id: str, key_manager: KeyManager) -> AsyncGenerator[A2AEvent, None]:
+        """
+        Subscribes to Server-Sent Events (SSE) for a given task to receive messages and updates.
+
+        Yields validated Pydantic models for TaskStatusUpdateEvent, TaskMessageEvent,
+        or TaskArtifactUpdateEvent as they arrive.
+
+        Args:
+            agent_card: The validated AgentCard of the target agent.
+            task_id: The ID of the task to subscribe to.
+            key_manager: The KeyManager instance for retrieving authentication keys.
+
+        Yields:
+            Validated A2AEvent objects.
+
+        Raises:
+            A2AAuthenticationError: If authentication fails.
+            A2AConnectionError: If connection or the SSE stream fails.
+            A2ARemoteAgentError: If the agent returns an error during subscription setup.
+            A2AMessageError: If request/response/event formatting is invalid.
+            A2ATimeoutError: If the initial subscription request times out.
+            A2AError: For other A2A related issues.
+            AgentVaultError: For unexpected library errors.
+        """
+        # Implementation unchanged...
         logger.info(f"Subscribing to events for task {task_id} on agent: {agent_card.human_readable_id}")
         byte_stream = None
         try:
             auth_headers = self._get_auth_headers(agent_card, key_manager); auth_headers["Accept"] = "text/event-stream"
             request_id = f"req-sub-{uuid.uuid4()}"
+            # Note: Assumes baseline A2A 'tasks/sendSubscribe' method.
             request_payload = {"jsonrpc": "2.0", "method": "tasks/sendSubscribe", "params": {"id": task_id}, "id": request_id}
             logger.debug(f"Subscribe request payload (id: {request_id})")
             byte_stream = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload, stream=True)
@@ -217,12 +297,34 @@ class AgentVaultClient:
             raise A2AError(f"An unexpected error occurred during event subscription: {e}") from e
 
     async def get_task_status(self, agent_card: AgentCard, task_id: str, key_manager: KeyManager) -> Task:
+        """
+        Retrieves the current status and details of a specific task.
+
+        Args:
+            agent_card: The validated AgentCard of the target agent.
+            task_id: The ID of the task to retrieve.
+            key_manager: The KeyManager instance for retrieving authentication keys.
+
+        Returns:
+            A Task object representing the current state of the task.
+
+        Raises:
+            A2AAuthenticationError: If authentication fails.
+            A2AConnectionError: If connection to the agent fails.
+            A2ARemoteAgentError: If the agent returns an error (e.g., task not found).
+            A2AMessageError: If request/response formatting is invalid.
+            A2ATimeoutError: If the request times out.
+            A2AError: For other A2A related issues.
+            AgentVaultError: For unexpected library errors.
+        """
+        # Implementation unchanged...
         logger.info(f"Getting status for task {task_id} on agent: {agent_card.human_readable_id}")
         try:
             auth_headers = self._get_auth_headers(agent_card, key_manager)
             task_get_params = TaskGetParams(id=task_id)
             request_id = f"req-get-{uuid.uuid4()}"
             request_params = task_get_params.model_dump(mode='json', by_alias=True)
+            # Note: Assumes baseline A2A 'tasks/get' method.
             request_payload = {"jsonrpc": "2.0", "method": "tasks/get", "params": request_params, "id": request_id}
             logger.debug(f"Get task status request payload (id: {request_id})")
             response_data = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload)
@@ -245,12 +347,34 @@ class AgentVaultClient:
             raise A2AError(f"An unexpected error occurred getting task status: {e}") from e
 
     async def terminate_task(self, agent_card: AgentCard, task_id: str, key_manager: KeyManager) -> bool:
+        """
+        Requests the termination (cancellation) of an ongoing task.
+
+        Args:
+            agent_card: The validated AgentCard of the target agent.
+            task_id: The ID of the task to terminate.
+            key_manager: The KeyManager instance for retrieving authentication keys.
+
+        Returns:
+            True if the termination request was acknowledged by the agent, False otherwise.
+
+        Raises:
+            A2AAuthenticationError: If authentication fails.
+            A2AConnectionError: If connection to the agent fails.
+            A2ARemoteAgentError: If the agent returns an error (e.g., task not found or already finished).
+            A2AMessageError: If request/response formatting is invalid.
+            A2ATimeoutError: If the request times out.
+            A2AError: For other A2A related issues.
+            AgentVaultError: For unexpected library errors.
+        """
+        # Implementation unchanged...
         logger.info(f"Requesting termination for task {task_id} on agent: {agent_card.human_readable_id}")
         try:
             auth_headers = self._get_auth_headers(agent_card, key_manager)
             task_cancel_params = TaskCancelParams(id=task_id)
             request_id = f"req-cancel-{uuid.uuid4()}"
             request_params = task_cancel_params.model_dump(mode='json', by_alias=True)
+            # Note: Assumes baseline A2A 'tasks/cancel' method.
             request_payload = {"jsonrpc": "2.0", "method": "tasks/cancel", "params": request_params, "id": request_id}
             logger.debug(f"Terminate task request payload (id: {request_id})")
             response_data = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload)
@@ -260,7 +384,7 @@ class AgentVaultClient:
                 err_code = error_data.get("code", -1); err_msg = error_data.get("message", "Unknown remote agent error"); err_data = error_data.get("data")
                 raise A2ARemoteAgentError(message=err_msg, status_code=err_code, response_body=err_data)
             if "result" not in response_data: raise A2AMessageError("Invalid response format: missing 'result' key.")
-            try: TaskCancelResult.model_validate(response_data["result"])
+            try: TaskCancelResult.model_validate(response_data["result"]) # Validate structure
             except pydantic.ValidationError as e: raise A2AMessageError(f"Failed to validate terminate task result: {e}") from e
             logger.info(f"Termination request for task {task_id} acknowledged by agent {agent_card.human_readable_id}.")
             return True
@@ -272,17 +396,16 @@ class AgentVaultClient:
              raise A2AAuthenticationError(f"Authentication failed: {e}") from e
         except Exception as e:
             logger.exception(f"Unexpected error terminating task {task_id} on agent {agent_card.human_readable_id}: {e}")
-            return False # Return False on unexpected errors
+            # Return False for unexpected errors during termination
+            return False
 
     # --- Private Helper Methods ---
     def _get_auth_headers(self, agent_card: AgentCard, key_manager: KeyManager) -> Dict[str, str]:
-        """(Docstring unchanged)"""
-        # --- FIX: Access agent_card.auth_schemes (snake_case) ---
+        """Determines required auth scheme and retrieves key if needed."""
+        # Implementation unchanged...
         agent_schemes = agent_card.auth_schemes
         supported_schemes_str = [s.scheme for s in agent_schemes] # For logging
         logger.debug(f"Agent supports auth schemes: {supported_schemes_str}")
-
-        # Check for apiKey FIRST
         api_key_scheme = next((s for s in agent_schemes if s.scheme == 'apiKey'), None)
         if api_key_scheme:
             service_id = api_key_scheme.service_identifier or agent_card.human_readable_id
@@ -292,14 +415,10 @@ class AgentVaultClient:
             if not api_key: raise A2AAuthenticationError(f"Missing API key for service '{service_id}' required by agent '{agent_card.human_readable_id}' (scheme: apiKey).")
             logger.debug(f"Using apiKey scheme for service_id '{service_id}'.")
             return {"X-Api-Key": api_key}
-
-        # Check for none SECOND
         none_scheme_present = any(s.scheme == 'none' for s in agent_schemes)
         if none_scheme_present:
             logger.debug("Using 'none' authentication scheme.")
             return {}
-
-        # If NEITHER apiKey NOR none was found, THEN raise error
         client_supported = ['apiKey', 'none']
         log_msg = (f"No compatible authentication scheme found for agent {agent_card.human_readable_id}. "
                    f"Agent supports: {supported_schemes_str}. Client supports: {client_supported}.")
@@ -310,7 +429,8 @@ class AgentVaultClient:
         self, method: str, url: str, headers: Optional[Dict[str, str]] = None,
         json_payload: Optional[Dict[str, Any]] = None, stream: bool = False
     ) -> Union[Dict[str, Any], AsyncGenerator[bytes, None]]:
-        """(Implementation unchanged)"""
+        """Internal helper to make HTTP requests using the configured client."""
+        # Implementation unchanged...
         request_kwargs = {"method": method, "url": url, "headers": headers or {}, "json": json_payload}
         logger.debug(f"Making A2A request: {method} {url}") # Simplified logging
         try:

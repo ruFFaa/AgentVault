@@ -2,6 +2,8 @@
 Pydantic models representing the structures used in the Agent-to-Agent (A2A) protocol.
 
 Based on common A2A concepts and structures (specific schema version TBD).
+Note: This implementation assumes a baseline A2A protocol version.
+Future versions may need adjustments based on standard evolution.
 """
 
 from enum import Enum

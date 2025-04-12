@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 # --- Basic MCP Pydantic Models (Example Structure) ---
 # These models represent a potential structure for MCP context.
 # They might need significant refinement based on the finalized MCP spec.
+# Note: This is a placeholder structure for Phase 1.
 
 class MCPItem(BaseModel):
     """Represents a single item within the MCP context."""
@@ -48,7 +49,8 @@ def format_mcp_context(context_data: Dict[str, Any]) -> Optional[Dict[str, Any]]
     Validates and formats the input dictionary according to the MCPContext model.
 
     For this initial version, it primarily validates the structure using Pydantic
-    and returns the dictionary representation if valid.
+    and returns the dictionary representation if valid. Future versions should
+    align with the official MCP specification.
 
     Args:
         context_data: A dictionary intended to represent the MCP context.
