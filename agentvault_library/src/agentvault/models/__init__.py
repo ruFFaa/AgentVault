@@ -9,15 +9,52 @@ from .agent_card import (
     AgentCard
 )
 
-# You might expose other models (like a2a_protocol) here later as needed
-# from .a2a_protocol import ...
+# Expose the core A2A protocol models
+from .a2a_protocol import (
+    TaskState,
+    TextPart,
+    FilePart,
+    DataPart,
+    Part,
+    Artifact,
+    Message,
+    Task,
+    TaskSendParams,
+    TaskSendResult,
+    TaskGetParams,
+    GetTaskResult,       # Alias for Task
+    TaskCancelParams,
+    TaskCancelResult,
+    TaskStatusUpdateEvent,
+    TaskMessageEvent,
+    TaskArtifactUpdateEvent,
+)
+
 
 __all__ = [
+    # Agent Card Models
     "AgentProvider",
     "AgentSkill",
     "AgentAuthentication",
     "AgentCapabilities",
     "AgentCard",
-    # Add other exported model names here
+    # A2A Protocol Models
+    "TaskState",
+    "TextPart",
+    "FilePart",
+    "DataPart",
+    "Part",
+    "Artifact",
+    "Message",
+    "Task",
+    "TaskSendParams",
+    "TaskSendResult",
+    "TaskGetParams",
+    "GetTaskResult",
+    "TaskCancelParams",
+    "TaskCancelResult",
+    "TaskStatusUpdateEvent",
+    "TaskMessageEvent",
+    "TaskArtifactUpdateEvent",
 ]
 #

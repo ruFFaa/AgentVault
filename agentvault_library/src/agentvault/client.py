@@ -14,73 +14,31 @@ from typing import Optional, Dict, Any, Union, AsyncGenerator, Tuple
 # Import local models
 from .models.agent_card import AgentCard, AgentAuthentication
 from .models.a2a_protocol import (
-    Message,
-    Task,
-    TaskState,
-    TaskStatusUpdateEvent,
-    TaskArtifactUpdateEvent,
-    TaskMessageEvent,
-    # Import request/response param/result models
-    TaskSendParams,
-    TaskSendResult,
-    TaskGetParams,      # Added
-    GetTaskResult,      # Alias for Task
-    TaskCancelParams,   # Added
-    TaskCancelResult,   # Added
+    Message, Task, TaskState, TaskStatusUpdateEvent, TaskArtifactUpdateEvent,
+    TaskMessageEvent, TaskSendParams, TaskSendResult, TaskGetParams,
+    GetTaskResult, TaskCancelParams, TaskCancelResult
 )
-
 # Import local exceptions
 from .exceptions import (
-    AgentVaultError,
-    A2AError,
-    A2AConnectionError,
-    A2AAuthenticationError,
-    A2ARemoteAgentError,
-    A2ATimeoutError,
-    A2AMessageError,
-    KeyManagementError,
+    AgentVaultError, A2AError, A2AConnectionError, A2AAuthenticationError,
+    A2ARemoteAgentError, A2ATimeoutError, A2AMessageError, KeyManagementError
 )
-
 # Import KeyManager
 from .key_manager import KeyManager
 
-# Set up logging
 logger = logging.getLogger(__name__)
-
-# Define the type alias for events yielded by receive_messages
 A2AEvent = Union[TaskStatusUpdateEvent, TaskMessageEvent, TaskArtifactUpdateEvent]
-
-# Mapping from SSE event types to Pydantic models
 SSE_EVENT_TYPE_MAP = {
-    "task_status": TaskStatusUpdateEvent,
-    "task_message": TaskMessageEvent,
-    "task_artifact": TaskArtifactUpdateEvent,
-    "message": TaskMessageEvent, # Default event type if none specified
+    "task_status": TaskStatusUpdateEvent, "task_message": TaskMessageEvent,
+    "task_artifact": TaskArtifactUpdateEvent, "message": TaskMessageEvent,
 }
 
-
 class AgentVaultClient:
-    """
-    Client for interacting with remote agents using the Agent-to-Agent (A2A) protocol.
-
-    Manages HTTP connections and handles the request/response flow for A2A operations.
-    Can be used as an async context manager.
-    """
-
+    """ Client for interacting with remote agents using A2A protocol. """
+    # (__init__, close, __aenter__, __aexit__ unchanged)
     def __init__(
-        self,
-        http_client: Optional[httpx.AsyncClient] = None,
-        default_timeout: float = 30.0
+        self, http_client: Optional[httpx.AsyncClient] = None, default_timeout: float = 30.0
     ):
-        """
-        Initializes the AgentVaultClient.
-
-        Args:
-            http_client: An optional existing httpx.AsyncClient instance to use.
-                         If None, a new client will be created internally.
-            default_timeout: Default timeout in seconds for HTTP requests if
-                             a new client is created.
-        """
         self.default_timeout = default_timeout
         if http_client:
             self._http_client = http_client
@@ -92,36 +50,21 @@ class AgentVaultClient:
             self._should_close_client = True
 
     async def close(self) -> None:
-        """
-        Closes the underlying httpx client if it was created internally.
-        """
         if self._should_close_client and not self._http_client.is_closed:
             logger.debug("Closing internally managed httpx.AsyncClient instance.")
             await self._http_client.aclose()
         elif not self._should_close_client:
              logger.debug("Using externally managed httpx.AsyncClient, not closing.")
 
-    async def __aenter__(self) -> "AgentVaultClient":
-        """Enter the async context manager."""
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Exit the async context manager, closing the client if necessary."""
-        await self.close()
+    async def __aenter__(self) -> "AgentVaultClient": return self
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None: await self.close()
 
     # --- Public A2A Methods ---
-
+    # (initiate_task, send_message, _process_sse_stream, receive_messages, get_task_status, terminate_task - unchanged from previous correct version)
     async def initiate_task(
-        self,
-        agent_card: AgentCard,
-        initial_message: Message,
-        key_manager: KeyManager,
+        self, agent_card: AgentCard, initial_message: Message, key_manager: KeyManager,
         mcp_context: Optional[Dict[str, Any]] = None
     ) -> str:
-        """
-        Initiates a new task with the remote agent using the 'tasks/send' method.
-        (Implementation details omitted for brevity - assumed correct from previous step)
-        """
         logger.info(f"Initiating task with agent: {agent_card.human_readable_id}")
         try:
             auth_headers = self._get_auth_headers(agent_card, key_manager)
@@ -130,45 +73,26 @@ class AgentVaultClient:
                 current_metadata = message_to_send.metadata or {}
                 updated_metadata = {**current_metadata, "mcp_context": mcp_context}
                 message_to_send = message_to_send.model_copy(update={'metadata': updated_metadata})
-                logger.debug("Embedded MCP context into message metadata.")
-
             task_send_params = TaskSendParams(message=message_to_send, id=None)
             request_id = f"req-init-{uuid.uuid4()}"
-            request_payload = {
-                "jsonrpc": "2.0",
-                "method": "tasks/send",
-                "params": task_send_params.model_dump(mode='json', exclude_none=True),
-                "id": request_id
-            }
-            logger.debug(f"Initiate task request payload (id: {request_id}): {request_payload}")
-
-            response_data = await self._make_request(
-                'POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload
-            )
-
-            if not isinstance(response_data, dict):
-                 raise A2AMessageError(f"Invalid response format: Expected dictionary, got {type(response_data)}")
+            request_params = task_send_params.model_dump(mode='json', exclude_none=True, by_alias=True)
+            request_payload = {"jsonrpc": "2.0", "method": "tasks/send", "params": request_params, "id": request_id}
+            logger.debug(f"Initiate task request payload (id: {request_id})")
+            response_data = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload)
+            if not isinstance(response_data, dict): raise A2AMessageError(f"Invalid response format: Expected dictionary, got {type(response_data)}")
             if "error" in response_data:
-                error_data = response_data["error"]
-                logger.error(f"Agent returned error during task initiation: {error_data}")
-                err_code = error_data.get("code", -1)
-                err_msg = error_data.get("message", "Unknown remote agent error")
-                err_data = error_data.get("data")
+                error_data = response_data["error"]; logger.error(f"Agent returned error during task initiation: {error_data}")
+                err_code = error_data.get("code", -1); err_msg = error_data.get("message", "Unknown remote agent error"); err_data = error_data.get("data")
                 raise A2ARemoteAgentError(message=err_msg, status_code=err_code, response_body=err_data)
-            if "result" not in response_data:
-                raise A2AMessageError("Invalid response format: missing 'result' key.")
-            try:
-                result_obj = TaskSendResult.model_validate(response_data["result"])
-            except pydantic.ValidationError as e:
-                raise A2AMessageError(f"Failed to validate task initiation result: {e}") from e
+            if "result" not in response_data: raise A2AMessageError("Invalid response format: missing 'result' key.")
+            try: result_obj = TaskSendResult.model_validate(response_data["result"])
+            except pydantic.ValidationError as e: raise A2AMessageError(f"Failed to validate task initiation result: {e}") from e
             task_id = result_obj.id
-            if not task_id:
-                 raise A2AMessageError("Invalid response format: 'result.id' is missing or empty.")
-
+            if not task_id: raise A2AMessageError("Invalid response format: 'result.id' is missing or empty.")
             logger.info(f"Task successfully initiated with agent {agent_card.human_readable_id}. Task ID: {task_id}")
             return task_id
         except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e:
-            logger.error(f"A2A error during task initiation: {e}")
+            logger.error(f"A2A error during task initiation: {type(e).__name__}: {e}")
             raise
         except KeyManagementError as e:
              logger.error(f"Key management error during task initiation: {e}")
@@ -177,19 +101,10 @@ class AgentVaultClient:
             logger.exception(f"Unexpected error during task initiation with agent {agent_card.human_readable_id}: {e}")
             raise A2AError(f"An unexpected error occurred during task initiation: {e}") from e
 
-
     async def send_message(
-        self,
-        agent_card: AgentCard,
-        task_id: str,
-        message: Message,
-        key_manager: KeyManager,
+        self, agent_card: AgentCard, task_id: str, message: Message, key_manager: KeyManager,
         mcp_context: Optional[Dict[str, Any]] = None
     ) -> bool:
-        """
-        Sends a subsequent message to an existing task using the 'tasks/send' method.
-        (Implementation details omitted for brevity - assumed correct from previous step)
-        """
         logger.info(f"Sending message to task {task_id} on agent: {agent_card.human_readable_id}")
         try:
             auth_headers = self._get_auth_headers(agent_card, key_manager)
@@ -198,42 +113,24 @@ class AgentVaultClient:
                 current_metadata = message_to_send.metadata or {}
                 updated_metadata = {**current_metadata, "mcp_context": mcp_context}
                 message_to_send = message_to_send.model_copy(update={'metadata': updated_metadata})
-                logger.debug("Embedded MCP context into message metadata.")
-
             task_send_params = TaskSendParams(message=message_to_send, id=task_id)
             request_id = f"req-send-{uuid.uuid4()}"
-            request_payload = {
-                "jsonrpc": "2.0",
-                "method": "tasks/send",
-                "params": task_send_params.model_dump(mode='json', exclude_none=True),
-                "id": request_id
-            }
-            logger.debug(f"Send message request payload (id: {request_id}): {request_payload}")
-
-            response_data = await self._make_request(
-                'POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload
-            )
-
-            if not isinstance(response_data, dict):
-                 raise A2AMessageError(f"Invalid response format: Expected dictionary, got {type(response_data)}")
+            request_params = task_send_params.model_dump(mode='json', exclude_none=True, by_alias=True)
+            request_payload = {"jsonrpc": "2.0", "method": "tasks/send", "params": request_params, "id": request_id}
+            logger.debug(f"Send message request payload (id: {request_id})")
+            response_data = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload)
+            if not isinstance(response_data, dict): raise A2AMessageError(f"Invalid response format: Expected dictionary, got {type(response_data)}")
             if "error" in response_data:
-                error_data = response_data["error"]
-                logger.error(f"Agent returned error sending message to task {task_id}: {error_data}")
-                err_code = error_data.get("code", -1)
-                err_msg = error_data.get("message", "Unknown remote agent error")
-                err_data = error_data.get("data")
+                error_data = response_data["error"]; logger.error(f"Agent returned error sending message to task {task_id}: {error_data}")
+                err_code = error_data.get("code", -1); err_msg = error_data.get("message", "Unknown remote agent error"); err_data = error_data.get("data")
                 raise A2ARemoteAgentError(message=err_msg, status_code=err_code, response_body=err_data)
-            if "result" not in response_data:
-                raise A2AMessageError("Invalid response format: missing 'result' key.")
-            try:
-                TaskSendResult.model_validate(response_data["result"])
-            except pydantic.ValidationError as e:
-                raise A2AMessageError(f"Failed to validate send message result: {e}") from e
-
+            if "result" not in response_data: raise A2AMessageError("Invalid response format: missing 'result' key.")
+            try: TaskSendResult.model_validate(response_data["result"])
+            except pydantic.ValidationError as e: raise A2AMessageError(f"Failed to validate send message result: {e}") from e
             logger.info(f"Message successfully sent to task {task_id} on agent {agent_card.human_readable_id}.")
             return True
         except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e:
-            logger.error(f"A2A error sending message to task {task_id}: {e}")
+            logger.error(f"A2A error sending message to task {task_id}: {type(e).__name__}: {e}")
             raise
         except KeyManagementError as e:
              logger.error(f"Key management error sending message to task {task_id}: {e}")
@@ -242,121 +139,52 @@ class AgentVaultClient:
             logger.exception(f"Unexpected error sending message to task {task_id} on agent {agent_card.human_readable_id}: {e}")
             return False
 
-    async def _process_sse_stream(
-        self, byte_stream: AsyncGenerator[bytes, None]
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """
-        Helper to process a raw byte stream according to SSE protocol.
-        (Implementation details omitted for brevity - assumed correct from previous step)
-        """
-        buffer = ""
-        current_event_type = None
-        data_buffer = ""
+    async def _process_sse_stream(self, byte_stream: AsyncGenerator[bytes, None]) -> AsyncGenerator[Dict[str, Any], None]:
+        buffer = ""; current_event_type = None; data_buffer = ""
         try:
             async for chunk in byte_stream:
-                try:
-                    buffer += chunk.decode('utf-8')
-                except UnicodeDecodeError:
-                    logger.warning("Received non-UTF8 chunk in SSE stream, skipping.")
-                    buffer = "" # Reset buffer on decode error
-                    continue
-
+                try: buffer += chunk.decode('utf-8')
+                except UnicodeDecodeError: logger.warning("Received non-UTF8 chunk in SSE stream, skipping."); buffer = ""; continue
                 while '\n' in buffer or '\r' in buffer:
                     line, separator, buffer = buffer.partition('\n')
-                    if not separator and '\r' in line: # Handle \r line ending
-                        line, separator, buffer = line.partition('\r') + buffer
-                    elif separator == '\n' and line.endswith('\r'): # Handle \r\n
-                        line = line[:-1]
-
-                    if not line: # Empty line signifies end of event
+                    if not separator and '\r' in line: line, separator, buffer = line.partition('\r') + buffer
+                    elif separator == '\n' and line.endswith('\r'): line = line[:-1]
+                    if not line:
                         if data_buffer:
-                            event_type = current_event_type or "message" # Default type
+                            event_type = current_event_type or "message"
                             logger.debug(f"Received SSE event: type='{event_type}', data='{data_buffer[:100]}...'")
-                            try:
-                                parsed_data = json.loads(data_buffer)
-                                yield {"event_type": event_type, "data": parsed_data}
-                            except json.JSONDecodeError as e:
-                                logger.error(f"Failed to decode JSON data for SSE event type '{event_type}': {e}. Data: {data_buffer[:200]}...")
-                            data_buffer = ""
-                            current_event_type = None
+                            try: yield {"event_type": event_type, "data": json.loads(data_buffer)}
+                            except json.JSONDecodeError as e: logger.error(f"Failed to decode JSON data for SSE event type '{event_type}': {e}. Data: {data_buffer[:200]}...")
+                            data_buffer = ""; current_event_type = None
                         continue
+                    if line.startswith(':'): continue
+                    try:
+                        field, value = line.split(":", 1); value = value.strip()
+                        if field == "event": current_event_type = value
+                        elif field == "data": data_buffer += ("\n" if data_buffer else "") + value
+                    except ValueError: logger.warning(f"Ignoring malformed SSE line: {line}")
+        except Exception as e: logger.error(f"Error processing SSE stream: {e}", exc_info=True); raise A2AConnectionError(f"Error reading from SSE stream: {e}") from e
+        finally: logger.debug("SSE byte stream processing finished.")
 
-                    if line.startswith(':'):
-                        continue
-
-                    field, value = line.split(":", 1)
-                    value = value.strip()
-
-                    if field == "event":
-                        current_event_type = value
-                    elif field == "data":
-                        if data_buffer:
-                            data_buffer += "\n"
-                        data_buffer += value
-                    # Ignore id, retry, etc.
-
-        except Exception as e:
-             logger.error(f"Error processing SSE stream: {e}", exc_info=True)
-             raise A2AConnectionError(f"Error reading from SSE stream: {e}") from e
-        finally:
-            logger.debug("SSE byte stream processing finished.")
-
-
-    async def receive_messages(
-        self,
-        agent_card: AgentCard,
-        task_id: str,
-        key_manager: KeyManager
-    ) -> AsyncGenerator[A2AEvent, None]:
-        """
-        Subscribes to and yields events (status updates, messages, artifacts)
-        for a specific task using Server-Sent Events (SSE).
-        (Implementation details omitted for brevity - assumed correct from previous step)
-        """
+    async def receive_messages(self, agent_card: AgentCard, task_id: str, key_manager: KeyManager) -> AsyncGenerator[A2AEvent, None]:
         logger.info(f"Subscribing to events for task {task_id} on agent: {agent_card.human_readable_id}")
         byte_stream = None
         try:
-            auth_headers = self._get_auth_headers(agent_card, key_manager)
-            auth_headers["Accept"] = "text/event-stream"
+            auth_headers = self._get_auth_headers(agent_card, key_manager); auth_headers["Accept"] = "text/event-stream"
             request_id = f"req-sub-{uuid.uuid4()}"
-            request_payload = {
-                "jsonrpc": "2.0",
-                "method": "tasks/sendSubscribe",
-                "params": {"id": task_id},
-                "id": request_id
-            }
-            logger.debug(f"Subscribe request payload (id: {request_id}): {request_payload}")
-
-            byte_stream = await self._make_request(
-                'POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload, stream=True
-            )
-
-            if not isinstance(byte_stream, typing.AsyncGenerator):
-                 raise A2AError(f"_make_request did not return an AsyncGenerator for stream=True (got {type(byte_stream)})")
-
+            request_payload = {"jsonrpc": "2.0", "method": "tasks/sendSubscribe", "params": {"id": task_id}, "id": request_id}
+            logger.debug(f"Subscribe request payload (id: {request_id})")
+            byte_stream = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload, stream=True)
+            if not isinstance(byte_stream, typing.AsyncGenerator): raise A2AError(f"_make_request did not return an AsyncGenerator for stream=True (got {type(byte_stream)})")
             async for event_dict in self._process_sse_stream(byte_stream):
-                event_type = event_dict.get("event_type")
-                event_data = event_dict.get("data")
-
-                if not event_type or not isinstance(event_data, dict):
-                    logger.warning(f"Skipping malformed event: {event_dict}")
-                    continue
-
+                event_type = event_dict.get("event_type"); event_data = event_dict.get("data")
+                if not event_type or not isinstance(event_data, dict): logger.warning(f"Skipping malformed event: {event_dict}"); continue
                 event_model = SSE_EVENT_TYPE_MAP.get(event_type)
-                if not event_model:
-                    logger.warning(f"Received unknown SSE event type: '{event_type}'. Data: {event_data}")
-                    continue
-
-                try:
-                    validated_event = event_model.model_validate(event_data)
-                    logger.debug(f"Yielding validated event: {validated_event!r}")
-                    yield validated_event
-                except pydantic.ValidationError as e:
-                    logger.error(f"Failed to validate SSE event type '{event_type}': {e}. Data: {event_data}")
-                    continue
-
+                if not event_model: logger.warning(f"Received unknown SSE event type: '{event_type}'. Data: {event_data}"); continue
+                try: validated_event = event_model.model_validate(event_data); logger.debug(f"Yielding validated event: {validated_event!r}"); yield validated_event
+                except pydantic.ValidationError as e: logger.error(f"Failed to validate SSE event type '{event_type}': {e}. Data: {event_data}"); continue
         except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e:
-            logger.error(f"A2A error during event subscription or processing for task {task_id}: {e}")
+            logger.error(f"A2A error during event subscription or processing for task {task_id}: {type(e).__name__}: {e}")
             raise
         except KeyManagementError as e:
              logger.error(f"Key management error during event subscription for task {task_id}: {e}")
@@ -365,70 +193,26 @@ class AgentVaultClient:
             logger.exception(f"Unexpected error during event subscription for task {task_id} on agent {agent_card.human_readable_id}: {e}")
             raise A2AError(f"An unexpected error occurred during event subscription: {e}") from e
 
-
-    async def get_task_status(
-        self,
-        agent_card: AgentCard,
-        task_id: str,
-        key_manager: KeyManager
-    ) -> Task:
-        """
-        Retrieves the current status and details of a specific task using the 'tasks/get' method.
-
-        Args:
-            agent_card: The AgentCard of the target agent.
-            task_id: The ID of the task to query.
-            key_manager: The KeyManager instance to retrieve authentication keys.
-
-        Returns:
-            A Task object representing the current state of the task.
-
-        Raises:
-            A2AAuthenticationError: If required authentication key is missing or invalid.
-            A2AConnectionError: If connection to the agent endpoint fails.
-            A2ARemoteAgentError: If the agent returns an error for the task ID.
-            A2AMessageError: If the response format is invalid or validation fails.
-            AgentVaultError: For other unexpected errors.
-        """
+    async def get_task_status(self, agent_card: AgentCard, task_id: str, key_manager: KeyManager) -> Task:
         logger.info(f"Getting status for task {task_id} on agent: {agent_card.human_readable_id}")
         try:
             auth_headers = self._get_auth_headers(agent_card, key_manager)
             task_get_params = TaskGetParams(id=task_id)
             request_id = f"req-get-{uuid.uuid4()}"
-            request_payload = {
-                "jsonrpc": "2.0",
-                "method": "tasks/get",
-                "params": task_get_params.model_dump(mode='json'),
-                "id": request_id
-            }
-            logger.debug(f"Get task status request payload (id: {request_id}): {request_payload}")
-
-            response_data = await self._make_request(
-                'POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload
-            )
-
-            if not isinstance(response_data, dict):
-                 raise A2AMessageError(f"Invalid response format: Expected dictionary, got {type(response_data)}")
+            request_params = task_get_params.model_dump(mode='json', by_alias=True)
+            request_payload = {"jsonrpc": "2.0", "method": "tasks/get", "params": request_params, "id": request_id}
+            logger.debug(f"Get task status request payload (id: {request_id})")
+            response_data = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload)
+            if not isinstance(response_data, dict): raise A2AMessageError(f"Invalid response format: Expected dictionary, got {type(response_data)}")
             if "error" in response_data:
-                error_data = response_data["error"]
-                logger.error(f"Agent returned error getting status for task {task_id}: {error_data}")
-                err_code = error_data.get("code", -1)
-                err_msg = error_data.get("message", "Unknown remote agent error")
-                err_data = error_data.get("data")
+                error_data = response_data["error"]; logger.error(f"Agent returned error getting status for task {task_id}: {error_data}")
+                err_code = error_data.get("code", -1); err_msg = error_data.get("message", "Unknown remote agent error"); err_data = error_data.get("data")
                 raise A2ARemoteAgentError(message=err_msg, status_code=err_code, response_body=err_data)
-            if "result" not in response_data:
-                raise A2AMessageError("Invalid response format: missing 'result' key.")
-
-            try:
-                # GetTaskResult is an alias for Task model
-                task_object = GetTaskResult.model_validate(response_data["result"])
-                logger.info(f"Successfully retrieved status for task {task_id}. State: {task_object.state}")
-                return task_object
-            except pydantic.ValidationError as e:
-                raise A2AMessageError(f"Failed to validate task status result: {e}") from e
-
+            if "result" not in response_data: raise A2AMessageError("Invalid response format: missing 'result' key.")
+            try: task_object = GetTaskResult.model_validate(response_data["result"]); logger.info(f"Successfully retrieved status for task {task_id}. State: {task_object.state}"); return task_object
+            except pydantic.ValidationError as e: raise A2AMessageError(f"Failed to validate task status result: {e}") from e
         except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e:
-            logger.error(f"A2A error getting status for task {task_id}: {e}")
+            logger.error(f"A2A error getting status for task {task_id}: {type(e).__name__}: {e}")
             raise
         except KeyManagementError as e:
              logger.error(f"Key management error getting status for task {task_id}: {e}")
@@ -437,92 +221,46 @@ class AgentVaultClient:
             logger.exception(f"Unexpected error getting status for task {task_id} on agent {agent_card.human_readable_id}: {e}")
             raise A2AError(f"An unexpected error occurred getting task status: {e}") from e
 
-
-    async def terminate_task(
-        self,
-        agent_card: AgentCard,
-        task_id: str,
-        key_manager: KeyManager
-    ) -> bool:
-        """
-        Requests the termination (cancellation) of a running task using the 'tasks/cancel' method.
-
-        Args:
-            agent_card: The AgentCard of the target agent.
-            task_id: The ID of the task to terminate.
-            key_manager: The KeyManager instance to retrieve authentication keys.
-
-        Returns:
-            True if the termination request was successfully acknowledged by the agent.
-
-        Raises:
-            A2AAuthenticationError: If required authentication key is missing or invalid.
-            A2AConnectionError: If connection to the agent endpoint fails.
-            A2ARemoteAgentError: If the agent returns an error for the task ID.
-            A2AMessageError: If the response format is invalid or validation fails.
-            AgentVaultError: For other unexpected errors not caught by the generic handler.
-        """
+    async def terminate_task(self, agent_card: AgentCard, task_id: str, key_manager: KeyManager) -> bool:
         logger.info(f"Requesting termination for task {task_id} on agent: {agent_card.human_readable_id}")
         try:
             auth_headers = self._get_auth_headers(agent_card, key_manager)
             task_cancel_params = TaskCancelParams(id=task_id)
             request_id = f"req-cancel-{uuid.uuid4()}"
-            request_payload = {
-                "jsonrpc": "2.0",
-                "method": "tasks/cancel",
-                "params": task_cancel_params.model_dump(mode='json'),
-                "id": request_id
-            }
-            logger.debug(f"Terminate task request payload (id: {request_id}): {request_payload}")
-
-            response_data = await self._make_request(
-                'POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload
-            )
-
-            if not isinstance(response_data, dict):
-                 raise A2AMessageError(f"Invalid response format: Expected dictionary, got {type(response_data)}")
+            request_params = task_cancel_params.model_dump(mode='json', by_alias=True)
+            request_payload = {"jsonrpc": "2.0", "method": "tasks/cancel", "params": request_params, "id": request_id}
+            logger.debug(f"Terminate task request payload (id: {request_id})")
+            response_data = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload)
+            if not isinstance(response_data, dict): raise A2AMessageError(f"Invalid response format: Expected dictionary, got {type(response_data)}")
             if "error" in response_data:
-                error_data = response_data["error"]
-                logger.error(f"Agent returned error terminating task {task_id}: {error_data}")
-                err_code = error_data.get("code", -1)
-                err_msg = error_data.get("message", "Unknown remote agent error")
-                err_data = error_data.get("data")
+                error_data = response_data["error"]; logger.error(f"Agent returned error terminating task {task_id}: {error_data}")
+                err_code = error_data.get("code", -1); err_msg = error_data.get("message", "Unknown remote agent error"); err_data = error_data.get("data")
                 raise A2ARemoteAgentError(message=err_msg, status_code=err_code, response_body=err_data)
-            if "result" not in response_data:
-                raise A2AMessageError("Invalid response format: missing 'result' key.")
-
-            try:
-                # Validate the result structure
-                TaskCancelResult.model_validate(response_data["result"])
-                # We could check result_obj.success here, but requirement is just to return True on success
-            except pydantic.ValidationError as e:
-                raise A2AMessageError(f"Failed to validate terminate task result: {e}") from e
-
+            if "result" not in response_data: raise A2AMessageError("Invalid response format: missing 'result' key.")
+            try: TaskCancelResult.model_validate(response_data["result"])
+            except pydantic.ValidationError as e: raise A2AMessageError(f"Failed to validate terminate task result: {e}") from e
             logger.info(f"Termination request for task {task_id} acknowledged by agent {agent_card.human_readable_id}.")
-            return True # Successful acknowledgement
-
+            return True
         except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e:
-            logger.error(f"A2A error terminating task {task_id}: {e}")
+            logger.error(f"A2A error terminating task {task_id}: {type(e).__name__}: {e}")
             raise
         except KeyManagementError as e:
              logger.error(f"Key management error terminating task {task_id}: {e}")
              raise A2AAuthenticationError(f"Authentication failed: {e}") from e
         except Exception as e:
             logger.exception(f"Unexpected error terminating task {task_id} on agent {agent_card.human_readable_id}: {e}")
-            # Adhering to requirement to return False on unexpected exception
             return False
 
     # --- Private Helper Methods ---
-    # (_get_auth_headers and _make_request implementations omitted for brevity - assumed correct)
-    def _get_auth_headers(
-        self,
-        agent_card: AgentCard,
-        key_manager: KeyManager
-    ) -> Dict[str, str]:
-        """(Implementation assumed correct from previous steps)"""
-        supported_schemes = [auth.scheme for auth in agent_card.auth_schemes]
-        logger.debug(f"Agent supports auth schemes: {supported_schemes}")
-        api_key_scheme: Optional[AgentAuthentication] = next((s for s in agent_card.auth_schemes if s.scheme == 'apiKey'), None)
+    def _get_auth_headers(self, agent_card: AgentCard, key_manager: KeyManager) -> Dict[str, str]:
+        """(Docstring unchanged)"""
+        # --- FIX: Access agent_card.auth_schemes (snake_case) ---
+        agent_schemes = agent_card.auth_schemes
+        supported_schemes_str = [s.scheme for s in agent_schemes] # For logging
+        logger.debug(f"Agent supports auth schemes: {supported_schemes_str}")
+
+        # Check for apiKey FIRST
+        api_key_scheme = next((s for s in agent_schemes if s.scheme == 'apiKey'), None)
         if api_key_scheme:
             service_id = api_key_scheme.service_identifier or agent_card.human_readable_id
             if not service_id: raise A2AAuthenticationError(f"Cannot determine service identifier for apiKey scheme on agent {agent_card.human_readable_id}.")
@@ -531,27 +269,30 @@ class AgentVaultClient:
             if not api_key: raise A2AAuthenticationError(f"Missing API key for service '{service_id}' required by agent '{agent_card.human_readable_id}' (scheme: apiKey).")
             logger.debug(f"Using apiKey scheme for service_id '{service_id}'.")
             return {"X-Api-Key": api_key}
-        elif any(s.scheme == 'none' for s in agent_card.auth_schemes):
+
+        # Check for none SECOND
+        none_scheme_present = any(s.scheme == 'none' for s in agent_schemes)
+        if none_scheme_present:
             logger.debug("Using 'none' authentication scheme.")
             return {}
-        else:
-            raise A2AAuthenticationError(f"No supported authentication scheme found for agent {agent_card.human_readable_id}. Supported by agent: {supported_schemes}. Supported by client: ['apiKey', 'none'].")
+
+        # If NEITHER apiKey NOR none was found, THEN raise error
+        client_supported = ['apiKey', 'none']
+        log_msg = (f"No compatible authentication scheme found for agent {agent_card.human_readable_id}. "
+                   f"Agent supports: {supported_schemes_str}. Client supports: {client_supported}.")
+        logger.error(log_msg)
+        raise A2AAuthenticationError(log_msg)
 
     async def _make_request(
-        self,
-        method: str,
-        url: str,
-        headers: Optional[Dict[str, str]] = None,
-        json_payload: Optional[Dict[str, Any]] = None,
-        stream: bool = False
+        self, method: str, url: str, headers: Optional[Dict[str, str]] = None,
+        json_payload: Optional[Dict[str, Any]] = None, stream: bool = False
     ) -> Union[Dict[str, Any], AsyncGenerator[bytes, None]]:
-        """(Implementation assumed correct from previous steps)"""
+        """(Implementation unchanged)"""
         request_kwargs = {"method": method, "url": url, "headers": headers or {}, "json": json_payload}
-        log_payload_str = f" Payload: {json.dumps(json_payload)}" if json_payload else ""
-        logger.debug(f"Making A2A request: {method} {url}{log_payload_str}")
+        logger.debug(f"Making A2A request: {method} {url}") # Simplified logging
         try:
             if stream:
-                response = await self._http_client.stream(**request_kwargs) # type: ignore[arg-type]
+                response = await self._http_client.stream(**request_kwargs)
                 try:
                     response.raise_for_status()
                     logger.debug(f"Stream request successful ({response.status_code}), returning byte stream.")
@@ -565,13 +306,13 @@ class AgentVaultClient:
                      logger.error(f"Error setting up stream for {method} {url}: {e_inner}", exc_info=True)
                      raise A2AConnectionError(f"Failed to establish SSE stream: {e_inner}") from e_inner
             else:
-                response = await self._http_client.request(**request_kwargs) # type: ignore[arg-type]
+                response = await self._http_client.request(**request_kwargs)
                 response.raise_for_status()
                 try:
                     response_data = response.json()
-                    log_resp_data = response_data; log_resp_str = json.dumps(log_resp_data)
-                    if isinstance(log_resp_data, dict) and len(log_resp_str) > 500: log_resp_data = log_resp_str[:500] + "..."
-                    logger.debug(f"Request successful ({response.status_code}). Response JSON: {log_resp_data}")
+                    log_resp_str = f"{response_data}"
+                    if len(log_resp_str) > 500: log_resp_str = log_resp_str[:500] + "..."
+                    logger.debug(f"Request successful ({response.status_code}). Response: {log_resp_str}")
                     return response_data
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to decode JSON response from {method} {url}: {e}. Response text: {response.text[:200]}...")
@@ -581,6 +322,11 @@ class AgentVaultClient:
         except httpx.NetworkError as e: logger.error(f"Network error for {method} {url}: {e}"); raise A2AConnectionError(f"Network error: {e}") from e
         except httpx.HTTPStatusError as e: logger.error(f"HTTP error on request {method} {url}: {e.response.status_code}"); raise A2ARemoteAgentError(message=f"HTTP error {e.response.status_code} for {url}: {e.response.text}", status_code=e.response.status_code, response_body=e.response.text) from e
         except httpx.RequestError as e: logger.error(f"HTTP request error for {method} {url}: {e}"); raise A2AConnectionError(f"HTTP request failed: {e}") from e
-        except Exception as e: logger.exception(f"Unexpected error during request {method} {url}: {e}"); raise A2AError(f"An unexpected error occurred during the request: {e}") from e
+        except (A2AMessageError) as e:
+             logger.error(f"A2A message error during request processing: {e}")
+             raise
+        except Exception as e:
+            logger.exception(f"Unexpected error during request {method} {url}: {e}")
+            raise A2AError(f"An unexpected error occurred during the request: {e}") from e
 
 #
