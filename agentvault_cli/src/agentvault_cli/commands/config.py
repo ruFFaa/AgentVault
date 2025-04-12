@@ -154,3 +154,47 @@ def get_key(ctx: click.Context, service_id: str, show_key: bool):
         utils.display_error(f"An unexpected error occurred while getting key source: {e}")
         logger.exception(f"Unexpected error in config get for service '{service_id}'")
         ctx.exit(1)
+
+
+@config_group.command("list")
+@click.pass_context
+def list_keys(ctx: click.Context):
+    """
+    List services with keys found via environment variables or key files.
+
+    This command shows keys loaded during the KeyManager initialization.
+    It does not actively scan the OS keyring unless a key from the keyring
+    was previously accessed via 'config get' or an agent run.
+    """
+    if not _agentvault_lib_imported or key_manager is None:
+        utils.display_error("Cannot list keys: Failed to import the 'agentvault' library or KeyManager.")
+        ctx.exit(1)
+
+    try:
+        # Instantiate KeyManager without enabling keyring for this specific list command,
+        # as we only want to show keys explicitly loaded from env/file initially.
+        # If we wanted to show keyring keys that *might* exist, we'd need a different
+        # approach in KeyManager or enable keyring here and call get_key on potential services.
+        manager = key_manager.KeyManager(use_keyring=False)
+
+        # Access the sources identified during initialization
+        sources = manager._key_sources
+
+        if not sources:
+            utils.display_info("No keys found configured via environment variables or specified key files.")
+            utils.display_info("(Keys stored only in the OS keyring will not be listed here unless previously accessed.)")
+            return
+
+        # Prepare data for the table
+        # Sort by service ID for consistent output
+        data = sorted([[service_id, source.upper()] for service_id, source in sources.items()])
+
+        utils.display_table("Configured Key Sources (Env/File)", ["Service ID", "Source"], data)
+        utils.display_info("\nNote: This list shows keys loaded from environment variables or key files.")
+        utils.display_info("Keys stored only in the OS keyring are typically loaded on demand and")
+        utils.display_info("may not appear here unless accessed by 'config get' or an agent run.")
+
+    except Exception as e:
+        utils.display_error(f"An unexpected error occurred while listing key sources: {e}")
+        logger.exception("Unexpected error in config list")
+        ctx.exit(1)
