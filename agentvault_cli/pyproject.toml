@@ -1,28 +1,56 @@
-[tool.poetry]
-name = "agentvault-cli"
-version = "0.1.0"
-description = "Command-line client for the AgentVault ecosystem."
-authors = ["AgentVault Contributors <agentvault@proton.me>"] # Placeholder - update as needed
-license = "Apache-2.0"
-readme = "README.md"
-packages = [{include = "agentvault_cli", from = "src"}]
+# --- ADDED [project] section for PEP 621 compatibility ---
+    [project]
+        name = "agentvault-cli"
+        version = "0.1.0"
+        description = "Command-line client for the AgentVault ecosystem."
+        authors = [{ name = "AgentVault Contributors", email = "agentvault@proton.me" }]
+        license = "Apache-2.0"
+        readme = "README.md"
+        requires-python = ">=3.10,<3.12"
 
-[tool.poetry.dependencies]
-python = ">=3.10,<3.12"
-click = ">=8.0,<9.0"
-httpx = ">=0.27,<0.29" # Keep compatible with library if possible
-rich = ">=13.0,<15.0"
-# Path dependency to the core library
-agentvault = {path = "../agentvault_library", develop = true}
+        dependencies = [
+            "click>=8.0,<9.0",
+            "httpx>=0.27,<0.29",
+            "rich>=13.0,<15.0",
+            # Path dependency needs special handling for PEP 621, often omitted here
+            # and handled by build backend or installation tooling.
+            # For editable installs with pip, the path is specified on the command line.
+            # "agentvault @ file:///${PROJECT_ROOT}/agentvault_library" # Example syntax, might vary
+        ]
 
-[tool.poetry.group.dev.dependencies]
-pytest = ">=8.0,<9.0" # Align with library
-pytest-mock = ">=3.12,<4.0" # Align with library
+        [project.optional-dependencies]
+        dev = [
+            "pytest>=8.0,<9.0",
+            "pytest-mock>=3.12,<4.0",
+        ]
+    # --- END ADDED [project] section ---
 
-[tool.poetry.scripts]
-# Defines the command that will be created when the package is installed
-agentvault_cli = "agentvault_cli.main:cli"
+    [build-system]
+    requires = ["poetry-core>=1.0.0"]
+    build-backend = "poetry.core.masonry.api"
 
-[build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+    # --- Poetry Specific Configuration ---
+    [tool.poetry]
+    name = "agentvault-cli"
+    version = "0.1.0"
+    description = "Command-line client for the AgentVault ecosystem."
+    authors = ["AgentVault Contributors <agentvault@proton.me>"] # Placeholder - update as needed
+    license = "Apache-2.0"
+    readme = "README.md"
+    packages = [{include = "agentvault_cli", from = "src"}]
+
+    [tool.poetry.dependencies]
+    python = ">=3.10,<3.12"
+    click = ">=8.0,<9.0"
+    httpx = ">=0.27,<0.29" # Keep compatible with library if possible
+    rich = ">=13.0,<15.0"
+    # Path dependency to the core library
+    agentvault = {path = "../agentvault_library", develop = true}
+
+    [tool.poetry.group.dev.dependencies]
+    pytest = ">=8.0,<9.0" # Align with library
+    pytest-mock = ">=3.12,<4.0" # Align with library
+
+    [tool.poetry.scripts]
+    # Defines the command that will be created when the package is installed
+    agentvault_cli = "agentvault_cli.main:cli"

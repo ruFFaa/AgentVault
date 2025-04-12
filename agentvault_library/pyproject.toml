@@ -1,26 +1,36 @@
-[project]
-    name = "agentvault"
-    version = "0.1.0"
-    description = "Core Python client library for A2A protocol, MCP, and secure local key management." # Added description
-    authors = [{ name = "Your Name", email = "you@example.com" }] # Replace with actual details
-    license = "Apache-2.0" # Added license field
-    readme = "README.md" # Added readme field
+# --- ADDED [project] section for PEP 621 compatibility ---
+    [project]
+        name = "agentvault"
+        version = "0.1.0"
+        description = "Core Python client library for A2A protocol, MCP, and secure local key management." # Added description
+        authors = [{ name = "Your Name", email = "you@example.com" }] # Replace with actual details
+        license = "Apache-2.0" # Added license field
+        readme = "README.md" # Added readme field
 
-    requires-python = ">=3.10,<3.12"
+        requires-python = ">=3.10,<3.12"
 
-    # Core Dependencies
-    dependencies = [
-        # httpx extras specified here for standard build if needed
-        "httpx[http2,brotli]>=0.27,<0.28",
-        "pydantic>=2.0,<3.0",
-        "python-dotenv>=1.0,<2.0"
-        # keyring is optional, handled via extras
-    ]
+        # Core Dependencies
+        dependencies = [
+            # httpx extras specified here for standard build if needed
+            "httpx[http2,brotli]>=0.27,<0.28",
+            "pydantic>=2.0,<3.0",
+            "python-dotenv>=1.0,<2.0"
+            # keyring is optional, handled via extras
+        ]
 
-    # Optional dependencies defined as extras
-    [project.optional-dependencies]
-    os_keyring = ["keyring>=24,<25"]
+        # Optional dependencies defined as extras
+        [project.optional-dependencies]
+        os_keyring = ["keyring>=24,<25"]
+        # --- ADDED dev extra for pip install -e .[dev] ---
+        dev = [
+            "pytest>=7.0,<9.0",
+            "pytest-asyncio>=0.23,<0.24",
+            "pytest-mock>=3.12,<4.0",
+            "respx>=0.20,<0.21",
+        ]
+        # --- END ADDED dev extra ---
 
+    # --- Build System ---
     [build-system]
     requires = ["poetry-core>=1.0.0"]
     build-backend = "poetry.core.masonry.api"
@@ -48,9 +58,9 @@
 
     # Development dependencies
     [tool.poetry.group.dev.dependencies]
-    pytest = ">=7.0,<9.0"
+    pytest = ">=7.0,<9.0" # Align with library
     pytest-asyncio = ">=0.23,<0.24" # Ensure this is present
-    pytest-mock = ">=3.12,<4.0"
+    pytest-mock = ">=3.12,<4.0" # Align with library
     respx = ">=0.20,<0.21" # Ensure this is present
 
     #
