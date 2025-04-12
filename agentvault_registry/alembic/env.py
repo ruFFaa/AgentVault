@@ -1,13 +1,19 @@
 import os
 import sys
-import asyncio # Import asyncio
+import asyncio
+# --- ADDED: Import logging ---
+import logging
+# --- END ADDED ---
 from logging.config import fileConfig
-# --- MODIFIED: Import create_engine for sync, AsyncEngine/async_engine_from_config for async ---
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine # Keep sync engine import for offline mode if needed
 from sqlalchemy import pool
-from sqlalchemy.ext.asyncio import AsyncEngine, async_engine_from_config # Import async helpers
-# --- END MODIFIED ---
+from sqlalchemy.ext.asyncio import AsyncEngine, async_engine_from_config
 from alembic import context
+
+# --- ADDED: Get logger instance ---
+log = logging.getLogger(__name__) # Use 'log' to avoid potential clash with logging config below
+# --- END ADDED ---
+
 
 # Add project source directory to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -26,7 +32,13 @@ except ImportError as e:
     sys.exit(1)
 
 config = context.config
-if config.config_file_name is not None: fileConfig(config.config_file_name)
+# Interpret the config file for Python logging.
+# This line sets up loggers based on alembic.ini.
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+# Note: The logger obtained above might be overridden by fileConfig if names clash.
+# Using 'log' instead of 'logger' avoids this potential issue.
+
 target_metadata = Base.metadata
 
 def get_url():
@@ -34,21 +46,20 @@ def get_url():
     db_url = config.get_main_option("sqlalchemy.url")
     if not db_url: db_url = settings.DATABASE_URL
     if not db_url: raise ValueError("DATABASE_URL environment variable must be set.")
-    # --- ADDED: Ensure URL uses asyncpg dialect ---
     if not db_url.startswith("postgresql+asyncpg"):
         if db_url.startswith("postgresql"):
-            db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-            logger.warning(f"Database URL adjusted to use asyncpg: {db_url}")
+            db_url_adjusted = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            # --- MODIFIED: Use 'log' instead of 'logger' ---
+            log.warning(f"Database URL adjusted to use asyncpg: {db_url_adjusted}")
+            # --- END MODIFIED ---
+            return db_url_adjusted # Return the adjusted URL
         else:
             raise ValueError(f"Database URL does not appear to be a PostgreSQL URL: {db_url}")
-    # --- END ADDED ---
-    return db_url
+    return db_url # Return original if already correct
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
-    # --- MODIFIED: Use get_url() to ensure correct dialect prefix if needed ---
     url = get_url()
-    # --- END MODIFIED ---
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -66,32 +77,25 @@ def do_run_migrations(connection):
 
 async def run_migrations_online() -> None:
     """Run migrations in 'online' mode using an async engine."""
-    # --- MODIFIED: Use async_engine_from_config ---
-    # Get config section, ensuring URL uses asyncpg
     connectable_cfg = config.get_section(config.config_ini_section)
     db_url = get_url() # Get potentially adjusted URL
     if connectable_cfg:
-        connectable_cfg["sqlalchemy.url"] = db_url # Ensure config dict uses correct URL
+        connectable_cfg["sqlalchemy.url"] = db_url
     else:
-        connectable_cfg = {"sqlalchemy.url": db_url} # Create if missing
+        connectable_cfg = {"sqlalchemy.url": db_url}
 
-    # Create an AsyncEngine explicitly
     connectable = async_engine_from_config(
         connectable_cfg,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
-        # future=True is default in SQLAlchemy 2.0+ engines
     )
-    # --- END MODIFIED ---
 
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
 
     await connectable.dispose()
 
-# --- MODIFIED: Use asyncio.run for online mode ---
 if context.is_offline_mode():
     run_migrations_offline()
 else:
     asyncio.run(run_migrations_online())
-# --- END MODIFIED ---

@@ -1,8 +1,8 @@
 # AgentVault
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![PyPI version](https://badge.fury.io/py/agentvault.svg)](https://badge.fury.io/py/agentvault) <!-- Placeholder - Needs actual PyPI release -->
-[![Python Version](https://img.shields.io/pypi/pyversions/agentvault.svg)](https://pypi.org/project/agentvault/) <!-- Placeholder -->
+[![PyPI version](https://badge.fury.io/py/agentvault.svg)](https://pypi.org/project/agentvault/)
+[![Python Version](https://img.shields.io/pypi/pyversions/agentvault.svg)](https://pypi.org/project/agentvault/)
 <!-- Add Build Status, Coverage badges later -->
 
 **AgentVault: Secure, Decentralized AI Agent Interoperability**
@@ -17,15 +17,15 @@ Built upon emerging open standards like the **Agent-to-Agent (A2A)** protocol an
 
 1.  **Local Key Management:** Your primary AI provider API keys stay securely on your local machine.
 2.  **Decentralized Execution:** Remote agents run on their providers' infrastructure.
-3.  **Standardized Communication:** Uses A2A protocol and MCP.
+3.  **Standardized Communication:** Uses A2A protocol and MCP concepts.
 4.  **Open Discovery:** Central registry for Agent Card metadata only.
 5.  **Open Source:** Core components are Apache 2.0 licensed.
 
 **Phase 1 Components:**
 
-*   **`agentvault` (Core Python Library):** A2A client, MCP context, secure local key management. ([agentvault_library/README.md](agentvault_library/README.md))
-*   **`agentvault-registry` (Backend API):** FastAPI backend for Agent Card discovery and developer submissions. ([agentvault_registry/README.md](agentvault_registry/README.md))
-*   **`agentvault-cli` (CLI Client):** Reference client using the library. ([agentvault_cli/README.md](agentvault_cli/README.md))
+*   **`agentvault` (Core Python Library):** A2A client, MCP context, secure local key management. ([agentvault_library/README.md](agentvault_library/README.md)) - **Available on PyPI!**
+*   **`agentvault-registry` (Backend API):** FastAPI backend for Agent Card discovery and developer submissions. ([agentvault_registry/README.md](agentvault_registry/README.md)) - **Live Dev Instance Available!**
+*   **`agentvault-cli` (CLI Client):** Reference client using the library. ([agentvault_cli/README.md](agentvault_cli/README.md)) - *(Coming soon to PyPI)*
 
 ## Security Model & Trust
 
@@ -77,15 +77,29 @@ AgentVault prioritizes user control over API keys, but operating within a decent
 
 ### Installation
 
-*(Note: Assumes `agentvault-cli` is published to PyPI. Until then, installation would be from source using the Development Setup instructions below).*
+1.  **Install the Core Library:**
+    ```bash
+    pip install agentvault
+    ```
+    *(Optional: Install keyring support: `pip install agentvault[os_keyring]`)*
 
-```bash
-# Install the CLI tool (this will also install the agentvault library)
-pip install agentvault-cli
+2.  **Install the CLI:** *(Note: CLI is not yet on PyPI, install from source for now)*
+    ```bash
+    # Clone the repo if you haven't already
+    # git clone https://github.com/SecureAgentTools/AgentVault.git
+    # cd AgentVault
 
-# Verify installation
-agentvault_cli --version
-```
+    # Activate your project's virtual environment (e.g., .venv)
+    # source .venv/bin/activate # or .\.venv\Scripts\Activate.ps1
+
+    # Install CLI editably
+    pip install -e ./agentvault_cli
+    ```
+
+3.  **Verify Installation:**
+    ```bash
+    agentvault_cli --version
+    ```
 
 ### Configuration: Setting Up Your Local API Keys
 
@@ -94,7 +108,7 @@ The CLI needs access to API keys required by the remote agents you want to use. 
 **Recommended Methods:**
 
 1.  **OS Keyring (Most Secure - If Available):**
-    *   Requires the `keyring` library and its backends to be installed and configured on your OS. Install the extra: `pip install agentvault-library[os_keyring]` (or `pip install agentvault[os_keyring]` if installing the combined package later).
+    *   Requires the `keyring` library and its backends to be installed and configured on your OS. Install the extra: `pip install agentvault[os_keyring]`.
     *   Set a key:
         ```bash
         # You will be prompted securely for the key value
@@ -127,43 +141,70 @@ agentvault_cli config get <service_id>
 agentvault_cli config list
 ```
 
+### Using the Live Development Registry
+
+A public registry instance is currently running for development and testing purposes at:
+
+**`https://agentvault-registry-api.onrender.com`**
+
+**Important Notes:**
+
+*   This instance runs on **Render's free tier**.
+*   It **will spin down after 15 minutes of inactivity**. The *first request* after it spins down may take **30-50 seconds or longer** to respond while the service restarts. Subsequent requests will be fast. Please account for this delay during testing.
+*   The database may be periodically reset during this development phase. Do not rely on submitted Agent Cards persisting long-term on this instance yet.
+
+To use this registry with the CLI, either set the environment variable:
+
+```bash
+# PowerShell
+$env:AGENTVAULT_REGISTRY_URL = "https://agentvault-registry-api.onrender.com"
+
+# Bash/Zsh
+export AGENTVAULT_REGISTRY_URL="https://agentvault-registry-api.onrender.com"
+```
+
+Or use the `--registry` flag with CLI commands:
+
+```bash
+agentvault_cli discover --registry https://agentvault-registry-api.onrender.com
+```
+
 ## Usage (`agentvault-cli`)
 
 ### Discovering Agents
 
 ```bash
-# List all agents from the default registry (paginated)
-agentvault_cli discover
+# List agents from the live development registry (allow for initial delay!)
+agentvault_cli discover --registry https://agentvault-registry-api.onrender.com
 
-# Search agents mentioning "weather"
-agentvault_cli discover "weather"
-
-# Search using a specific registry URL and limit results
-agentvault_cli discover --registry https://my-private-registry.com/api --limit 10 "database"
+# Search agents mentioning "weather" on the live registry
+agentvault_cli discover --registry https://agentvault-registry-api.onrender.com "weather"
 ```
 
 ### Running an Agent Task
+
+*(Note: Requires an agent compatible with AgentVault's A2A implementation)*
 
 1.  **Identify the Agent:** Find the agent's ID from `discover`, or get its Agent Card URL or file path.
 2.  **Ensure Keys are Configured:** Use `agentvault_cli config get <service_id>` to check if the key needed for the agent's authentication (check its Agent Card `authSchemes`) is set up locally.
 3.  **Run the Task:**
 
     ```bash
-    # Run using agent ID found via discover
-    agentvault_cli run --agent <agent_card_id> --input "What is the weather in London?"
+    # Run using agent ID found via discover (using the live registry)
+    agentvault_cli run --registry https://agentvault-registry-api.onrender.com --agent <agent_id> --input "What is the weather in London?"
 
-    # Run using agent card URL
+    # Run using agent card URL (doesn't need registry)
     # Note: Use '--agent' for ID, URL, or File Path
     agentvault_cli run --agent https://some-agent.com/agent-card.json --input "Summarize this text: ..."
 
-    # Run using local agent card file
+    # Run using local agent card file (doesn't need registry)
     agentvault_cli run --agent ./path/to/downloaded-card.json --input "Translate to French: Hello"
 
     # Run with input from a file (prefix path with '@')
-    agentvault_cli run --agent <agent_id> --input @./my_document.txt
+    agentvault_cli run --agent <agent_id_or_url_or_file> --input @./my_document.txt
 
     # Run with MCP context from a JSON file (Syntax TBC based on MCP implementation)
-    # agentvault_cli run --agent <agent_id> --input "Analyze this data" --context-file ./context.json
+    # agentvault_cli run --agent <agent_id_or_url_or_file> --input "Analyze this data" --context-file ./context.json
     ```
 
 The CLI will connect to the remote agent, initiate the task using the A2A protocol via the `agentvault` library, display status updates, and show the final result or artifact.
@@ -173,7 +214,7 @@ The CLI will connect to the remote agent, initiate the task using the A2A protoc
 1.  **Build Your Agent:** Create your agent logic using any language/framework.
 2.  **Expose an A2A Endpoint:** Create an HTTPS web server endpoint that understands and responds to A2A protocol messages (JSON-RPC requests like `tasks/send`, `tasks/get`, etc., potentially serving SSE for `tasks/sendSubscribe`). Implement your chosen authentication mechanism(s).
 3.  **Create Agent Card:** Generate a JSON file matching the A2A Agent Card schema, accurately describing your agent, its capabilities, the A2A endpoint URL, and required authentication schemes.
-4.  **Publish (Phase 1):** Use the AgentVault Registry API (e.g., via `curl` or a custom script) to submit your `agent-card.json`. You will need to obtain a Developer API Key from the registry administrators first. Authenticate your API requests using the `X-Api-Key` header.
+4.  **Publish (Phase 1):** Use the AgentVault Registry API (e.g., via `curl` or a custom script) to submit your `agent-card.json`. You will need to obtain a Developer API Key from the registry administrators first (process TBD - contact maintainers for now). Authenticate your API requests using the `X-Api-Key` header.
 
 *(Reference server implementations and detailed developer guides are planned for future phases).*
 
@@ -181,7 +222,7 @@ The CLI will connect to the remote agent, initiate the task using the A2A protoc
 
 If you want to contribute to AgentVault itself:
 
-1.  Clone the main repository: `git clone <repository_url>`
+1.  Clone the main repository: `git clone https://github.com/SecureAgentTools/AgentVault.git`
 2.  `cd agentvault`
 3.  **Crucially:** Ensure you have the correct Python version (>=3.10, <3.12) and Poetry installed.
 4.  **Configure Poetry for In-Project Environment:**
