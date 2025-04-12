@@ -90,9 +90,40 @@ class KeyManager:
         pass
 
     def _load_from_env(self) -> None:
-        """Loads keys from environment variables based on the prefix."""
-        # Implementation will be added in REQ-LIB-KEY-002
-        pass
+        """
+        Loads keys from environment variables based on the prefix.
+
+        Keys loaded from environment variables will only be added if a key
+        for the same service ID hasn't already been loaded from a file.
+        """
+        logger.debug(f"Attempting to load keys from environment variables with prefix '{self.env_prefix}'...")
+        prefix_len = len(self.env_prefix)
+        loaded_count = 0
+        for env_var, value in os.environ.items():
+            if env_var.startswith(self.env_prefix):
+                # Extract the part after the prefix as the service ID
+                service_id_part = env_var[prefix_len:]
+                if not service_id_part:
+                    logger.warning(f"Skipping environment variable '{env_var}' with empty service ID part.")
+                    continue
+
+                # Normalize to lowercase for consistent key storage
+                normalized_id = service_id_part.lower()
+
+                # Respect priority: Only load if not already loaded from file
+                if normalized_id not in self._keys:
+                    if value: # Ensure the key value is not empty
+                        self._keys[normalized_id] = value
+                        self._key_sources[normalized_id] = 'env'
+                        logger.info(f"Loaded key for service '{normalized_id}' from environment variable.")
+                        loaded_count += 1
+                    else:
+                        logger.warning(f"Environment variable '{env_var}' found but has an empty value. Skipping.")
+                else:
+                    logger.debug(f"Key for service '{normalized_id}' already loaded from '{self._key_sources.get(normalized_id)}'. Skipping environment variable.")
+
+        logger.debug(f"Finished loading from environment variables. Loaded {loaded_count} new keys.")
+
 
     def _load_from_keyring(self, service_id: str) -> Optional[str]:
         """
@@ -156,10 +187,13 @@ class KeyManager:
 
         # Normalize service_id for keyring service name consistency
         normalized_id = service_id.lower()
-        keyring_service_name = f"agentvault:{normalized_id}" # Use a prefix
+        # Use a distinct service name for keyring to avoid conflicts with other apps
+        # Using 'agentvault' as a namespace seems reasonable.
+        keyring_service_name = f"agentvault:{normalized_id}"
 
         try:
-            logger.info(f"Setting key for service '{normalized_id}' in OS keyring.")
+            logger.info(f"Setting key for service '{normalized_id}' in OS keyring under service name '{keyring_service_name}'.")
+            # Use normalized_id as the 'username' field in keyring for consistency
             keyring.set_password(keyring_service_name, normalized_id, key_value)
             # Optionally update internal state if needed, though keyring is external
             # self._keys[normalized_id] = key_value
