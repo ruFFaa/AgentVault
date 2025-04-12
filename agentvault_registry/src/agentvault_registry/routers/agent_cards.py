@@ -74,7 +74,13 @@ async def list_agent_cards(
     skip: int = Query(0, ge=0, description="Number of records to skip for pagination."),
     limit: int = Query(100, ge=1, le=250, description="Maximum number of records to return."),
     active_only: bool = Query(True, description="Filter for active agent cards only."),
-    search: Optional[str] = Query(None, description="Search term to filter by name or description (case-insensitive).")
+    # --- MODIFIED: Added max_length to search parameter ---
+    search: Optional[str] = Query(
+        None,
+        max_length=100, # Limit search term length
+        description="Search term to filter by name or description (case-insensitive, max 100 chars)."
+    )
+    # --- END MODIFIED ---
 ):
     """
     Public endpoint to list and search for Agent Cards.
