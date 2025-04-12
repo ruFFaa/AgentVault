@@ -85,6 +85,7 @@ ipython_config.py
 .env.*
 !/.env.example # Allow example env files
 .venv/ # Explicitly ignore root venv
+/.venv/
 venv/
 ENV/
 env.bak/
