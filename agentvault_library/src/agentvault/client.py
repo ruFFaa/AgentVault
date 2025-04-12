@@ -25,6 +25,9 @@ from .exceptions import (
 )
 # Import KeyManager
 from .key_manager import KeyManager
+# --- ADDED IMPORT ---
+from .mcp_utils import format_mcp_context
+# --- END ADDED IMPORT ---
 
 logger = logging.getLogger(__name__)
 A2AEvent = Union[TaskStatusUpdateEvent, TaskMessageEvent, TaskArtifactUpdateEvent]
@@ -60,7 +63,7 @@ class AgentVaultClient:
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None: await self.close()
 
     # --- Public A2A Methods ---
-    # (initiate_task, send_message, _process_sse_stream, receive_messages, get_task_status, terminate_task - unchanged from previous correct version)
+    # (receive_messages, _process_sse_stream, get_task_status, terminate_task - unchanged)
     async def initiate_task(
         self, agent_card: AgentCard, initial_message: Message, key_manager: KeyManager,
         mcp_context: Optional[Dict[str, Any]] = None
@@ -69,10 +72,20 @@ class AgentVaultClient:
         try:
             auth_headers = self._get_auth_headers(agent_card, key_manager)
             message_to_send = initial_message
+            # --- MODIFIED MCP HANDLING ---
             if mcp_context:
-                current_metadata = message_to_send.metadata or {}
-                updated_metadata = {**current_metadata, "mcp_context": mcp_context}
-                message_to_send = message_to_send.model_copy(update={'metadata': updated_metadata})
+                formatted_mcp = format_mcp_context(mcp_context)
+                if formatted_mcp is not None:
+                    current_metadata = message_to_send.metadata or {}
+                    # Embed the formatted MCP dict
+                    updated_metadata = {**current_metadata, "mcp_context": formatted_mcp}
+                    message_to_send = message_to_send.model_copy(update={'metadata': updated_metadata})
+                    logger.debug("Successfully formatted and embedded MCP context into message metadata.")
+                else:
+                    # Log warning if formatting failed, but proceed without MCP context
+                    logger.warning("Failed to format provided MCP context data. Proceeding without embedding it.")
+            # --- END MODIFIED MCP HANDLING ---
+
             task_send_params = TaskSendParams(message=message_to_send, id=None)
             request_id = f"req-init-{uuid.uuid4()}"
             request_params = task_send_params.model_dump(mode='json', exclude_none=True, by_alias=True)
@@ -109,10 +122,20 @@ class AgentVaultClient:
         try:
             auth_headers = self._get_auth_headers(agent_card, key_manager)
             message_to_send = message
+            # --- MODIFIED MCP HANDLING ---
             if mcp_context:
-                current_metadata = message_to_send.metadata or {}
-                updated_metadata = {**current_metadata, "mcp_context": mcp_context}
-                message_to_send = message_to_send.model_copy(update={'metadata': updated_metadata})
+                formatted_mcp = format_mcp_context(mcp_context)
+                if formatted_mcp is not None:
+                    current_metadata = message_to_send.metadata or {}
+                    # Embed the formatted MCP dict
+                    updated_metadata = {**current_metadata, "mcp_context": formatted_mcp}
+                    message_to_send = message_to_send.model_copy(update={'metadata': updated_metadata})
+                    logger.debug("Successfully formatted and embedded MCP context into message metadata.")
+                else:
+                    # Log warning if formatting failed, but proceed without MCP context
+                    logger.warning("Failed to format provided MCP context data. Proceeding without embedding it.")
+            # --- END MODIFIED MCP HANDLING ---
+
             task_send_params = TaskSendParams(message=message_to_send, id=task_id)
             request_id = f"req-send-{uuid.uuid4()}"
             request_params = task_send_params.model_dump(mode='json', exclude_none=True, by_alias=True)
@@ -137,7 +160,7 @@ class AgentVaultClient:
              raise A2AAuthenticationError(f"Authentication failed: {e}") from e
         except Exception as e:
             logger.exception(f"Unexpected error sending message to task {task_id} on agent {agent_card.human_readable_id}: {e}")
-            return False
+            return False # Return False on unexpected errors
 
     async def _process_sse_stream(self, byte_stream: AsyncGenerator[bytes, None]) -> AsyncGenerator[Dict[str, Any], None]:
         buffer = ""; current_event_type = None; data_buffer = ""
@@ -249,7 +272,7 @@ class AgentVaultClient:
              raise A2AAuthenticationError(f"Authentication failed: {e}") from e
         except Exception as e:
             logger.exception(f"Unexpected error terminating task {task_id} on agent {agent_card.human_readable_id}: {e}")
-            return False
+            return False # Return False on unexpected errors
 
     # --- Private Helper Methods ---
     def _get_auth_headers(self, agent_card: AgentCard, key_manager: KeyManager) -> Dict[str, str]:
