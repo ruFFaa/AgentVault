@@ -198,10 +198,45 @@ class KeyManager:
     def _load_from_keyring(self, service_id: str) -> Optional[str]:
         """
         Attempts to load a specific key from the OS keyring.
-        Internal method called by get_key if keyring is enabled.
+
+        Internal method called by get_key if keyring is enabled and the key
+        was not found in file or environment variables.
+
+        Args:
+            service_id: The identifier for the service key (case-insensitive).
+
+        Returns:
+            The key string if found in keyring, otherwise None.
         """
-        # Implementation will be added in REQ-LIB-KEY-004
-        return None
+        if not self.use_keyring:
+            logger.debug("Keyring usage is disabled, skipping keyring load.")
+            return None
+        # Check _keyring_installed again in case it failed during init but use_keyring was True
+        if not _keyring_installed or keyring is None:
+            logger.debug("Keyring package not available, skipping keyring load.")
+            return None
+
+        normalized_id = service_id.lower()
+        keyring_service_name = f"agentvault:{normalized_id}"
+
+        try:
+            logger.debug(f"Attempting to load key for service '{normalized_id}' from keyring (service name: '{keyring_service_name}').")
+            key_value = keyring.get_password(keyring_service_name, normalized_id)
+
+            if key_value is not None:
+                logger.info(f"Loaded key for service '{normalized_id}' from OS keyring.")
+                # DO NOT store in self._keys here; let get_key handle caching.
+                return key_value
+            else:
+                logger.debug(f"Key for service '{normalized_id}' not found in OS keyring.")
+                return None
+        except Exception as e:
+            # Catch potential backend errors from keyring
+            logger.error(f"Failed to get key for service '{normalized_id}' from keyring: {e}", exc_info=True)
+            # Optionally raise KeyManagementError here, but returning None might be safer
+            # raise KeyManagementError(f"Failed to get key from keyring for service '{normalized_id}': {e}") from e
+            return None
+
 
     def get_key(self, service_id: str) -> Optional[str]:
         """
