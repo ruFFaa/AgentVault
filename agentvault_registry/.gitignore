@@ -1,9 +1,86 @@
-# Exclude files specific to registry API development
-# Example: Local test database files, generated certs
-local_registry.db
-*.pem
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Environments
+.env
+.env.*
+!.env.example
+.venv
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# VS Code settings
+.vscode/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# FastAPI / Uvicorn instance data
 /instance/
-/dist/
-/build/
-/.eggs/
-/.env # Exclude local env file
+
+# Local database files (example)
+*.db
+local_*.db
+
+# Generated certificates (example)
+*.pem
+*.crt
+*.key
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Temp files
+temp/
+tmp/

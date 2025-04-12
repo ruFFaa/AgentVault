@@ -1,23 +1,39 @@
-[project]
+[tool.poetry]
 name = "agentvault-registry-api"
 version = "0.1.0"
-description = ""
-authors = [{ name = "Your Name", email = "you@example.com" }]
-requires-python = ">=3.10,<3.12"
-dependencies = [
-    "fastapi>=0.111,<0.112",
-    "pydantic>=2.0,<3.0"
-]
+description = "Backend API for the AgentVault Central Registry"
+authors = ["AgentVault Contributors <agentvault@proton.me>"] # Placeholder - update as needed
+license = "Apache-2.0"
+readme = "README.md"
+packages = [{include = "agentvault_registry", from = "src"}]
 
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+[tool.poetry.dependencies]
+python = ">=3.10,<3.12"
+fastapi = ">=0.111,<0.112"
+uvicorn = {extras = ["standard"], version = ">=0.29,<0.35"} # Pinned uvicorn to avoid recent breaking changes if any
+sqlalchemy = ">=2.0,<2.1"
+# Use asyncpg for async database access with FastAPI/SQLAlchemy
+asyncpg = ">=0.29,<0.30"
+# psycopg2-binary = ">=2.9,<2.10" # Alternative if using synchronous SQLAlchemy sessions
+alembic = ">=1.13,<1.14"
+pydantic = ">=2.0,<3.0"
+pydantic-settings = ">=2.0,<2.4"
+passlib = {extras = ["bcrypt"], version = ">=1.7,<1.8"}
+python-dotenv = ">=1.0,<2.0"
+# Add agentvault library dependency later if needed for schema validation directly
+# agentvault = {path = "../agentvault_library", develop = true}
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^7.0.0"
-# You can add more dev tools here, e.g.:
-# flake8 = "^6.0.0"
-# black = "^23.0.0"
+pytest = ">=7.0,<9.0" # Align with library
+pytest-asyncio = ">=0.23,<0.24" # Align with library
+httpx = ">=0.27,<0.29" # Align with library for testing client interactions
 
-[tool.poetry]
-packages = [{include = "agentvault_registry", from = "src"}]
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+# Optional: Add project URLs, classifiers etc. later
+# [tool.poetry.urls]
+# Homepage = "https://github.com/your-org/agentvault"
+# Documentation = "https://your-org.github.io/agentvault"
+# Repository = "https://github.com/your-org/agentvault"
