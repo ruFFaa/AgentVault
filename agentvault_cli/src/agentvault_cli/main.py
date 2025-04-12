@@ -23,14 +23,14 @@ def cli():
 
 # --- Command Imports and Registration ---
 # Import command groups/commands from other modules here
+from .commands import config
 # Placeholder imports - uncomment and adjust as commands are implemented
-# from .commands import config
 # from .commands import discover
 # from .commands import run
 
 # Add the imported commands/groups to the main CLI group
+cli.add_command(config.config_group) # Register the config group
 # Placeholder command additions - uncomment and adjust later
-# cli.add_command(config.config_group, name="config")
 # cli.add_command(discover.discover_command, name="discover")
 # cli.add_command(run.run_command, name="run")
 
