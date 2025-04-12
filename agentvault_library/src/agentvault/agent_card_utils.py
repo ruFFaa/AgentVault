@@ -4,10 +4,13 @@ Utilities for loading, parsing, and validating A2A Agent Cards.
 
 import json
 import httpx
-import pydantic
-from pathlib import Path
+import pathlib
 from typing import Dict, Any, Optional
 
+# Import Pydantic for validation errors
+import pydantic
+
+# Import local models and exceptions
 from .models.agent_card import AgentCard
 from .exceptions import (
     AgentCardError,
@@ -27,22 +30,22 @@ def parse_agent_card_from_dict(data: Dict[str, Any]) -> AgentCard:
         A validated AgentCard Pydantic model instance.
 
     Raises:
-        AgentCardValidationError: If the data fails Pydantic validation.
+        AgentCardValidationError: If the provided data fails Pydantic validation.
         AgentCardError: For any other unexpected errors during parsing.
     """
     try:
-        # Use Pydantic's model_validate for v2 syntax
+        # Use Pydantic V2's model_validate method
         agent_card = AgentCard.model_validate(data)
         return agent_card
     except pydantic.ValidationError as e:
-        # Wrap Pydantic's validation error in our custom exception
+        # Wrap Pydantic's error in our custom exception
         raise AgentCardValidationError(f"Agent Card validation failed: {e}") from e
     except Exception as e:
         # Catch any other unexpected errors during parsing
         raise AgentCardError(f"An unexpected error occurred parsing the Agent Card data: {e}") from e
 
 
-def load_agent_card_from_file(file_path: Path) -> AgentCard:
+def load_agent_card_from_file(file_path: pathlib.Path) -> AgentCard:
     """
     Loads, parses, and validates an Agent Card from a local JSON file.
 
@@ -55,15 +58,11 @@ def load_agent_card_from_file(file_path: Path) -> AgentCard:
     Raises:
         AgentCardError: If the file does not exist, is not a file,
                         cannot be read, or is not valid JSON.
-        AgentCardValidationError: If the loaded JSON data fails validation
-                                  against the AgentCard model.
+        AgentCardValidationError: If the JSON content fails Agent Card validation.
     """
-    if not isinstance(file_path, Path):
-        # Ensure input is a Path object for consistency
-        try:
-            file_path = Path(file_path)
-        except TypeError as e:
-             raise AgentCardError(f"Invalid file path type provided: {type(file_path)}. Must be Path or str.") from e
+    if not isinstance(file_path, pathlib.Path):
+         # Ensure input is a Path object for consistency
+         file_path = pathlib.Path(file_path)
 
     if not file_path.exists():
         raise AgentCardError(f"Agent Card file not found at: {file_path}")
@@ -71,17 +70,19 @@ def load_agent_card_from_file(file_path: Path) -> AgentCard:
         raise AgentCardError(f"Path exists but is not a file: {file_path}")
 
     try:
-        with file_path.open('r', encoding='utf-8') as f:
-            raw_data = f.read()
-            data = json.loads(raw_data)
+        # Read the file content
+        raw_content = file_path.read_text(encoding='utf-8')
+        # Parse the JSON content
+        data = json.loads(raw_content)
     except IOError as e:
-        raise AgentCardError(f"Could not read Agent Card file: {file_path}. Error: {e}") from e
+        raise AgentCardError(f"Failed to read Agent Card file '{file_path}': {e}") from e
     except json.JSONDecodeError as e:
-        raise AgentCardError(f"Invalid JSON in Agent Card file: {file_path}. Error: {e}") from e
+        raise AgentCardError(f"Failed to decode JSON from Agent Card file '{file_path}': {e}") from e
     except Exception as e:
-        raise AgentCardError(f"An unexpected error occurred loading the Agent Card file: {e}") from e
+        # Catch other potential errors during file reading/parsing
+        raise AgentCardError(f"An unexpected error occurred loading Agent Card file '{file_path}': {e}") from e
 
-    # Reuse the dictionary parsing function for validation
+    # Validate the loaded data using the dictionary parser
     return parse_agent_card_from_dict(data)
 
 
@@ -101,54 +102,50 @@ async def fetch_agent_card_from_url(
         A validated AgentCard Pydantic model instance.
 
     Raises:
-        AgentCardFetchError: If there's a network error, an unsuccessful HTTP status code,
-                             or the response is not valid JSON.
-        AgentCardValidationError: If the fetched JSON data fails validation
-                                  against the AgentCard model.
+        AgentCardFetchError: If there's a network error, the server returns a non-2xx
+                             status code, or the response is not valid JSON.
+        AgentCardValidationError: If the fetched JSON content fails Agent Card validation.
     """
-    client_to_use = http_client or httpx.AsyncClient()
-    should_close_client = not http_client # Only close if we created it
+    client_to_use: httpx.AsyncClient
 
-    try:
-        response = await client_to_use.get(url)
+    async def _fetch(client: httpx.AsyncClient):
+        try:
+            response = await client.get(url)
 
-        # Check for HTTP errors (4xx or 5xx)
-        response.raise_for_status()
+            # Check for non-successful status codes
+            response.raise_for_status() # Raises HTTPStatusError for 4xx/5xx
 
-        # Attempt to parse the JSON response
-        data = response.json()
+            # Try parsing the JSON response
+            try:
+                data = response.json()
+            except json.JSONDecodeError as e:
+                raise AgentCardFetchError(f"Failed to decode JSON response from URL '{url}': {e}") from e
 
-    except httpx.RequestError as e:
-        # Handles connection errors, timeouts, etc.
-        raise AgentCardFetchError(f"Network error fetching Agent Card from {url}: {e}") from e
-    except httpx.HTTPStatusError as e:
-        # Handles 4xx/5xx responses after raise_for_status()
-        raise AgentCardFetchError(
-            f"Failed to fetch Agent Card from {url}. "
-            f"Status code: {e.response.status_code}. Response: {e.response.text}"
-        ) from e
-    except json.JSONDecodeError as e:
-        # Handle cases where the response is not valid JSON
-        raise AgentCardFetchError(
-            f"Invalid JSON received from Agent Card URL: {url}. Error: {e}. Response text: {response.text}"
-        ) from e
-    except Exception as e:
-         raise AgentCardFetchError(f"An unexpected error occurred fetching the Agent Card: {e}") from e
-    finally:
-        # Ensure the temporary client is closed if we created it
-        if should_close_client:
-            await client_to_use.aclose()
+            # Validate the fetched data
+            return parse_agent_card_from_dict(data)
 
-    # Reuse the dictionary parsing function for validation
-    # This will raise AgentCardValidationError if validation fails
-    try:
-        return parse_agent_card_from_dict(data)
-    except AgentCardValidationError as e:
-         # Re-raise validation errors specifically from parsing the fetched data
-         raise AgentCardValidationError(f"Validation failed for Agent Card fetched from {url}: {e}") from e
-    except AgentCardError as e:
-         # Catch other parsing errors from parse_agent_card_from_dict
-         raise AgentCardFetchError(f"Error parsing Agent Card fetched from {url}: {e}") from e
+        except httpx.HTTPStatusError as e:
+            # Handle 4xx/5xx errors specifically
+            raise AgentCardFetchError(
+                f"Failed to fetch Agent Card from URL '{url}'. Status: {e.response.status_code}. Response: {e.response.text}",
+                status_code=e.response.status_code,
+                response_body=e.response.text
+            ) from e
+        except httpx.RequestError as e:
+            # Handle network-related errors (DNS, connection, timeout, etc.)
+            raise AgentCardFetchError(f"Network error fetching Agent Card from URL '{url}': {e}") from e
+        except AgentCardValidationError:
+             # Re-raise validation errors directly
+             raise
+        except Exception as e:
+            # Catch any other unexpected errors during fetch/parse
+            raise AgentCardFetchError(f"An unexpected error occurred fetching Agent Card from '{url}': {e}") from e
 
+    if http_client:
+        return await _fetch(http_client)
+    else:
+        # Create a temporary client if none was provided
+        async with httpx.AsyncClient() as temp_client:
+            return await _fetch(temp_client)
 
 #
