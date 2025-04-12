@@ -134,14 +134,12 @@ class AgentVaultClient:
             # 2. Prepare Message (handle potential immutability and MCP context)
             message_to_send = initial_message
             if mcp_context:
-                # Since Message model is frozen, create a new one with updated metadata
                 current_metadata = message_to_send.metadata or {}
                 updated_metadata = {**current_metadata, "mcp_context": mcp_context}
-                # Use model_copy for Pydantic v2 to create a mutable copy and update
                 message_to_send = message_to_send.model_copy(update={'metadata': updated_metadata})
                 logger.debug("Embedded MCP context into message metadata.")
 
-            # 3. Construct Parameters
+            # 3. Construct Parameters (id=None for initiation)
             task_send_params = TaskSendParams(message=message_to_send, id=None)
 
             # 4. Construct JSON-RPC Request Payload
@@ -149,30 +147,20 @@ class AgentVaultClient:
             request_payload = {
                 "jsonrpc": "2.0",
                 "method": "tasks/send",
-                "params": task_send_params.model_dump(mode='json', exclude_none=True), # Use mode='json' for proper serialization
+                "params": task_send_params.model_dump(mode='json', exclude_none=True),
                 "id": request_id
             }
             logger.debug(f"Initiate task request payload (id: {request_id}): {request_payload}")
 
-            # 5. Make the Request (ASSUMES _make_request is implemented and returns parsed dict)
+            # 5. Make the Request (ASSUMES _make_request returns parsed dict for now)
             # TODO: Replace placeholder call once _make_request is implemented
-            # response_data = await self._make_request(
-            #     'POST',
-            #     str(agent_card.url), # Ensure URL is string
-            #     headers=auth_headers,
-            #     json_payload=request_payload
-            # )
-            # --- Placeholder for _make_request ---
-            logger.warning("Using placeholder for _make_request. Response parsing assumes successful call.")
-            # Simulate a successful response structure for now
-            # In reality, this dict would come from the parsed JSON of the HTTP response
-            response_data: Dict[str, Any] = {
-                 "jsonrpc": "2.0",
-                 "result": {"id": f"task-{uuid.uuid4()}"}, # Simulate a successful result
-                 "id": request_id
-            }
-            # --- End Placeholder ---
-
+            response_data = await self._make_request(
+                'POST',
+                str(agent_card.url), # Ensure URL is string
+                headers=auth_headers,
+                json_payload=request_payload
+            )
+            # Placeholder logic is inside _make_request for now
 
             # 6. Parse and Validate Response
             if not isinstance(response_data, dict):
@@ -181,7 +169,6 @@ class AgentVaultClient:
             if "error" in response_data:
                 error_data = response_data["error"]
                 logger.error(f"Agent returned error during task initiation: {error_data}")
-                # TODO: Parse error_data structure more robustly if defined by A2A spec
                 err_code = error_data.get("code", -1)
                 err_msg = error_data.get("message", "Unknown remote agent error")
                 err_data = error_data.get("data")
@@ -225,7 +212,7 @@ class AgentVaultClient:
         mcp_context: Optional[Dict[str, Any]] = None
     ) -> bool:
         """
-        Sends a subsequent message to an existing task.
+        Sends a subsequent message to an existing task using the 'tasks/send' method.
 
         Args:
             agent_card: The AgentCard of the target agent.
@@ -235,18 +222,88 @@ class AgentVaultClient:
             mcp_context: Optional dictionary representing MCP context data.
 
         Returns:
-            True if the message was sent successfully (agent acknowledged), False otherwise.
+            True if the message was sent successfully and acknowledged by the agent.
 
         Raises:
             A2AAuthenticationError: If required authentication key is missing or invalid.
             A2AConnectionError: If connection to the agent endpoint fails.
             A2ARemoteAgentError: If the agent returns an error response for the task ID.
-            A2AMessageError: If there's an issue formatting the request.
-            AgentVaultError: For other unexpected errors.
+            A2AMessageError: If there's an issue formatting the request or parsing the response.
+            AgentVaultError: For other unexpected errors not caught by the generic handler.
         """
         logger.info(f"Sending message to task {task_id} on agent: {agent_card.human_readable_id}")
-        # Implementation will follow in REQ-LIB-A2ACLIENT-003
-        raise NotImplementedError
+        try:
+            # 1. Get Authentication Headers
+            auth_headers = self._get_auth_headers(agent_card, key_manager)
+
+            # 2. Prepare Message
+            message_to_send = message
+            if mcp_context:
+                current_metadata = message_to_send.metadata or {}
+                updated_metadata = {**current_metadata, "mcp_context": mcp_context}
+                message_to_send = message_to_send.model_copy(update={'metadata': updated_metadata})
+                logger.debug("Embedded MCP context into message metadata.")
+
+            # 3. Construct Parameters (with existing task_id)
+            task_send_params = TaskSendParams(message=message_to_send, id=task_id)
+
+            # 4. Construct JSON-RPC Request Payload
+            request_id = f"req-send-{uuid.uuid4()}"
+            request_payload = {
+                "jsonrpc": "2.0",
+                "method": "tasks/send",
+                "params": task_send_params.model_dump(mode='json', exclude_none=True),
+                "id": request_id
+            }
+            logger.debug(f"Send message request payload (id: {request_id}): {request_payload}")
+
+            # 5. Make the Request (ASSUMES _make_request returns parsed dict for now)
+            # TODO: Replace placeholder call once _make_request is implemented
+            response_data = await self._make_request(
+                'POST',
+                str(agent_card.url),
+                headers=auth_headers,
+                json_payload=request_payload
+            )
+            # Placeholder logic is inside _make_request for now
+
+            # 6. Parse and Validate Response
+            if not isinstance(response_data, dict):
+                 raise A2AMessageError(f"Invalid response format: Expected dictionary, got {type(response_data)}")
+
+            if "error" in response_data:
+                error_data = response_data["error"]
+                logger.error(f"Agent returned error sending message to task {task_id}: {error_data}")
+                err_code = error_data.get("code", -1)
+                err_msg = error_data.get("message", "Unknown remote agent error")
+                err_data = error_data.get("data")
+                raise A2ARemoteAgentError(message=err_msg, status_code=err_code, response_body=err_data)
+
+            if "result" not in response_data:
+                raise A2AMessageError("Invalid response format: missing 'result' key.")
+
+            try:
+                # Validate the result structure, even if it's just confirmation
+                TaskSendResult.model_validate(response_data["result"])
+            except pydantic.ValidationError as e:
+                raise A2AMessageError(f"Failed to validate send message result: {e}") from e
+
+            logger.info(f"Message successfully sent to task {task_id} on agent {agent_card.human_readable_id}.")
+            return True # Successful acknowledgement
+
+        except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError) as e:
+            # Re-raise specific A2A errors
+            logger.error(f"A2A error sending message to task {task_id}: {e}")
+            raise
+        except KeyManagementError as e:
+             # Convert KeyManager errors to A2AAuthenticationError
+             logger.error(f"Key management error sending message to task {task_id}: {e}")
+             raise A2AAuthenticationError(f"Authentication failed: {e}") from e
+        except Exception as e:
+            # Catch any other unexpected errors and return False as per requirement
+            logger.exception(f"Unexpected error sending message to task {task_id} on agent {agent_card.human_readable_id}: {e}")
+            return False
+
 
     async def receive_messages(
         self,
@@ -349,7 +406,7 @@ class AgentVaultClient:
         """
         Determines and retrieves the necessary authentication headers for the agent.
 
-        Currently supports only 'apiKey' scheme.
+        Currently supports only 'apiKey' and 'none' schemes.
 
         Args:
             agent_card: The AgentCard containing auth scheme information.
@@ -365,7 +422,7 @@ class AgentVaultClient:
         supported_schemes = [auth.scheme for auth in agent_card.auth_schemes]
         logger.debug(f"Agent supports auth schemes: {supported_schemes}")
 
-        # Prioritize apiKey for now
+        # Prioritize apiKey
         api_key_scheme: Optional[AgentAuthentication] = next(
             (s for s in agent_card.auth_schemes if s.scheme == 'apiKey'), None
         )
@@ -388,14 +445,14 @@ class AgentVaultClient:
                 )
             logger.debug(f"Using apiKey scheme for service_id '{service_id}'.")
             return {"X-Api-Key": api_key} # Standard header for API keys
-        # elif add bearer support...
-        # elif add oauth2 support...
-        else:
-            # Check for 'none' scheme
-            if any(s.scheme == 'none' for s in agent_card.auth_schemes):
-                logger.debug("Using 'none' authentication scheme.")
-                return {} # No auth headers needed
 
+        # Check for 'none' scheme if apiKey not found/used
+        elif any(s.scheme == 'none' for s in agent_card.auth_schemes):
+            logger.debug("Using 'none' authentication scheme.")
+            return {} # No auth headers needed
+
+        # Add support for other schemes (Bearer, OAuth2) later
+        else:
             raise A2AAuthenticationError(
                 f"No supported authentication scheme found for agent {agent_card.human_readable_id}. "
                 f"Supported by agent: {supported_schemes}. Supported by client: ['apiKey', 'none']." # Update as client supports more
@@ -408,7 +465,7 @@ class AgentVaultClient:
         headers: Optional[Dict[str, str]] = None,
         json_payload: Optional[Dict[str, Any]] = None,
         stream: bool = False # Added for potential SSE use
-    ) -> Union[httpx.Response, AsyncGenerator[bytes, None]]:
+    ) -> Union[Dict[str, Any], AsyncGenerator[bytes, None]]: # Changed return type to Dict for non-stream
         """
         Internal helper to make HTTP requests using the client's httpx instance
         and handle common errors, converting them to A2A exceptions.
@@ -421,16 +478,17 @@ class AgentVaultClient:
             stream: Whether to return a streaming response.
 
         Returns:
-            An httpx.Response object for regular requests or an async generator
-            yielding bytes for streaming requests.
+            A dictionary representing the parsed JSON response for regular requests,
+            or an async generator yielding bytes for streaming requests.
 
         Raises:
             A2AConnectionError: For connection issues (DNS, refused, etc.).
             A2ATimeoutError: For request timeouts.
+            A2ARemoteAgentError: For non-2xx HTTP status codes.
+            A2AMessageError: If the response body cannot be parsed as JSON (for non-stream).
             A2AError: For other unexpected httpx errors.
         """
-        # Implementation will wrap self._http_client calls and exception handling
-        # TODO: Implement this method properly.
+        # TODO: Implement this method properly using self._http_client
         logger.warning(f"_make_request called (method={method}, url={url}, stream={stream}) - Returning placeholder/raising error.")
         if stream:
              # Placeholder for async generator
@@ -438,20 +496,15 @@ class AgentVaultClient:
                   yield b'data: {"event": "placeholder"}\n\n' # pragma: no cover
              return _dummy_stream()
         else:
-             # Placeholder for regular response - raise error until implemented
-             # Or return a dummy success dict if needed for testing initiate_task
+             # Placeholder for regular response - return a dummy success dict
+             req_id = json_payload.get("id", "unknown") if json_payload else "unknown"
+             # Simulate successful JSON-RPC response (TaskSendResult might just be confirmation)
+             return {
+                 "jsonrpc": "2.0",
+                 "result": {"id": json_payload.get("params", {}).get("id", f"task-placeholder-{uuid.uuid4()}")}, # Echo task ID if present, else generate placeholder
+                 "id": req_id
+             }
              # raise NotImplementedError("_make_request is not fully implemented yet.")
-             # Simulate successful JSON-RPC response for initiate_task testing
-             if method == 'POST' and json_payload and json_payload.get("method") == "tasks/send":
-                 req_id = json_payload.get("id", "unknown")
-                 return { # Return dict directly, assuming successful parse
-                     "jsonrpc": "2.0",
-                     "result": {"id": f"task-placeholder-{uuid.uuid4()}"},
-                     "id": req_id
-                 }
-             else:
-                 # Fallback for other methods until implemented
-                 raise NotImplementedError(f"_make_request placeholder cannot handle {method} to {url} yet.")
 
 
 #
