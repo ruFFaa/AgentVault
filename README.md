@@ -1,6 +1,6 @@
 # AgentVault
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) <!-- Updated link -->
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![PyPI version](https://badge.fury.io/py/agentvault.svg)](https://badge.fury.io/py/agentvault) <!-- Placeholder - Needs actual PyPI release -->
 [![Python Version](https://img.shields.io/pypi/pyversions/agentvault.svg)](https://pypi.org/project/agentvault/) <!-- Placeholder -->
 <!-- Add Build Status, Coverage badges later -->
@@ -90,7 +90,60 @@ AgentVault prioritizes user control over API keys, but operating within a decent
 
 ## Development Setup
 
-*(Content remains the same, ensure it mentions the manual venv setup + pip install -e as the current reliable method)*
+If you want to contribute to AgentVault itself:
+
+1.  Clone the main repository: `git clone <repository_url>`
+2.  `cd agentvault`
+3.  **Crucially:** Ensure you have the correct Python version (>=3.10, <3.12) and Poetry installed.
+4.  **Configure Poetry for In-Project Environment:**
+    ```bash
+    poetry config virtualenvs.in-project true
+    ```
+5.  **Create and Activate Root Environment:** Manually create the virtual environment in the project root using Python's `venv` module and activate it.
+    ```bash
+    # Ensure you are in the project root (e.g., D:\AgentVault)
+    python -m venv .venv
+    # Activate (PowerShell example)
+    .\.venv\Scripts\Activate.ps1
+    # Activate (Bash/Zsh example)
+    # source .venv/bin/activate
+    ```
+6.  **Install All Components and Dependencies:** Use `pip` within the activated environment to install the local packages editably and their dependencies.
+    ```bash
+    # Ensure root .venv is active
+    python -m pip install --upgrade pip
+
+    # Install library editably with its extras
+    pip install -e ".\agentvault_library\[os_keyring]"
+
+    # Install registry editably
+    pip install -e ".\agentvault_registry\"
+
+    # Install CLI editably
+    pip install -e ".\agentvault_cli\"
+
+    # Install common dev dependencies manually
+    pip install pytest pytest-asyncio pytest-mock httpx respx uvicorn slowapi alembic passlib[bcrypt] pydantic-settings asyncpg psycopg2-binary click rich
+    ```
+    *(Note: This manual installation of dev dependencies might need adjustment if specific versions are critical. Using Poetry lock files across components is complex without workspace tools).*
+7.  **Set up Services:** Configure your local PostgreSQL database and create a `.env` file in `agentvault_registry/` as described in its README.
+8.  **Run Migrations:**
+    ```bash
+    # Ensure .venv is active and you are in the project root
+    cd agentvault_registry
+    alembic upgrade head
+    cd ..
+    ```
+9.  **Run Tests:**
+    ```bash
+    # Ensure .venv is active and you are in the project root
+    pytest
+    ```
+10. **Run Development Server:**
+    ```bash
+    # Ensure .venv is active and you are in the project root
+    uvicorn agentvault_registry.main:app --reload --host 0.0.0.0 --port 8000
+    ```
 
 ## Contributing
 
@@ -98,7 +151,7 @@ We welcome contributions! Please see our [**Contributing Guidelines**](CONTRIBUT
 
 ## License
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details. Dependency licenses have been reviewed for compatibility.
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details. Dependency licenses have been reviewed and are believed to be compatible with the project's license.
 
 ## Legal
 
