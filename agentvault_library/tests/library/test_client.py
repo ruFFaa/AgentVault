@@ -57,9 +57,25 @@ def agent_card_no_auth_fixture() -> AgentCard:
     )
 
 @pytest.fixture
+def agent_card_oauth2_fixture() -> AgentCard:
+    """Provides an AgentCard instance supporting only OAuth2."""
+    # --- FIX: Use model_validate to ensure internal validation passes ---
+    card_data = {
+        "schemaVersion":"1.0", "humanReadableId":"test-org/oauth2-agent", "agentVersion":"1.0.0",
+        "name":"OAuth2 Test Agent", "description":"Agent for testing oauth2 auth.", "url":AGENT_URL + "/oauth",
+        "provider":{"name": "Test Suite Inc."}, "capabilities":{"a2aVersion":"1.0"},
+        "authSchemes":[{"scheme":"oauth2", "tokenUrl":"https://auth.example.com/token", "scopes":["tasks:read"]}]
+    }
+    return AgentCard.model_validate(card_data)
+    # --- END FIX ---
+
+
+@pytest.fixture
 def mock_key_manager(mocker) -> MagicMock:
     mock_km = MagicMock(spec=KeyManager)
     mock_km.get_key.return_value = TEST_API_KEY
+    mock_km.get_oauth_client_id.return_value = None
+    mock_km.get_oauth_client_secret.return_value = None
     return mock_km
 
 @pytest.fixture
@@ -69,10 +85,10 @@ def sample_message() -> Message:
 @pytest.fixture
 def sample_task_data() -> dict:
     now = datetime.datetime.now(datetime.timezone.utc)
-    return {"id": TEST_TASK_ID, "state": "RUNNING", "createdAt": now.isoformat(), "updatedAt": now.isoformat(), "messages": [{"role": "user", "parts": [{"type": "text", "content": "Hello"}]}, {"role": "assistant", "parts": [{"type": "text", "content": "Hi"}]}], "artifacts": [], "metadata": {}}
+    # Use WORKING state as per Task 2.C.1
+    return {"id": TEST_TASK_ID, "state": "WORKING", "createdAt": now.isoformat(), "updatedAt": now.isoformat(), "messages": [{"role": "user", "parts": [{"type": "text", "content": "Hello"}]}, {"role": "assistant", "parts": [{"type": "text", "content": "Hi"}]}], "artifacts": [], "metadata": {}}
 
 # --- Test Init and Context Manager ---
-# (Tests unchanged)
 @pytest.mark.asyncio
 async def test_client_init_internal_client():
     client = AgentVaultClient()
@@ -109,7 +125,6 @@ async def test_client_context_manager_external():
     await external_http_client.aclose()
 
 # --- Test _get_auth_headers ---
-# (Tests unchanged)
 def test_get_auth_headers_apikey_success(agent_card_fixture, mock_key_manager):
     client = AgentVaultClient()
     headers = client._get_auth_headers(agent_card_fixture, mock_key_manager)
@@ -130,15 +145,23 @@ def test_get_auth_headers_key_missing(agent_card_fixture, mock_key_manager):
 
 def test_get_auth_headers_no_supported_scheme(agent_card_dict_fixture, mock_key_manager):
     unsupported_data = agent_card_dict_fixture.copy()
-    unsupported_data["authSchemes"] = [{"scheme": "oauth2"}]
+    unsupported_data["authSchemes"] = [{"scheme": "bearer"}] # Use bearer as unsupported example
     unsupported_card = AgentCard.model_validate(unsupported_data)
     client = AgentVaultClient()
-    assert [s.scheme for s in unsupported_card.auth_schemes] == ["oauth2"]
+    assert [s.scheme for s in unsupported_card.auth_schemes] == ["bearer"]
     with pytest.raises(A2AAuthenticationError, match="No compatible authentication scheme found"):
         client._get_auth_headers(unsupported_card, mock_key_manager)
 
+def test_get_auth_headers_oauth2_not_implemented(agent_card_oauth2_fixture, mock_key_manager):
+    """Test that oauth2 scheme raises NotImplementedError for now."""
+    client = AgentVaultClient()
+    with pytest.raises(NotImplementedError, match="OAuth2 authentication flow not yet implemented"):
+        client._get_auth_headers(agent_card_oauth2_fixture, mock_key_manager)
+    # Ensure API key retrieval was not attempted
+    mock_key_manager.get_key.assert_not_called()
+
+
 # --- Test initiate_task ---
-# (Tests unchanged - should pass)
 @pytest.mark.asyncio
 @respx.mock
 async def test_initiate_task_success(agent_card_fixture, mock_key_manager, sample_message):
@@ -169,6 +192,14 @@ async def test_initiate_task_auth_error(agent_card_fixture, mock_key_manager, sa
     async with AgentVaultClient() as client:
         with pytest.raises(A2AAuthenticationError):
             await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager)
+
+@pytest.mark.asyncio
+async def test_initiate_task_oauth_error(agent_card_oauth2_fixture, mock_key_manager, sample_message):
+    """Test initiate_task fails correctly when OAuth is not yet implemented."""
+    async with AgentVaultClient() as client:
+        with pytest.raises(A2AAuthenticationError, match="Authentication scheme 'oauth2' not yet implemented"):
+            await client.initiate_task(agent_card_oauth2_fixture, sample_message, mock_key_manager)
+
 
 @pytest.mark.asyncio
 @respx.mock
@@ -213,7 +244,6 @@ async def test_initiate_task_timeout_error(agent_card_fixture, mock_key_manager,
             await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager)
 
 # --- Test send_message ---
-# (Tests should pass)
 @pytest.mark.asyncio
 @respx.mock
 async def test_send_message_success(agent_card_fixture, mock_key_manager, sample_message):
@@ -242,7 +272,6 @@ async def test_send_message_unexpected_error(agent_card_fixture, mock_key_manage
             await client.send_message(agent_card_fixture, TEST_TASK_ID, sample_message, mock_key_manager)
 
 # --- Test get_task_status ---
-# (Tests should pass)
 @pytest.mark.asyncio
 @respx.mock
 async def test_get_task_status_success(agent_card_fixture, mock_key_manager, sample_task_data):
@@ -250,7 +279,7 @@ async def test_get_task_status_success(agent_card_fixture, mock_key_manager, sam
     route = respx.post(AGENT_URL).mock(return_value=httpx.Response(200, json=mock_response))
     async with AgentVaultClient() as client:
         task = await client.get_task_status(agent_card_fixture, TEST_TASK_ID, mock_key_manager)
-    assert isinstance(task, Task); assert task.id == TEST_TASK_ID; assert task.state == TaskState.RUNNING
+    assert isinstance(task, Task); assert task.id == TEST_TASK_ID; assert task.state == TaskState.WORKING
     assert route.called; request = route.calls[0].request; payload = json.loads(request.content)
     assert payload["method"] == "tasks/get"; assert payload["params"]["id"] == TEST_TASK_ID
 
@@ -264,7 +293,6 @@ async def test_get_task_status_remote_error(agent_card_fixture, mock_key_manager
             await client.get_task_status(agent_card_fixture, "invalid-task-id", mock_key_manager)
 
 # --- Test terminate_task ---
-# (Tests should pass)
 @pytest.mark.asyncio
 @respx.mock
 async def test_terminate_task_success(agent_card_fixture, mock_key_manager):
@@ -289,27 +317,23 @@ async def test_terminate_task_remote_error(agent_card_fixture, mock_key_manager)
 async def test_terminate_task_unexpected_error(agent_card_fixture, mock_key_manager, mocker):
     mocker.patch.object(AgentVaultClient, "_make_request", side_effect=TypeError("Something else broke"))
     async with AgentVaultClient() as client:
-        # --- CORRECTED: Match the actual error message ---
         with pytest.raises(A2AError, match="An unexpected error occurred terminating task:"):
              await client.terminate_task(agent_card_fixture, TEST_TASK_ID, mock_key_manager)
-        # --- END CORRECTED ---
 
 # --- Test receive_messages ---
-# (These will still fail with NotImplementedError)
 async def mock_sse_stream(*lines: str):
-    for line in lines: yield line.encode('utf-8'); await asyncio.sleep(0)
+    for line in lines: yield line.encode('utf-8'); await asyncio.sleep(0.01) # Added small delay
+    yield b'\n'
+
 
 @pytest.mark.asyncio
 @respx.mock
 async def test_receive_messages_success(agent_card_fixture, mock_key_manager, mocker):
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    sse_lines = [f"event: task_status\ndata: {json.dumps({'taskId': TEST_TASK_ID, 'state': 'RUNNING', 'timestamp': now_iso})}\n\n", f"data: {json.dumps({'taskId': TEST_TASK_ID, 'message': {'role': 'assistant', 'parts': [{'type': 'text', 'content': 'Working...'}]}, 'timestamp': now_iso})}\n\n", f"event: task_artifact\ndata: {json.dumps({'taskId': TEST_TASK_ID, 'artifact': {'id': 'art-1', 'type': 'log', 'content': 'Step 1 done'}, 'timestamp': now_iso})}\n\n", ": comment\n", f"event: task_status\ndata: {json.dumps({'taskId': TEST_TASK_ID, 'state': 'COMPLETED', 'timestamp': now_iso})}\n\n"]
+    sse_lines = [f"event: task_status\ndata: {json.dumps({'taskId': TEST_TASK_ID, 'state': 'WORKING', 'timestamp': now_iso})}\n\n", f"data: {json.dumps({'taskId': TEST_TASK_ID, 'message': {'role': 'assistant', 'parts': [{'type': 'text', 'content': 'Working...'}]}, 'timestamp': now_iso})}\n\n", f"event: task_artifact\ndata: {json.dumps({'taskId': TEST_TASK_ID, 'artifact': {'id': 'art-1', 'type': 'log', 'content': 'Step 1 done'}, 'timestamp': now_iso})}\n\n", ": comment\n", f"event: task_status\ndata: {json.dumps({'taskId': TEST_TASK_ID, 'state': 'COMPLETED', 'timestamp': now_iso})}\n\n"]
     mock_stream_gen = mock_sse_stream(*sse_lines)
-    # Mock _make_request to return the generator when stream=True
     async def mock_make_request_side_effect(*args, **kwargs):
-        if kwargs.get("stream") is True:
-            return mock_stream_gen
-        # Handle non-stream calls if necessary, or raise error
+        if kwargs.get("stream") is True: return mock_stream_gen
         raise ValueError("Mock _make_request only configured for stream=True in this test")
     mocker.patch.object(AgentVaultClient, "_make_request", side_effect=mock_make_request_side_effect)
     received_events = []
@@ -317,7 +341,7 @@ async def test_receive_messages_success(agent_card_fixture, mock_key_manager, mo
         async for event in client.receive_messages(agent_card_fixture, TEST_TASK_ID, mock_key_manager):
             received_events.append(event)
     assert len(received_events) == 4
-    assert isinstance(received_events[0], TaskStatusUpdateEvent); assert received_events[0].state == TaskState.RUNNING
+    assert isinstance(received_events[0], TaskStatusUpdateEvent); assert received_events[0].state == TaskState.WORKING
     assert isinstance(received_events[1], TaskMessageEvent); assert received_events[1].message.role == "assistant"
     assert isinstance(received_events[2], TaskArtifactUpdateEvent); assert received_events[2].artifact.id == "art-1"
     assert isinstance(received_events[3], TaskStatusUpdateEvent); assert received_events[3].state == TaskState.COMPLETED
@@ -340,7 +364,9 @@ async def test_receive_messages_invalid_json(agent_card_fixture, mock_key_manage
 @pytest.mark.asyncio
 async def test_receive_messages_validation_error(agent_card_fixture, mock_key_manager, mocker, caplog):
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    # --- FIX: Use valid TaskState ---
     sse_lines = [f"event: task_status\ndata: {json.dumps({'taskId': TEST_TASK_ID, 'state': 'INVALID_STATE', 'timestamp': now_iso})}\n\n", f"event: task_message\ndata: {json.dumps({'taskId': TEST_TASK_ID, 'message': {'role': 'assistant', 'parts': [{'type': 'text', 'content': 'OK'}]}, 'timestamp': now_iso})}\n\n"]
+    # --- END FIX ---
     mock_stream_gen = mock_sse_stream(*sse_lines)
     async def mock_make_request_side_effect(*args, **kwargs): return mock_stream_gen
     mocker.patch.object(AgentVaultClient, "_make_request", side_effect=mock_make_request_side_effect)
@@ -374,13 +400,8 @@ async def test_receive_messages_stream_error(agent_card_fixture, mock_key_manage
         raise ConnectionAbortedError("Stream broken") # Simulate non-httpx error during streaming
     mocker.patch.object(AgentVaultClient, "_stream_request", side_effect=error_stream) # Patch the correct helper
 
-    # Expect A2AConnectionError raised by the generic handler in _process_sse_stream
-    # --- CORRECTED: Match the actual error message ---
     with pytest.raises(A2AConnectionError, match="Unexpected error processing SSE stream: Stream broken"):
-    # --- END CORRECTED ---
          async with AgentVaultClient() as client:
-             # Iterate through receive_messages to trigger the stream processing
-             # The error will occur inside the _process_sse_stream call within receive_messages
              async for event in client.receive_messages(agent_card_fixture, TEST_TASK_ID, mock_key_manager):
                  pass # pragma: no cover
 

@@ -131,6 +131,9 @@ class AgentVaultClient:
             return task_id
         except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e: logger.error(f"A2A error during task initiation: {type(e).__name__}: {e}"); raise
         except KeyManagementError as e: logger.error(f"Key management error during task initiation: {e}"); raise A2AAuthenticationError(f"Authentication failed due to key management error: {e}") from e
+        except NotImplementedError as e: # Catch the specific error from _get_auth_headers
+            logger.error(f"Authentication scheme not yet implemented: {e}")
+            raise A2AAuthenticationError(f"Authentication scheme '{agent_card.auth_schemes[0].scheme if agent_card.auth_schemes else 'unknown'}' not yet implemented by client.") from e
         except Exception as e: logger.exception(f"Unexpected error during task initiation with agent {agent_card.human_readable_id}: {e}"); raise A2AError(f"An unexpected error occurred during task initiation: {e}") from e
 
     async def send_message(
@@ -175,6 +178,9 @@ class AgentVaultClient:
             return True
         except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e: logger.error(f"A2A error sending message to task {task_id}: {type(e).__name__}: {e}"); raise
         except KeyManagementError as e: logger.error(f"Key management error sending message to task {task_id}: {e}"); raise A2AAuthenticationError(f"Authentication failed due to key management error: {e}") from e
+        except NotImplementedError as e: # Catch the specific error from _get_auth_headers
+            logger.error(f"Authentication scheme not yet implemented: {e}")
+            raise A2AAuthenticationError(f"Authentication scheme '{agent_card.auth_schemes[0].scheme if agent_card.auth_schemes else 'unknown'}' not yet implemented by client.") from e
         except Exception as e: logger.exception(f"Unexpected error sending message to task {task_id} on agent {agent_card.human_readable_id}: {e}"); raise A2AError(f"An unexpected error occurred sending message: {e}") from e
 
     async def receive_messages(
@@ -195,7 +201,7 @@ class AgentVaultClient:
             Validated A2AEvent objects.
 
         Raises:
-            A2AAuthenticationError: If authentication fails.
+            A2AAuthenticationError: If authentication fails or scheme not implemented.
             A2AConnectionError: If connection or the SSE stream fails.
             A2ARemoteAgentError: If the agent returns an error during subscription setup.
             A2AMessageError: If request/response/event formatting is invalid.
@@ -203,7 +209,6 @@ class AgentVaultClient:
             A2AError: For other A2A related issues.
             ValueError: If task_id is invalid.
         """
-        # --- Implementation Start (REQ-LIB-A2ACLIENT-004) ---
         logger.info(f"Subscribing to events for task {task_id} on agent: {agent_card.human_readable_id}")
         if not task_id or not isinstance(task_id, str):
              raise ValueError("Invalid task_id provided for receive_messages.")
@@ -215,8 +220,6 @@ class AgentVaultClient:
             auth_headers["Accept"] = "text/event-stream"
 
             # 2. Construct JSON-RPC request payload for tasks/sendSubscribe
-            # Note: Assumes baseline A2A 'tasks/sendSubscribe' method.
-            # Future versions might need 'tasks/resubscribe' logic.
             request_id = f"req-sub-{uuid.uuid4()}"
             request_payload = {
                 "jsonrpc": "2.0",
@@ -227,7 +230,6 @@ class AgentVaultClient:
             logger.debug(f"Subscribe request payload (id: {request_id})")
 
             # 3. Make the streaming request
-            # Type hint to help static analysis understand the return type
             byte_stream_gen: AsyncGenerator[bytes, None]
             stream_result = await self._make_request(
                 method='POST',
@@ -237,7 +239,6 @@ class AgentVaultClient:
                 stream=True
             )
 
-            # Ensure we actually got an async generator
             if not isinstance(stream_result, typing.AsyncGenerator):
                  raise A2AError(f"_make_request did not return an AsyncGenerator for stream=True (got {type(stream_result)})")
             byte_stream_gen = stream_result
@@ -262,25 +263,22 @@ class AgentVaultClient:
                     yield validated_event
                 except pydantic.ValidationError as e:
                     logger.error(f"Failed to validate SSE event type '{event_type}': {e}. Data: {event_data}")
-                    # Optionally raise A2AMessageError here, or just log and continue
-                    continue # Continue processing stream despite one bad event
+                    continue
 
-        # Catch specific A2A errors and re-raise
         except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e:
             logger.error(f"A2A error during event subscription or processing for task {task_id}: {type(e).__name__}: {e}")
             raise
-        # Catch KeyManagementError specifically for auth issues
         except KeyManagementError as e:
              logger.error(f"Key management error during event subscription for task {task_id}: {e}")
              raise A2AAuthenticationError(f"Authentication failed due to key management error: {e}") from e
-        # Catch unexpected errors during subscription setup or stream processing
+        except NotImplementedError as e: # Catch the specific error from _get_auth_headers
+            logger.error(f"Authentication scheme not yet implemented: {e}")
+            raise A2AAuthenticationError(f"Authentication scheme '{agent_card.auth_schemes[0].scheme if agent_card.auth_schemes else 'unknown'}' not yet implemented by client.") from e
         except Exception as e:
             logger.exception(f"Unexpected error during event subscription for task {task_id} on agent {agent_card.human_readable_id}: {e}")
             raise A2AError(f"An unexpected error occurred during event subscription: {e}") from e
         finally:
-             # Ensure stream resources are cleaned up if necessary (httpx context manager handles this)
              logger.debug(f"Finished receiving messages for task {task_id}.")
-        # --- Implementation End ---
 
 
     async def get_task_status(
@@ -311,6 +309,9 @@ class AgentVaultClient:
             except pydantic.ValidationError as e: raise A2AMessageError(f"Failed to validate task status result (Task model): {e}") from e
         except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e: logger.error(f"A2A error getting status for task {task_id}: {type(e).__name__}: {e}"); raise
         except KeyManagementError as e: logger.error(f"Key management error getting status for task {task_id}: {e}"); raise A2AAuthenticationError(f"Authentication failed due to key management error: {e}") from e
+        except NotImplementedError as e: # Catch the specific error from _get_auth_headers
+            logger.error(f"Authentication scheme not yet implemented: {e}")
+            raise A2AAuthenticationError(f"Authentication scheme '{agent_card.auth_schemes[0].scheme if agent_card.auth_schemes else 'unknown'}' not yet implemented by client.") from e
         except Exception as e: logger.exception(f"Unexpected error getting status for task {task_id} on agent {agent_card.human_readable_id}: {e}"); raise A2AError(f"An unexpected error occurred getting task status: {e}") from e
 
     async def terminate_task(
@@ -345,16 +346,20 @@ class AgentVaultClient:
             return True
         except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e: logger.error(f"A2A error terminating task {task_id}: {type(e).__name__}: {e}"); raise
         except KeyManagementError as e: logger.error(f"Key management error terminating task {task_id}: {e}"); raise A2AAuthenticationError(f"Authentication failed due to key management error: {e}") from e
+        except NotImplementedError as e: # Catch the specific error from _get_auth_headers
+            logger.error(f"Authentication scheme not yet implemented: {e}")
+            raise A2AAuthenticationError(f"Authentication scheme '{agent_card.auth_schemes[0].scheme if agent_card.auth_schemes else 'unknown'}' not yet implemented by client.") from e
         except Exception as e: logger.exception(f"Unexpected error terminating task {task_id} on agent {agent_card.human_readable_id}: {e}"); raise A2AError(f"An unexpected error occurred terminating task: {e}") from e
 
 
     # --- Private Helper Methods ---
-    # _get_auth_headers unchanged
     def _get_auth_headers(self, agent_card: AgentCard, key_manager: KeyManager) -> Dict[str, str]:
-        """Determines required auth scheme and retrieves key if needed."""
+        """Determines required auth scheme and retrieves key/token if needed."""
         agent_schemes = agent_card.auth_schemes
         supported_schemes_str = [s.scheme for s in agent_schemes]
         logger.debug(f"Agent supports auth schemes: {supported_schemes_str}")
+
+        # Check for apiKey
         api_key_scheme = next((s for s in agent_schemes if s.scheme == 'apiKey'), None)
         if api_key_scheme:
             service_id = api_key_scheme.service_identifier or agent_card.human_readable_id
@@ -364,15 +369,26 @@ class AgentVaultClient:
             if not api_key: raise A2AAuthenticationError(f"Missing API key for service '{service_id}' required by agent '{agent_card.human_readable_id}' (scheme: apiKey). Check local configuration.")
             logger.debug(f"Using apiKey scheme for service_id '{service_id}'.")
             return {"X-Api-Key": api_key}
+
+        # Check for oauth2
+        oauth2_scheme = next((s for s in agent_schemes if s.scheme == 'oauth2'), None)
+        if oauth2_scheme:
+            logger.debug("Found 'oauth2' authentication scheme.")
+            # --- Placeholder for Task 2.B.7 ---
+            raise NotImplementedError("OAuth2 authentication flow not yet implemented.")
+            # return {} # Temporary return if not raising error
+
+        # Check for none
         none_scheme_present = any(s.scheme == 'none' for s in agent_schemes)
         if none_scheme_present:
             logger.debug("Using 'none' authentication scheme."); return {}
-        client_supported = ['apiKey', 'none']
+
+        # No compatible scheme found
+        client_supported = ['apiKey', 'oauth2', 'none'] # Update client supported list
         log_msg = (f"No compatible authentication scheme found for agent {agent_card.human_readable_id}. "
                    f"Agent supports: {supported_schemes_str}. Client supports: {client_supported}.")
         logger.error(log_msg); raise A2AAuthenticationError(log_msg)
 
-    # _stream_request unchanged
     async def _stream_request(
         self, request_kwargs: Dict[str, Any]
     ) -> AsyncGenerator[bytes, None]:
@@ -392,7 +408,6 @@ class AgentVaultClient:
         except httpx.RequestError as e: logger.error(f"HTTP request error for {log_context}: {e}"); raise A2AConnectionError(f"HTTP request failed for {url}: {e}") from e
         except Exception as e: logger.exception(f"Unexpected error during stream request {log_context}: {e}"); raise A2AError(f"An unexpected error occurred during the stream request for {url}: {e}") from e
 
-    # _make_request unchanged
     async def _make_request(
         self, method: str, url: str, headers: Optional[Dict[str, str]] = None,
         json_payload: Optional[Dict[str, Any]] = None, stream: bool = False
@@ -415,7 +430,6 @@ class AgentVaultClient:
             except (A2AMessageError, A2AAuthenticationError, A2ARemoteAgentError) as e: logger.error(f"A2A error during request processing for {log_context}: {e}"); raise
             except Exception as e: logger.exception(f"Unexpected error during request {log_context}: {e}"); raise A2AError(f"An unexpected error occurred during the request for {url}: {e}") from e
 
-    # --- IMPLEMENTED _process_sse_stream ---
     async def _process_sse_stream(self, byte_stream: AsyncGenerator[bytes, None]) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Processes a Server-Sent Event byte stream into event dictionaries.
@@ -488,19 +502,26 @@ class AgentVaultClient:
                     except ValueError:
                         logger.warning(f"Ignoring malformed SSE line (no colon): {line}")
 
-        # --- MODIFIED: Catch specific httpx exceptions that might occur during streaming ---
+            # --- ADDED: Process any remaining buffer content after stream ends ---
+            if data_buffer:
+                event_type = current_event_type or "message"
+                logger.debug(f"Processing final SSE event buffer: type='{event_type}', data='{data_buffer[:100]}...'")
+                try:
+                    yield {"event_type": event_type, "data": json.loads(data_buffer)}
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to decode JSON data for final SSE event type '{event_type}': {e}. Data: {data_buffer[:200]}...")
+            # --- END ADDED ---
+
         except httpx.RemoteProtocolError as e:
             logger.error(f"SSE stream ended unexpectedly (RemoteProtocolError): {e}", exc_info=True)
             raise A2AConnectionError(f"SSE stream ended unexpectedly: {e}") from e
         except httpx.StreamError as e:
             logger.error(f"Error reading from SSE stream: {e}", exc_info=True)
             raise A2AConnectionError(f"Error reading from SSE stream: {e}") from e
-        # --- END MODIFIED ---
         except Exception as e:
             logger.error(f"Unexpected error processing SSE stream: {e}", exc_info=True)
             raise A2AConnectionError(f"Unexpected error processing SSE stream: {e}") from e
         finally:
             logger.debug("SSE byte stream processing finished.")
-    # --- END IMPLEMENTED ---
 
 #

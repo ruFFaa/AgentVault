@@ -5,7 +5,8 @@ Based on A2A Agent Card Schema concepts (specific draft version TBD).
 """
 
 from typing import List, Optional, Dict, Any, Literal
-from pydantic import BaseModel, Field, HttpUrl, field_validator, AnyUrl
+from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator, AnyUrl
+
 
 # Note: Using standard Python types and Pydantic types.
 # Field aliases can be used if the JSON field names differ from Pythonic names.
@@ -30,16 +31,39 @@ class AgentAuthentication(BaseModel):
     """Describes an authentication scheme supported by the agent's A2A endpoint."""
     scheme: Literal['apiKey', 'bearer', 'oauth2', 'none'] = Field(..., description="The type of authentication scheme required.")
     description: Optional[str] = Field(None, description="Human-readable description of how to obtain and use credentials for this scheme.")
-    # Add scheme-specific fields if necessary (e.g., tokenUrl for oauth2)
-    # For 'apiKey', convention often implies an 'X-Api-Key' header, but details might be in description.
+    token_url: Optional[HttpUrl] = Field(None, alias="tokenUrl", description="URL of the OAuth 2.0 token endpoint (required for 'oauth2' scheme).")
+    scopes: Optional[List[str]] = Field(None, description="List of OAuth 2.0 scope identifiers required by the agent.")
     service_identifier: Optional[str] = Field(None, description="Optional identifier used by the client's KeyManager to retrieve the correct local key (e.g., 'openai', 'agent-specific-id'). If omitted, might default to agent's humanReadableId or require explicit client configuration.")
+
+    @model_validator(mode='after')
+    def check_oauth2_fields(self) -> 'AgentAuthentication':
+        """Ensure tokenUrl is provided if scheme is oauth2."""
+        # --- FIX: Only raise if scheme is oauth2 AND token_url is None ---
+        if self.scheme == 'oauth2' and self.token_url is None:
+             # This check might seem redundant if HttpUrl is required, but handles cases
+             # where validation might be bypassed or default is None.
+             # It primarily ensures consistency if the field definition changes later.
+             raise ValueError("'tokenUrl' is required when scheme is 'oauth2'")
+        # --- END FIX ---
+        return self
+
+
+class TeeDetails(BaseModel):
+    """Details about the Trusted Execution Environment (TEE) an agent utilizes."""
+    type: str = Field(..., description="Identifier for the type of TEE technology used (e.g., 'Intel SGX', 'AMD SEV', 'AWS Nitro Enclaves').")
+    attestation_endpoint: Optional[HttpUrl] = Field(None, alias="attestationEndpoint", description="URL where clients can obtain or verify attestation documents for the TEE instance.")
+    public_key: Optional[str] = Field(None, alias="publicKey", description="Public key associated with the TEE instance, potentially used for secure communication or verifying attestations (format depends on TEE type).")
+    description: Optional[str] = Field(None, description="Human-readable description of the TEE setup or guarantees.")
+
 
 class AgentCapabilities(BaseModel):
     """Defines the overall capabilities and supported protocols."""
     a2a_version: str = Field(..., alias="a2aVersion", description="Version of the A2A protocol supported by the agent endpoint.")
     mcp_version: Optional[str] = Field(None, alias="mcpVersion", description="Version of the Model Context Protocol supported (if any).")
     supported_message_parts: Optional[List[str]] = Field(None, alias="supportedMessageParts", description="List of message part types supported (e.g., 'text', 'file', 'data'). If omitted, client may assume basic types.")
-    # Add other capability fields (e.g., max input size, supported SSE features)
+    tee_details: Optional[TeeDetails] = Field(None, alias="teeDetails", description="Details about the Trusted Execution Environment the agent runs in, if applicable.")
+    supports_push_notifications: Optional[bool] = Field(None, alias="supportsPushNotifications", description="Indicates if the agent supports sending push notifications to a webhook.")
+
 
 class AgentCard(BaseModel):
     """
@@ -74,14 +98,5 @@ class AgentCard(BaseModel):
              raise ValueError('Agent URL must use HTTPS unless it is localhost')
         # Pydantic v2 handles AnyUrl parsing well, this is more of an example
         return v
-
-    @field_validator('auth_schemes')
-    @classmethod
-    def check_auth_schemes_not_empty(cls, v: List[AgentAuthentication]) -> List[AgentAuthentication]:
-        if not v:
-            raise ValueError('auth_schemes must not be empty')
-        return v
-
-    # Add more validators as needed (e.g., version formats)
 
 #

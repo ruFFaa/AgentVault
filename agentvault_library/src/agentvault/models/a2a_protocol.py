@@ -15,12 +15,14 @@ import datetime
 
 class TaskState(str, Enum):
     """Represents the possible states of an A2A task."""
-    PENDING = "PENDING"
-    RUNNING = "RUNNING"
+    # --- MODIFIED: Renamed states and added INPUT_REQUIRED ---
+    SUBMITTED = "SUBMITTED" # Renamed from PENDING
+    WORKING = "WORKING"     # Renamed from RUNNING
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
-    CANCELLED = "CANCELLED"
-    # Add other states as needed (e.g., PAUSED, REQUIRES_INPUT)
+    CANCELED = "CANCELED"   # Renamed from CANCELLED
+    INPUT_REQUIRED = "INPUT_REQUIRED" # Added new state
+    # --- END MODIFIED ---
 
 # --- Message Parts ---
 
