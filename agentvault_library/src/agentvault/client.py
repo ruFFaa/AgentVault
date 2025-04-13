@@ -118,8 +118,8 @@ class AgentVaultClient:
         Raises:
             A2AAuthenticationError: If authentication fails (missing key, invalid creds).
             A2AConnectionError: If connection to the agent endpoint fails.
-            A2ARemoteAgentError: If the agent returns a specific error response.
-            A2AMessageError: If the agent's response is malformed.
+            A2ARemoteAgentError: If the agent returns a specific error response (JSON-RPC error).
+            A2AMessageError: If the agent's response is malformed (non-JSON, invalid JSON-RPC).
             A2ATimeoutError: If the request times out.
             A2AError: For other unexpected A2A protocol errors.
             KeyManagementError: If there's an issue retrieving keys locally.
@@ -145,31 +145,36 @@ class AgentVaultClient:
             request_id = f"req-init-{uuid.uuid4()}"
             request_params_dict = task_send_params.model_dump(mode='json', exclude_none=True, by_alias=True)
 
-            # --- ADDED: Include webhookUrl in params if provided ---
             if webhook_url:
                 request_params_dict['webhookUrl'] = webhook_url
                 logger.debug(f"Adding webhookUrl='{webhook_url}' to initiate task params.")
-            # --- END ADDED ---
 
             request_payload = {"jsonrpc": "2.0", "method": "tasks/send", "params": request_params_dict, "id": request_id}
             logger.debug(f"Initiate task request payload (id: {request_id})")
+            # _make_request now handles JSON-RPC error/result parsing
             response_data = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload, stream=False)
 
-            if not isinstance(response_data, dict): raise A2AMessageError(f"Invalid response format: Expected dictionary, got {type(response_data)}")
-            if "error" in response_data:
-                error_data = response_data["error"]; logger.error(f"Agent returned error during task initiation: {error_data}")
-                err_code = error_data.get("code", -1); err_msg = error_data.get("message", "Unknown remote agent error"); err_details = error_data.get("data")
-                raise A2ARemoteAgentError(message=err_msg, status_code=err_code, response_body=err_details)
-            if "result" not in response_data: raise A2AMessageError("Invalid JSON-RPC response format: missing 'result' key.")
-            try: result_obj = TaskSendResult.model_validate(response_data["result"])
-            except pydantic.ValidationError as e: raise A2AMessageError(f"Failed to validate task initiation result structure: {e}") from e
+            try:
+                # Validate the structure of the 'result' part
+                result_obj = TaskSendResult.model_validate(response_data) # Validate the result directly
+            except pydantic.ValidationError as e:
+                raise A2AMessageError(f"Failed to validate task initiation result structure: {e}") from e
+
             task_id = result_obj.id
-            if not task_id or not isinstance(task_id, str): raise A2AMessageError("Invalid response format: 'result.id' is missing, empty, or not a string.")
+            if not task_id or not isinstance(task_id, str):
+                raise A2AMessageError("Invalid response format: 'result.id' is missing, empty, or not a string.")
+
             logger.info(f"Task successfully initiated with agent {agent_card.human_readable_id}. Task ID: {task_id}")
             return task_id
-        except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e: logger.error(f"A2A error during task initiation: {type(e).__name__}: {e}"); raise
-        except KeyManagementError as e: logger.error(f"Key management error during task initiation: {e}"); raise A2AAuthenticationError(f"Authentication failed due to key management error: {e}") from e
-        except Exception as e: logger.exception(f"Unexpected error during task initiation with agent {agent_card.human_readable_id}: {e}"); raise A2AError(f"An unexpected error occurred during task initiation: {e}") from e
+        except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e:
+            logger.error(f"A2A error during task initiation: {type(e).__name__}: {e}")
+            raise
+        except KeyManagementError as e:
+            logger.error(f"Key management error during task initiation: {e}")
+            raise A2AAuthenticationError(f"Authentication failed due to key management error: {e}") from e
+        except Exception as e:
+            logger.exception(f"Unexpected error during task initiation with agent {agent_card.human_readable_id}: {e}")
+            raise A2AError(f"An unexpected error occurred during task initiation: {e}") from e
 
     async def send_message(
         self, agent_card: AgentCard, task_id: str, message: Message, key_manager: KeyManager,
@@ -198,21 +203,26 @@ class AgentVaultClient:
             request_params_dict = task_send_params.model_dump(mode='json', exclude_none=True, by_alias=True)
             request_payload = {"jsonrpc": "2.0", "method": "tasks/send", "params": request_params_dict, "id": request_id}
             logger.debug(f"Send message request payload (id: {request_id})")
+            # _make_request handles JSON-RPC error/result parsing
             response_data = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload, stream=False)
 
-            if not isinstance(response_data, dict): raise A2AMessageError(f"Invalid response format: Expected dictionary, got {type(response_data)}")
-            if "error" in response_data:
-                error_data = response_data["error"]; logger.error(f"Agent returned error sending message to task {task_id}: {error_data}")
-                err_code = error_data.get("code", -1); err_msg = error_data.get("message", "Unknown remote agent error"); err_details = error_data.get("data")
-                raise A2ARemoteAgentError(message=err_msg, status_code=err_code, response_body=err_details)
-            if "result" not in response_data: raise A2AMessageError("Invalid JSON-RPC response format: missing 'result' key.")
-            try: TaskSendResult.model_validate(response_data["result"])
-            except pydantic.ValidationError as e: raise A2AMessageError(f"Failed to validate send message result structure: {e}") from e
+            try:
+                # Validate the result structure
+                TaskSendResult.model_validate(response_data) # Validate the result directly
+            except pydantic.ValidationError as e:
+                raise A2AMessageError(f"Failed to validate send message result structure: {e}") from e
+
             logger.info(f"Message successfully sent to task {task_id} on agent {agent_card.human_readable_id}.")
             return True
-        except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e: logger.error(f"A2A error sending message to task {task_id}: {type(e).__name__}: {e}"); raise
-        except KeyManagementError as e: logger.error(f"Key management error sending message to task {task_id}: {e}"); raise A2AAuthenticationError(f"Authentication failed due to key management error: {e}") from e
-        except Exception as e: logger.exception(f"Unexpected error sending message to task {task_id} on agent {agent_card.human_readable_id}: {e}"); raise A2AError(f"An unexpected error occurred sending message: {e}") from e
+        except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e:
+            logger.error(f"A2A error sending message to task {task_id}: {type(e).__name__}: {e}")
+            raise
+        except KeyManagementError as e:
+            logger.error(f"Key management error sending message to task {task_id}: {e}")
+            raise A2AAuthenticationError(f"Authentication failed due to key management error: {e}") from e
+        except Exception as e:
+            logger.exception(f"Unexpected error sending message to task {task_id} on agent {agent_card.human_readable_id}: {e}")
+            raise A2AError(f"An unexpected error occurred sending message: {e}") from e
 
     async def receive_messages(
         self, agent_card: AgentCard, task_id: str, key_manager: KeyManager
@@ -300,19 +310,25 @@ class AgentVaultClient:
             request_params_dict = task_get_params.model_dump(mode='json', by_alias=True)
             request_payload = {"jsonrpc": "2.0", "method": "tasks/get", "params": request_params_dict, "id": request_id}
             logger.debug(f"Get task status request payload (id: {request_id})")
+            # _make_request handles JSON-RPC error/result parsing
             response_data = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload, stream=False)
 
-            if not isinstance(response_data, dict): raise A2AMessageError(f"Invalid response format: Expected dictionary, got {type(response_data)}")
-            if "error" in response_data:
-                error_data = response_data["error"]; logger.error(f"Agent returned error getting status for task {task_id}: {error_data}")
-                err_code = error_data.get("code", -1); err_msg = error_data.get("message", "Unknown remote agent error"); err_details = error_data.get("data")
-                raise A2ARemoteAgentError(message=err_msg, status_code=err_code, response_body=err_details)
-            if "result" not in response_data: raise A2AMessageError("Invalid JSON-RPC response format: missing 'result' key.")
-            try: task_object = GetTaskResult.model_validate(response_data["result"]); logger.info(f"Successfully retrieved status for task {task_id}. State: {task_object.state}"); return task_object
-            except pydantic.ValidationError as e: raise A2AMessageError(f"Failed to validate task status result (Task model): {e}") from e
-        except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e: logger.error(f"A2A error getting status for task {task_id}: {type(e).__name__}: {e}"); raise
-        except KeyManagementError as e: logger.error(f"Key management error getting status for task {task_id}: {e}"); raise A2AAuthenticationError(f"Authentication failed due to key management error: {e}") from e
-        except Exception as e: logger.exception(f"Unexpected error getting status for task {task_id} on agent {agent_card.human_readable_id}: {e}"); raise A2AError(f"An unexpected error occurred getting task status: {e}") from e
+            try:
+                # Validate the result structure (which should be the Task object)
+                task_object = GetTaskResult.model_validate(response_data) # Validate the result directly
+                logger.info(f"Successfully retrieved status for task {task_id}. State: {task_object.state}")
+                return task_object
+            except pydantic.ValidationError as e:
+                raise A2AMessageError(f"Failed to validate task status result (Task model): {e}") from e
+        except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e:
+            logger.error(f"A2A error getting status for task {task_id}: {type(e).__name__}: {e}")
+            raise
+        except KeyManagementError as e:
+            logger.error(f"Key management error getting status for task {task_id}: {e}")
+            raise A2AAuthenticationError(f"Authentication failed due to key management error: {e}") from e
+        except Exception as e:
+            logger.exception(f"Unexpected error getting status for task {task_id} on agent {agent_card.human_readable_id}: {e}")
+            raise A2AError(f"An unexpected error occurred getting task status: {e}") from e
 
     async def terminate_task(
         self, agent_card: AgentCard, task_id: str, key_manager: KeyManager
@@ -329,23 +345,30 @@ class AgentVaultClient:
             request_params_dict = task_cancel_params.model_dump(mode='json', by_alias=True)
             request_payload = {"jsonrpc": "2.0", "method": "tasks/cancel", "params": request_params_dict, "id": request_id}
             logger.debug(f"Terminate task request payload (id: {request_id})")
+            # _make_request handles JSON-RPC error/result parsing
             response_data = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload, stream=False)
 
-            if not isinstance(response_data, dict): raise A2AMessageError(f"Invalid response format: Expected dictionary, got {type(response_data)}")
-            if "error" in response_data:
-                error_data = response_data["error"]; logger.error(f"Agent returned error terminating task {task_id}: {error_data}")
-                err_code = error_data.get("code", -1); err_msg = error_data.get("message", "Unknown remote agent error"); err_details = error_data.get("data")
-                raise A2ARemoteAgentError(message=err_msg, status_code=err_code, response_body=err_details)
-            if "result" not in response_data: raise A2AMessageError("Invalid JSON-RPC response format: missing 'result' key.")
             try:
-                result_obj = TaskCancelResult.model_validate(response_data["result"])
-                if not result_obj.success: logger.warning(f"Agent acknowledged termination request for task {task_id} but indicated failure (success=false). Message: {result_obj.message}")
-            except pydantic.ValidationError as e: raise A2AMessageError(f"Failed to validate terminate task result structure: {e}") from e
+                # Validate the result structure
+                result_obj = TaskCancelResult.model_validate(response_data) # Validate the result directly
+                if not result_obj.success:
+                    logger.warning(f"Agent acknowledged termination request for task {task_id} but indicated failure (success=false). Message: {result_obj.message}")
+            except pydantic.ValidationError as e:
+                raise A2AMessageError(f"Failed to validate terminate task result structure: {e}") from e
+
             logger.info(f"Termination request for task {task_id} acknowledged by agent {agent_card.human_readable_id}.")
+            # Note: We return True even if result_obj.success is False, as the request itself succeeded.
+            # The caller might want to check the result object if finer-grained status is needed.
             return True
-        except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e: logger.error(f"A2A error terminating task {task_id}: {type(e).__name__}: {e}"); raise
-        except KeyManagementError as e: logger.error(f"Key management error terminating task {task_id}: {e}"); raise A2AAuthenticationError(f"Authentication failed due to key management error: {e}") from e
-        except Exception as e: logger.exception(f"Unexpected error terminating task {task_id} on agent {agent_card.human_readable_id}: {e}"); raise A2AError(f"An unexpected error occurred terminating task: {e}") from e
+        except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e:
+            logger.error(f"A2A error terminating task {task_id}: {type(e).__name__}: {e}")
+            raise
+        except KeyManagementError as e:
+            logger.error(f"Key management error terminating task {task_id}: {e}")
+            raise A2AAuthenticationError(f"Authentication failed due to key management error: {e}") from e
+        except Exception as e:
+            logger.exception(f"Unexpected error terminating task {task_id} on agent {agent_card.human_readable_id}: {e}")
+            raise A2AError(f"An unexpected error occurred terminating task: {e}") from e
 
 
     # --- Private Helper Methods ---
@@ -374,7 +397,6 @@ class AgentVaultClient:
             if not service_id: raise A2AAuthenticationError(f"Cannot determine service identifier for oauth2 scheme on agent {agent_card.human_readable_id}.")
             if not oauth2_scheme.token_url: raise A2AAuthenticationError(f"Agent card specifies oauth2 scheme but is missing 'tokenUrl' for agent {agent_card.human_readable_id}.")
 
-            # --- ADDED: Token Caching Logic ---
             now = time.time()
             cached_token_info = self._token_cache.get(service_id)
             if cached_token_info:
@@ -384,7 +406,6 @@ class AgentVaultClient:
                     return {"Authorization": f"Bearer {token}"}
                 else:
                     logger.debug(f"Cached OAuth token for service '{service_id}' expired. Fetching new token.")
-            # --- END ADDED ---
 
             logger.debug(f"Retrieving OAuth credentials for service_id '{service_id}'.")
             client_id = key_manager.get_oauth_client_id(service_id)
@@ -420,20 +441,23 @@ class AgentVaultClient:
                     token_response_data = response.json()
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to decode JSON response from token endpoint {token_url_str}: {e}. Response: {response.text[:200]}...")
-                    raise A2AAuthenticationError(f"Invalid JSON response from token endpoint {token_url_str}.") from e
+                    # --- MODIFIED: Raise specific A2AAuthenticationError ---
+                    raise A2AAuthenticationError(f"Invalid JSON response from token endpoint {token_url_str}: {e}") from e
+                    # --- END MODIFIED ---
 
                 access_token = token_response_data.get("access_token")
                 token_type = token_response_data.get("token_type", "bearer") # Default to bearer if missing
 
                 if not access_token or not isinstance(access_token, str):
                     logger.error(f"Token response from {token_url_str} missing 'access_token'. Response: {token_response_data}")
+                    # --- MODIFIED: Raise specific A2AAuthenticationError ---
                     raise A2AAuthenticationError(f"Invalid token response from {token_url_str}: missing 'access_token'.")
+                    # --- END MODIFIED ---
                 if token_type.lower() != "bearer":
                     logger.warning(f"Token response from {token_url_str} has non-Bearer token_type: '{token_type}'. Proceeding anyway.")
 
                 logger.info(f"Successfully obtained OAuth token for service '{service_id}'.")
 
-                # --- ADDED: Cache the new token ---
                 expires_in = token_response_data.get("expires_in")
                 expiry_timestamp: Optional[float] = None
                 if isinstance(expires_in, (int, float)) and expires_in > 0:
@@ -442,10 +466,10 @@ class AgentVaultClient:
                 else:
                     logger.debug(f"Caching token for service '{service_id}' without expiry.")
                 self._token_cache[service_id] = (access_token, expiry_timestamp)
-                # --- END ADDED ---
 
                 return {"Authorization": f"Bearer {access_token}"}
 
+            # --- MODIFIED: Raise specific A2AAuthenticationError for each httpx error ---
             except httpx.TimeoutException as e:
                 logger.error(f"Timeout requesting OAuth token from {token_url_str}: {e}")
                 raise A2AAuthenticationError(f"Timeout connecting to token endpoint {token_url_str}.") from e
@@ -460,9 +484,10 @@ class AgentVaultClient:
                     raise A2AAuthenticationError(f"Invalid credentials or request for token endpoint {token_url_str} (HTTP {status_code}): {error_detail}") from e
                 else: # 5xx or other errors
                     raise A2AAuthenticationError(f"Token endpoint {token_url_str} returned server error (HTTP {status_code}): {error_detail}") from e
-            except httpx.RequestError as e:
+            except httpx.RequestError as e: # Catch other request errors (e.g., network issues)
                 logger.error(f"Network error requesting OAuth token from {token_url_str}: {e}")
-                raise A2AAuthenticationError(f"Network error communicating with token endpoint {token_url_str}.") from e
+                raise A2AAuthenticationError(f"Network error communicating with token endpoint {token_url_str}: {e}") from e
+            # --- END MODIFIED ---
             except Exception as e: # Catch any other unexpected error
                 logger.exception(f"Unexpected error during OAuth token request to {token_url_str}: {e}")
                 raise A2AAuthenticationError(f"Unexpected error during OAuth token request: {e}") from e
@@ -491,7 +516,11 @@ class AgentVaultClient:
                     async for chunk in response.aiter_bytes(): yield chunk; return
                 except httpx.HTTPStatusError as e:
                     await response.aread(); logger.error(f"HTTP error on stream request {log_context}: {e.response.status_code}")
-                    raise A2ARemoteAgentError(message=f"HTTP error {e.response.status_code} for {url}: {e.response.text}", status_code=e.response.status_code, response_body=e.response.text) from e
+                    try:
+                        error_body = e.response.json()
+                    except json.JSONDecodeError:
+                        error_body = e.response.text
+                    raise A2ARemoteAgentError(message=f"HTTP error {e.response.status_code} for {url}: {e.response.text}", status_code=e.response.status_code, response_body=error_body) from e
         except httpx.TimeoutException as e: logger.error(f"Request timeout for {log_context}: {e}"); raise A2ATimeoutError(f"Request timed out for {url}: {e}") from e
         except httpx.ConnectError as e: logger.error(f"Connection error for {log_context}: {e}"); raise A2AConnectionError(f"Connection failed for {url}: {e}") from e
         except httpx.RequestError as e: logger.error(f"HTTP request error for {log_context}: {e}"); raise A2AConnectionError(f"HTTP request failed for {url}: {e}") from e
@@ -501,7 +530,10 @@ class AgentVaultClient:
         self, method: str, url: str, headers: Optional[Dict[str, str]] = None,
         json_payload: Optional[Dict[str, Any]] = None, stream: bool = False
     ) -> Union[Dict[str, Any], AsyncGenerator[bytes, None]]:
-        """Internal helper to make HTTP requests using the configured httpx client."""
+        """
+        Internal helper to make HTTP requests using the configured httpx client.
+        Handles JSON-RPC error parsing for non-streaming requests.
+        """
         url_str = str(url)
         request_kwargs = {"method": method, "url": url_str, "headers": headers or {}, "json": json_payload}; log_context = f"{method} {url_str}"
         if stream: return self._stream_request(request_kwargs)
@@ -509,15 +541,47 @@ class AgentVaultClient:
             logger.debug(f"Making non-stream request: {log_context}");
             if json_payload: logger.debug(f"Request payload keys: {list(json_payload.keys())}")
             try:
-                response = await self._http_client.request(**request_kwargs); response.raise_for_status()
+                response = await self._http_client.request(**request_kwargs)
+                response.raise_for_status() # Raise HTTPStatusError for 4xx/5xx
+
+                # --- MODIFIED: Enhanced JSON-RPC response handling ---
                 try:
-                    response_data = response.json(); log_resp_str = f"size={len(response.content)} bytes, keys={list(response_data.keys())}" if isinstance(response_data, dict) else f"size={len(response.content)} bytes"; logger.debug(f"Request successful ({response.status_code}) for {log_context}. Response: {log_resp_str}"); return response_data
-                except json.JSONDecodeError as e: logger.error(f"Failed to decode JSON response from {log_context}. Status: {response.status_code}. Response text: {response.text[:200]}..."); raise A2AMessageError(f"Failed to decode JSON response from {url_str}. Status: {response.status_code}. Body: {response.text[:200]}...") from e
+                    response_data = response.json()
+                    if not isinstance(response_data, dict):
+                        raise A2AMessageError(f"Invalid response format from {url_str}: Expected dictionary, got {type(response_data)}. Body: {response.text[:200]}...")
+
+                    # Check for JSON-RPC error structure first
+                    if "error" in response_data:
+                        error_obj = response_data["error"]
+                        if isinstance(error_obj, dict):
+                            err_code = error_obj.get("code", -1)
+                            err_msg = error_obj.get("message", "Unknown remote agent error")
+                            err_details = error_obj.get("data")
+                            logger.error(f"Agent returned JSON-RPC error for {log_context}: code={err_code}, msg='{err_msg}', data={err_details}")
+                            raise A2ARemoteAgentError(message=err_msg, status_code=err_code, response_body=err_details)
+                        else:
+                            raise A2AMessageError(f"Invalid JSON-RPC error format from {url_str}: 'error' field is not a dictionary. Body: {response.text[:200]}...")
+
+                    # Check for JSON-RPC result structure
+                    elif "result" in response_data:
+                        log_resp_str = f"size={len(response.content)} bytes, keys={list(response_data.get('result').keys())}" if isinstance(response_data.get('result'), dict) else f"size={len(response.content)} bytes";
+                        logger.debug(f"Request successful ({response.status_code}) for {log_context}. Response: {log_resp_str}")
+                        return response_data["result"] # Return only the result part
+
+                    # If neither error nor result is present, it's invalid JSON-RPC
+                    else:
+                        raise A2AMessageError(f"Invalid JSON-RPC response from {url_str}: Missing 'result' or 'error' key. Body: {response.text[:200]}...")
+
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to decode JSON response from {log_context}. Status: {response.status_code}. Response text: {response.text[:200]}...")
+                    raise A2AMessageError(f"Failed to decode JSON response from {url_str}. Status: {response.status_code}. Body: {response.text[:200]}...") from e
+                # --- END MODIFIED ---
+
             except httpx.TimeoutException as e: logger.error(f"Request timeout for {log_context}: {e}"); raise A2ATimeoutError(f"Request timed out for {url_str}: {e}") from e
             except httpx.ConnectError as e: logger.error(f"Connection error for {log_context}: {e}"); raise A2AConnectionError(f"Connection failed for {url_str}: {e}") from e
             except httpx.HTTPStatusError as e: logger.error(f"HTTP error on request {log_context}: {e.response.status_code}"); raise A2ARemoteAgentError(message=f"HTTP error {e.response.status_code} for {url_str}: {e.response.text}", status_code=e.response.status_code, response_body=e.response.text) from e
             except httpx.RequestError as e: logger.error(f"HTTP request error for {log_context}: {e}"); raise A2AConnectionError(f"HTTP request failed for {url_str}: {e}") from e
-            except (A2AMessageError, A2AAuthenticationError, A2ARemoteAgentError) as e: logger.error(f"A2A error during request processing for {log_context}: {e}"); raise
+            except (A2AMessageError, A2AAuthenticationError, A2ARemoteAgentError) as e: logger.error(f"A2A error during request processing for {log_context}: {e}"); raise # Re-raise specific A2A errors
             except Exception as e: logger.exception(f"Unexpected error during request {log_context}: {e}"); raise A2AError(f"An unexpected error occurred during the request for {url_str}: {e}") from e
 
     async def _process_sse_stream(self, byte_stream: AsyncGenerator[bytes, None]) -> AsyncGenerator[Dict[str, Any], None]:
