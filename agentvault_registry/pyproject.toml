@@ -7,6 +7,22 @@
     license = { text = "Apache-2.0" }
     readme = "README.md"
     requires-python = ">=3.10,<3.12"
+    keywords = ["ai", "agent", "a2a", "mcp", "registry", "discovery", "fastapi", "api", "rest", "postgresql", "asyncpg", "sqlalchemy", "alembic", "security", "interoperability", "python"]
+    classifiers = [
+        "Development Status :: 3 - Alpha",
+        "Intended Audience :: Developers",
+        "License :: OSI Approved :: Apache Software License",
+        "Operating System :: OS Independent",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Framework :: FastAPI",
+        "Topic :: Database",
+        "Topic :: Internet :: WWW/HTTP :: WSGI :: Application", # Uvicorn runs ASGI apps
+        "Topic :: System :: Systems Administration", # Related to registry/discovery
+        "Topic :: Software Development :: Libraries :: Application Frameworks",
+        "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    ]
 
     # Define ALL dependencies here for pip/build tools
     dependencies = [
