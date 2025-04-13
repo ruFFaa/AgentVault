@@ -5,7 +5,10 @@ import json
 import uuid
 import datetime
 import asyncio
-from unittest.mock import MagicMock, ANY, patch
+# --- MODIFIED: Remove ANY import ---
+from unittest.mock import MagicMock, call, patch # Removed ANY
+# --- END MODIFIED ---
+
 
 # Import client, models, exceptions, and KeyManager
 from agentvault.client import AgentVaultClient, A2AEvent
@@ -26,6 +29,13 @@ AGENT_URL = "https://fake-agent.example.com/a2a"
 TEST_API_KEY = "test-key-123"
 TEST_SERVICE_ID = "test-agent-service"
 TEST_TASK_ID = "task-abc-123"
+# OAuth Fixtures
+TEST_OAUTH_SERVICE_ID = "oauth-service"
+TEST_OAUTH_CLIENT_ID = "oauth-client-id-123"
+TEST_OAUTH_CLIENT_SECRET = "oauth-client-secret-xyz"
+TEST_OAUTH_TOKEN_URL = "https://auth.example.com/token"
+TEST_OAUTH_ACCESS_TOKEN = "test-access-token-456"
+
 
 @pytest.fixture
 def agent_card_dict_fixture() -> dict:
@@ -59,15 +69,13 @@ def agent_card_no_auth_fixture() -> AgentCard:
 @pytest.fixture
 def agent_card_oauth2_fixture() -> AgentCard:
     """Provides an AgentCard instance supporting only OAuth2."""
-    # --- FIX: Use model_validate to ensure internal validation passes ---
     card_data = {
         "schemaVersion":"1.0", "humanReadableId":"test-org/oauth2-agent", "agentVersion":"1.0.0",
         "name":"OAuth2 Test Agent", "description":"Agent for testing oauth2 auth.", "url":AGENT_URL + "/oauth",
         "provider":{"name": "Test Suite Inc."}, "capabilities":{"a2aVersion":"1.0"},
-        "authSchemes":[{"scheme":"oauth2", "tokenUrl":"https://auth.example.com/token", "scopes":["tasks:read"]}]
+        "authSchemes":[{"scheme":"oauth2", "tokenUrl":TEST_OAUTH_TOKEN_URL, "scopes":["tasks:read"], "service_identifier": TEST_OAUTH_SERVICE_ID}]
     }
     return AgentCard.model_validate(card_data)
-    # --- END FIX ---
 
 
 @pytest.fixture
@@ -125,40 +133,152 @@ async def test_client_context_manager_external():
     await external_http_client.aclose()
 
 # --- Test _get_auth_headers ---
-def test_get_auth_headers_apikey_success(agent_card_fixture, mock_key_manager):
+@pytest.mark.asyncio
+async def test_get_auth_headers_apikey_success(agent_card_fixture, mock_key_manager):
     client = AgentVaultClient()
-    headers = client._get_auth_headers(agent_card_fixture, mock_key_manager)
+    headers = await client._get_auth_headers(agent_card_fixture, mock_key_manager)
     assert headers == {"X-Api-Key": TEST_API_KEY}
     mock_key_manager.get_key.assert_called_once_with(TEST_SERVICE_ID)
 
-def test_get_auth_headers_none_success(agent_card_no_auth_fixture, mock_key_manager):
+@pytest.mark.asyncio
+async def test_get_auth_headers_none_success(agent_card_no_auth_fixture, mock_key_manager):
     client = AgentVaultClient()
-    headers = client._get_auth_headers(agent_card_no_auth_fixture, mock_key_manager)
+    headers = await client._get_auth_headers(agent_card_no_auth_fixture, mock_key_manager)
     assert headers == {}
     mock_key_manager.get_key.assert_not_called()
 
-def test_get_auth_headers_key_missing(agent_card_fixture, mock_key_manager):
+@pytest.mark.asyncio
+async def test_get_auth_headers_key_missing(agent_card_fixture, mock_key_manager):
     mock_key_manager.get_key.return_value = None
     client = AgentVaultClient()
     with pytest.raises(A2AAuthenticationError, match=f"Missing API key for service '{TEST_SERVICE_ID}'"):
-        client._get_auth_headers(agent_card_fixture, mock_key_manager)
+        await client._get_auth_headers(agent_card_fixture, mock_key_manager)
 
-def test_get_auth_headers_no_supported_scheme(agent_card_dict_fixture, mock_key_manager):
+@pytest.mark.asyncio
+async def test_get_auth_headers_no_supported_scheme(agent_card_dict_fixture, mock_key_manager):
     unsupported_data = agent_card_dict_fixture.copy()
     unsupported_data["authSchemes"] = [{"scheme": "bearer"}] # Use bearer as unsupported example
     unsupported_card = AgentCard.model_validate(unsupported_data)
     client = AgentVaultClient()
     assert [s.scheme for s in unsupported_card.auth_schemes] == ["bearer"]
     with pytest.raises(A2AAuthenticationError, match="No compatible authentication scheme found"):
-        client._get_auth_headers(unsupported_card, mock_key_manager)
+        await client._get_auth_headers(unsupported_card, mock_key_manager)
 
-def test_get_auth_headers_oauth2_not_implemented(agent_card_oauth2_fixture, mock_key_manager):
-    """Test that oauth2 scheme raises NotImplementedError for now."""
+# --- Tests for OAuth2 Flow in _get_auth_headers ---
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_auth_headers_oauth2_success(agent_card_oauth2_fixture, mock_key_manager):
+    """Test successful OAuth2 token retrieval."""
+    mock_key_manager.get_oauth_client_id.return_value = TEST_OAUTH_CLIENT_ID
+    mock_key_manager.get_oauth_client_secret.return_value = TEST_OAUTH_CLIENT_SECRET
+
+    # Mock the token endpoint
+    respx.post(TEST_OAUTH_TOKEN_URL).mock(
+        return_value=httpx.Response(200, json={
+            "access_token": TEST_OAUTH_ACCESS_TOKEN,
+            "token_type": "Bearer",
+            "expires_in": 3600
+        })
+    )
+
     client = AgentVaultClient()
-    with pytest.raises(NotImplementedError, match="OAuth2 authentication flow not yet implemented"):
-        client._get_auth_headers(agent_card_oauth2_fixture, mock_key_manager)
-    # Ensure API key retrieval was not attempted
-    mock_key_manager.get_key.assert_not_called()
+    headers = await client._get_auth_headers(agent_card_oauth2_fixture, mock_key_manager)
+
+    assert headers == {"Authorization": f"Bearer {TEST_OAUTH_ACCESS_TOKEN}"}
+    mock_key_manager.get_oauth_client_id.assert_called_once_with(TEST_OAUTH_SERVICE_ID)
+    mock_key_manager.get_oauth_client_secret.assert_called_once_with(TEST_OAUTH_SERVICE_ID)
+    # Check token request payload
+    token_request = respx.calls[0].request
+    assert token_request.headers["content-type"] == "application/x-www-form-urlencoded"
+    # httpx encodes form data, need to decode for assertion
+    content = token_request.content.decode()
+    assert f"client_id={TEST_OAUTH_CLIENT_ID}" in content
+    assert f"client_secret={TEST_OAUTH_CLIENT_SECRET}" in content
+    assert "grant_type=client_credentials" in content
+    assert "scope=tasks%3Aread" in content # Check scopes are included and url-encoded
+
+
+@pytest.mark.asyncio
+async def test_get_auth_headers_oauth2_missing_creds(agent_card_oauth2_fixture, mock_key_manager):
+    """Test failure when KeyManager doesn't have OAuth creds."""
+    mock_key_manager.get_oauth_client_id.return_value = None # Simulate missing ID
+    mock_key_manager.get_oauth_client_secret.return_value = TEST_OAUTH_CLIENT_SECRET
+
+    client = AgentVaultClient()
+    with pytest.raises(A2AAuthenticationError, match=f"Missing OAuth Client ID or Client Secret for service '{TEST_OAUTH_SERVICE_ID}'"):
+        await client._get_auth_headers(agent_card_oauth2_fixture, mock_key_manager)
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_auth_headers_oauth2_token_endpoint_401(agent_card_oauth2_fixture, mock_key_manager):
+    """Test failure when token endpoint returns 401."""
+    mock_key_manager.get_oauth_client_id.return_value = TEST_OAUTH_CLIENT_ID
+    mock_key_manager.get_oauth_client_secret.return_value = "wrong_secret"
+    respx.post(TEST_OAUTH_TOKEN_URL).mock(return_value=httpx.Response(401, json={"error": "invalid_client"}))
+
+    client = AgentVaultClient()
+    with pytest.raises(A2AAuthenticationError, match="Invalid credentials or request"):
+        await client._get_auth_headers(agent_card_oauth2_fixture, mock_key_manager)
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_auth_headers_oauth2_token_endpoint_500(agent_card_oauth2_fixture, mock_key_manager):
+    """Test failure when token endpoint returns 500."""
+    mock_key_manager.get_oauth_client_id.return_value = TEST_OAUTH_CLIENT_ID
+    mock_key_manager.get_oauth_client_secret.return_value = TEST_OAUTH_CLIENT_SECRET
+    respx.post(TEST_OAUTH_TOKEN_URL).mock(return_value=httpx.Response(500, text="Server Error"))
+
+    client = AgentVaultClient()
+    with pytest.raises(A2AAuthenticationError, match="Token endpoint .* returned server error"):
+        await client._get_auth_headers(agent_card_oauth2_fixture, mock_key_manager)
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_auth_headers_oauth2_token_endpoint_connect_error(agent_card_oauth2_fixture, mock_key_manager):
+    """Test failure when token endpoint connection fails."""
+    mock_key_manager.get_oauth_client_id.return_value = TEST_OAUTH_CLIENT_ID
+    mock_key_manager.get_oauth_client_secret.return_value = TEST_OAUTH_CLIENT_SECRET
+    respx.post(TEST_OAUTH_TOKEN_URL).mock(side_effect=httpx.ConnectError("Connection refused"))
+
+    client = AgentVaultClient()
+    with pytest.raises(A2AAuthenticationError, match="Could not connect to token endpoint"):
+        await client._get_auth_headers(agent_card_oauth2_fixture, mock_key_manager)
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_auth_headers_oauth2_token_endpoint_timeout(agent_card_oauth2_fixture, mock_key_manager):
+    """Test failure when token endpoint times out."""
+    mock_key_manager.get_oauth_client_id.return_value = TEST_OAUTH_CLIENT_ID
+    mock_key_manager.get_oauth_client_secret.return_value = TEST_OAUTH_CLIENT_SECRET
+    respx.post(TEST_OAUTH_TOKEN_URL).mock(side_effect=httpx.TimeoutException("Timeout"))
+
+    client = AgentVaultClient()
+    with pytest.raises(A2AAuthenticationError, match="Timeout connecting to token endpoint"):
+        await client._get_auth_headers(agent_card_oauth2_fixture, mock_key_manager)
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_auth_headers_oauth2_token_endpoint_invalid_json(agent_card_oauth2_fixture, mock_key_manager):
+    """Test failure when token endpoint returns invalid JSON."""
+    mock_key_manager.get_oauth_client_id.return_value = TEST_OAUTH_CLIENT_ID
+    mock_key_manager.get_oauth_client_secret.return_value = TEST_OAUTH_CLIENT_SECRET
+    respx.post(TEST_OAUTH_TOKEN_URL).mock(return_value=httpx.Response(200, text="{not json"))
+
+    client = AgentVaultClient()
+    with pytest.raises(A2AAuthenticationError, match="Invalid JSON response from token endpoint"):
+        await client._get_auth_headers(agent_card_oauth2_fixture, mock_key_manager)
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_auth_headers_oauth2_token_endpoint_missing_token(agent_card_oauth2_fixture, mock_key_manager):
+    """Test failure when token endpoint response misses access_token."""
+    mock_key_manager.get_oauth_client_id.return_value = TEST_OAUTH_CLIENT_ID
+    mock_key_manager.get_oauth_client_secret.return_value = TEST_OAUTH_CLIENT_SECRET
+    respx.post(TEST_OAUTH_TOKEN_URL).mock(return_value=httpx.Response(200, json={"token_type": "Bearer"}))
+
+    client = AgentVaultClient()
+    with pytest.raises(A2AAuthenticationError, match="Invalid token response.*missing 'access_token'"):
+        await client._get_auth_headers(agent_card_oauth2_fixture, mock_key_manager)
 
 
 # --- Test initiate_task ---
@@ -194,11 +314,34 @@ async def test_initiate_task_auth_error(agent_card_fixture, mock_key_manager, sa
             await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager)
 
 @pytest.mark.asyncio
-async def test_initiate_task_oauth_error(agent_card_oauth2_fixture, mock_key_manager, sample_message):
-    """Test initiate_task fails correctly when OAuth is not yet implemented."""
+@respx.mock # Keep respx mock for token endpoint
+async def test_initiate_task_oauth_success(agent_card_oauth2_fixture, mock_key_manager, sample_message):
+    """Test initiate_task succeeds using OAuth2."""
+    # Setup KeyManager mock for OAuth
+    mock_key_manager.get_oauth_client_id.return_value = TEST_OAUTH_CLIENT_ID
+    mock_key_manager.get_oauth_client_secret.return_value = TEST_OAUTH_CLIENT_SECRET
+
+    # Mock Token Endpoint
+    respx.post(TEST_OAUTH_TOKEN_URL).mock(
+        return_value=httpx.Response(200, json={"access_token": TEST_OAUTH_ACCESS_TOKEN, "token_type": "Bearer"})
+    )
+
+    # Mock A2A Endpoint
+    expected_task_id = f"task-oauth-{uuid.uuid4()}"
+    # --- FIX: Use JSON serializable value for ID ---
+    mock_a2a_response = {"jsonrpc": "2.0", "result": {"id": expected_task_id}, "id": "mock-req-id"}
+    # --- END FIX ---
+    agent_url_str = str(agent_card_oauth2_fixture.url)
+    route_a2a = respx.post(agent_url_str).mock(return_value=httpx.Response(200, json=mock_a2a_response))
+
     async with AgentVaultClient() as client:
-        with pytest.raises(A2AAuthenticationError, match="Authentication scheme 'oauth2' not yet implemented"):
-            await client.initiate_task(agent_card_oauth2_fixture, sample_message, mock_key_manager)
+        task_id = await client.initiate_task(agent_card_oauth2_fixture, sample_message, mock_key_manager)
+
+    assert task_id == expected_task_id
+    assert route_a2a.called
+    # Check A2A request has Bearer token
+    a2a_request = route_a2a.calls[0].request
+    assert a2a_request.headers["authorization"] == f"Bearer {TEST_OAUTH_ACCESS_TOKEN}"
 
 
 @pytest.mark.asyncio
@@ -364,9 +507,7 @@ async def test_receive_messages_invalid_json(agent_card_fixture, mock_key_manage
 @pytest.mark.asyncio
 async def test_receive_messages_validation_error(agent_card_fixture, mock_key_manager, mocker, caplog):
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    # --- FIX: Use valid TaskState ---
     sse_lines = [f"event: task_status\ndata: {json.dumps({'taskId': TEST_TASK_ID, 'state': 'INVALID_STATE', 'timestamp': now_iso})}\n\n", f"event: task_message\ndata: {json.dumps({'taskId': TEST_TASK_ID, 'message': {'role': 'assistant', 'parts': [{'type': 'text', 'content': 'OK'}]}, 'timestamp': now_iso})}\n\n"]
-    # --- END FIX ---
     mock_stream_gen = mock_sse_stream(*sse_lines)
     async def mock_make_request_side_effect(*args, **kwargs): return mock_stream_gen
     mocker.patch.object(AgentVaultClient, "_make_request", side_effect=mock_make_request_side_effect)
