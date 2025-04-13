@@ -12,6 +12,9 @@ import httpx
 import typing
 import uuid
 import pydantic
+# --- ADDED: Import time ---
+import time
+# --- END ADDED ---
 from typing import Optional, Dict, Any, Union, AsyncGenerator, Tuple
 
 # Import local models
@@ -43,6 +46,9 @@ SSE_EVENT_TYPE_MAP = {
     "message": TaskMessageEvent, # Allow 'message' as an alias for task_message
 }
 
+# --- ADDED: Cache constants ---
+CACHE_EXPIRY_BUFFER_SECONDS = 60 # Fetch token 60s before it actually expires
+# --- END ADDED ---
 
 class AgentVaultClient:
     """
@@ -117,9 +123,7 @@ class AgentVaultClient:
             request_params_dict = task_send_params.model_dump(mode='json', exclude_none=True, by_alias=True)
             request_payload = {"jsonrpc": "2.0", "method": "tasks/send", "params": request_params_dict, "id": request_id}
             logger.debug(f"Initiate task request payload (id: {request_id})")
-            # --- FIX: Cast agent_card.url to str ---
             response_data = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload, stream=False)
-            # --- END FIX ---
 
             if not isinstance(response_data, dict): raise A2AMessageError(f"Invalid response format: Expected dictionary, got {type(response_data)}")
             if "error" in response_data:
@@ -164,9 +168,7 @@ class AgentVaultClient:
             request_params_dict = task_send_params.model_dump(mode='json', exclude_none=True, by_alias=True)
             request_payload = {"jsonrpc": "2.0", "method": "tasks/send", "params": request_params_dict, "id": request_id}
             logger.debug(f"Send message request payload (id: {request_id})")
-            # --- FIX: Cast agent_card.url to str ---
             response_data = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload, stream=False)
-            # --- END FIX ---
 
             if not isinstance(response_data, dict): raise A2AMessageError(f"Invalid response format: Expected dictionary, got {type(response_data)}")
             if "error" in response_data:
@@ -207,7 +209,6 @@ class AgentVaultClient:
             logger.debug(f"Subscribe request payload (id: {request_id})")
 
             byte_stream_gen: AsyncGenerator[bytes, None]
-            # --- FIX: Cast agent_card.url to str ---
             stream_result = await self._make_request(
                 method='POST',
                 url=str(agent_card.url),
@@ -215,7 +216,6 @@ class AgentVaultClient:
                 json_payload=request_payload,
                 stream=True
             )
-            # --- END FIX ---
 
             if not isinstance(stream_result, typing.AsyncGenerator):
                  raise A2AError(f"_make_request did not return an AsyncGenerator for stream=True (got {type(stream_result)})")
@@ -270,9 +270,7 @@ class AgentVaultClient:
             request_params_dict = task_get_params.model_dump(mode='json', by_alias=True)
             request_payload = {"jsonrpc": "2.0", "method": "tasks/get", "params": request_params_dict, "id": request_id}
             logger.debug(f"Get task status request payload (id: {request_id})")
-            # --- FIX: Cast agent_card.url to str ---
             response_data = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload, stream=False)
-            # --- END FIX ---
 
             if not isinstance(response_data, dict): raise A2AMessageError(f"Invalid response format: Expected dictionary, got {type(response_data)}")
             if "error" in response_data:
@@ -301,9 +299,7 @@ class AgentVaultClient:
             request_params_dict = task_cancel_params.model_dump(mode='json', by_alias=True)
             request_payload = {"jsonrpc": "2.0", "method": "tasks/cancel", "params": request_params_dict, "id": request_id}
             logger.debug(f"Terminate task request payload (id: {request_id})")
-            # --- FIX: Cast agent_card.url to str ---
             response_data = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload, stream=False)
-            # --- END FIX ---
 
             if not isinstance(response_data, dict): raise A2AMessageError(f"Invalid response format: Expected dictionary, got {type(response_data)}")
             if "error" in response_data:
@@ -348,7 +344,17 @@ class AgentVaultClient:
             if not service_id: raise A2AAuthenticationError(f"Cannot determine service identifier for oauth2 scheme on agent {agent_card.human_readable_id}.")
             if not oauth2_scheme.token_url: raise A2AAuthenticationError(f"Agent card specifies oauth2 scheme but is missing 'tokenUrl' for agent {agent_card.human_readable_id}.")
 
-            # --- TODO (Task 2.B.8): Implement token caching check here ---
+            # --- ADDED: Token Caching Logic ---
+            now = time.time()
+            cached_token_info = self._token_cache.get(service_id)
+            if cached_token_info:
+                token, expiry = cached_token_info
+                if expiry is None or expiry > now:
+                    logger.debug(f"Using cached OAuth token for service '{service_id}'.")
+                    return {"Authorization": f"Bearer {token}"}
+                else:
+                    logger.debug(f"Cached OAuth token for service '{service_id}' expired. Fetching new token.")
+            # --- END ADDED ---
 
             logger.debug(f"Retrieving OAuth credentials for service_id '{service_id}'.")
             client_id = key_manager.get_oauth_client_id(service_id)
@@ -371,7 +377,6 @@ class AgentVaultClient:
 
             logger.debug(f"Requesting OAuth token from {token_url_str} for service '{service_id}'.")
             try:
-                # Use internal client directly for specific error handling
                 response = await self._http_client.request(
                     method="POST",
                     url=token_url_str,
@@ -397,7 +402,17 @@ class AgentVaultClient:
                     logger.warning(f"Token response from {token_url_str} has non-Bearer token_type: '{token_type}'. Proceeding anyway.")
 
                 logger.info(f"Successfully obtained OAuth token for service '{service_id}'.")
-                # --- TODO (Task 2.B.8): Cache the token here ---
+
+                # --- ADDED: Cache the new token ---
+                expires_in = token_response_data.get("expires_in")
+                expiry_timestamp: Optional[float] = None
+                if isinstance(expires_in, (int, float)) and expires_in > 0:
+                    expiry_timestamp = time.time() + expires_in - CACHE_EXPIRY_BUFFER_SECONDS
+                    logger.debug(f"Caching token for service '{service_id}' with expiry {expiry_timestamp} (expires_in={expires_in}s).")
+                else:
+                    logger.debug(f"Caching token for service '{service_id}' without expiry.")
+                self._token_cache[service_id] = (access_token, expiry_timestamp)
+                # --- END ADDED ---
 
                 return {"Authorization": f"Bearer {access_token}"}
 
@@ -457,9 +472,7 @@ class AgentVaultClient:
         json_payload: Optional[Dict[str, Any]] = None, stream: bool = False
     ) -> Union[Dict[str, Any], AsyncGenerator[bytes, None]]:
         """Internal helper to make HTTP requests using the configured httpx client."""
-        # --- FIX: Ensure URL is string ---
         url_str = str(url)
-        # --- END FIX ---
         request_kwargs = {"method": method, "url": url_str, "headers": headers or {}, "json": json_payload}; log_context = f"{method} {url_str}"
         if stream: return self._stream_request(request_kwargs)
         else:

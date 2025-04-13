@@ -5,13 +5,11 @@ import json
 import uuid
 import datetime
 import asyncio
-# --- MODIFIED: Remove ANY import ---
-from unittest.mock import MagicMock, call, patch # Removed ANY
-# --- END MODIFIED ---
-
+import time
+from unittest.mock import MagicMock, call, patch
 
 # Import client, models, exceptions, and KeyManager
-from agentvault.client import AgentVaultClient, A2AEvent
+from agentvault.client import AgentVaultClient, A2AEvent, CACHE_EXPIRY_BUFFER_SECONDS
 from agentvault.key_manager import KeyManager
 from agentvault.models import (
     AgentCard, AgentProvider, AgentCapabilities, AgentAuthentication, Message, TextPart,
@@ -35,6 +33,7 @@ TEST_OAUTH_CLIENT_ID = "oauth-client-id-123"
 TEST_OAUTH_CLIENT_SECRET = "oauth-client-secret-xyz"
 TEST_OAUTH_TOKEN_URL = "https://auth.example.com/token"
 TEST_OAUTH_ACCESS_TOKEN = "test-access-token-456"
+TEST_OAUTH_ACCESS_TOKEN_2 = "test-access-token-789-new"
 
 
 @pytest.fixture
@@ -173,7 +172,7 @@ async def test_get_auth_headers_oauth2_success(agent_card_oauth2_fixture, mock_k
     mock_key_manager.get_oauth_client_secret.return_value = TEST_OAUTH_CLIENT_SECRET
 
     # Mock the token endpoint
-    respx.post(TEST_OAUTH_TOKEN_URL).mock(
+    token_route = respx.post(TEST_OAUTH_TOKEN_URL).mock(
         return_value=httpx.Response(200, json={
             "access_token": TEST_OAUTH_ACCESS_TOKEN,
             "token_type": "Bearer",
@@ -188,9 +187,9 @@ async def test_get_auth_headers_oauth2_success(agent_card_oauth2_fixture, mock_k
     mock_key_manager.get_oauth_client_id.assert_called_once_with(TEST_OAUTH_SERVICE_ID)
     mock_key_manager.get_oauth_client_secret.assert_called_once_with(TEST_OAUTH_SERVICE_ID)
     # Check token request payload
-    token_request = respx.calls[0].request
+    assert token_route.called
+    token_request = token_route.calls[0].request
     assert token_request.headers["content-type"] == "application/x-www-form-urlencoded"
-    # httpx encodes form data, need to decode for assertion
     content = token_request.content.decode()
     assert f"client_id={TEST_OAUTH_CLIENT_ID}" in content
     assert f"client_secret={TEST_OAUTH_CLIENT_SECRET}" in content
@@ -280,6 +279,157 @@ async def test_get_auth_headers_oauth2_token_endpoint_missing_token(agent_card_o
     with pytest.raises(A2AAuthenticationError, match="Invalid token response.*missing 'access_token'"):
         await client._get_auth_headers(agent_card_oauth2_fixture, mock_key_manager)
 
+# --- Tests for OAuth Token Caching ---
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_auth_headers_oauth2_cache_hit(agent_card_oauth2_fixture, mock_key_manager):
+    """Test that a valid cached token is used."""
+    mock_key_manager.get_oauth_client_id.return_value = TEST_OAUTH_CLIENT_ID
+    mock_key_manager.get_oauth_client_secret.return_value = TEST_OAUTH_CLIENT_SECRET
+
+    # Mock the token endpoint (should not be called if cache hits)
+    token_route = respx.post(TEST_OAUTH_TOKEN_URL).mock(
+        return_value=httpx.Response(200, json={"access_token": "should_not_use_this", "token_type": "Bearer"})
+    )
+
+    client = AgentVaultClient()
+    # Pre-populate cache with a valid token
+    valid_expiry = time.time() + 1000
+    client._token_cache[TEST_OAUTH_SERVICE_ID] = (TEST_OAUTH_ACCESS_TOKEN, valid_expiry)
+
+    headers = await client._get_auth_headers(agent_card_oauth2_fixture, mock_key_manager)
+
+    assert headers == {"Authorization": f"Bearer {TEST_OAUTH_ACCESS_TOKEN}"}
+    assert not token_route.called # Verify token endpoint was NOT called
+    # Verify KeyManager was not called either as token was cached
+    mock_key_manager.get_oauth_client_id.assert_not_called()
+    mock_key_manager.get_oauth_client_secret.assert_not_called()
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_auth_headers_oauth2_cache_expired(agent_card_oauth2_fixture, mock_key_manager):
+    """Test that an expired cached token triggers a new fetch."""
+    mock_key_manager.get_oauth_client_id.return_value = TEST_OAUTH_CLIENT_ID
+    mock_key_manager.get_oauth_client_secret.return_value = TEST_OAUTH_CLIENT_SECRET
+
+    # Mock the token endpoint for the new fetch
+    token_route = respx.post(TEST_OAUTH_TOKEN_URL).mock(
+        return_value=httpx.Response(200, json={
+            "access_token": TEST_OAUTH_ACCESS_TOKEN_2, # Return a new token
+            "token_type": "Bearer",
+            "expires_in": 3600
+        })
+    )
+
+    client = AgentVaultClient()
+    # Pre-populate cache with an expired token
+    expired_expiry = time.time() - 1000
+    client._token_cache[TEST_OAUTH_SERVICE_ID] = ("expired_token", expired_expiry)
+
+    headers = await client._get_auth_headers(agent_card_oauth2_fixture, mock_key_manager)
+
+    # Should get the new token
+    assert headers == {"Authorization": f"Bearer {TEST_OAUTH_ACCESS_TOKEN_2}"}
+    assert token_route.called # Verify token endpoint WAS called
+    # Verify KeyManager was called to get creds for the new request
+    mock_key_manager.get_oauth_client_id.assert_called_once_with(TEST_OAUTH_SERVICE_ID)
+    mock_key_manager.get_oauth_client_secret.assert_called_once_with(TEST_OAUTH_SERVICE_ID)
+    # Verify cache was updated
+    assert client._token_cache[TEST_OAUTH_SERVICE_ID][0] == TEST_OAUTH_ACCESS_TOKEN_2
+    assert client._token_cache[TEST_OAUTH_SERVICE_ID][1] > time.time() # Check expiry is in the future
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_auth_headers_oauth2_cache_no_expiry(agent_card_oauth2_fixture, mock_key_manager):
+    """Test caching and reuse of a token without expiry info."""
+    mock_key_manager.get_oauth_client_id.return_value = TEST_OAUTH_CLIENT_ID
+    mock_key_manager.get_oauth_client_secret.return_value = TEST_OAUTH_CLIENT_SECRET
+
+    # Mock the token endpoint (called first time)
+    token_route = respx.post(TEST_OAUTH_TOKEN_URL).mock(
+        return_value=httpx.Response(200, json={
+            "access_token": TEST_OAUTH_ACCESS_TOKEN,
+            "token_type": "Bearer" # No expires_in
+        })
+    )
+
+    client = AgentVaultClient()
+
+    # First call - fetches token
+    headers1 = await client._get_auth_headers(agent_card_oauth2_fixture, mock_key_manager)
+    assert headers1 == {"Authorization": f"Bearer {TEST_OAUTH_ACCESS_TOKEN}"}
+    assert token_route.call_count == 1
+    assert client._token_cache[TEST_OAUTH_SERVICE_ID] == (TEST_OAUTH_ACCESS_TOKEN, None) # Check expiry is None
+
+    # Second call - should use cache
+    headers2 = await client._get_auth_headers(agent_card_oauth2_fixture, mock_key_manager)
+    assert headers2 == {"Authorization": f"Bearer {TEST_OAUTH_ACCESS_TOKEN}"}
+    assert token_route.call_count == 1 # Should not be called again
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_auth_headers_oauth2_cache_different_services(agent_card_oauth2_fixture, mock_key_manager):
+    """Test that cache is specific to the service_id."""
+    service_id_1 = "service_one"
+    service_id_2 = "service_two"
+    token_1 = "token_for_1"
+    token_2 = "token_for_2"
+
+    # Modify fixture for service 1
+    card1_data = agent_card_oauth2_fixture.model_dump(by_alias=True)
+    card1_data["authSchemes"][0]["service_identifier"] = service_id_1
+    card1 = AgentCard.model_validate(card1_data)
+
+    # Modify fixture for service 2
+    card2_data = agent_card_oauth2_fixture.model_dump(by_alias=True)
+    card2_data["authSchemes"][0]["service_identifier"] = service_id_2
+    card2 = AgentCard.model_validate(card2_data)
+
+    # --- FIX: Configure mock KeyManager side_effect ---
+    def mock_get_id(sid):
+        if sid == service_id_1: return f"id_for_{service_id_1}"
+        if sid == service_id_2: return f"id_for_{service_id_2}"
+        return None
+    def mock_get_secret(sid):
+        if sid == service_id_1: return f"secret_for_{service_id_1}"
+        if sid == service_id_2: return f"secret_for_{service_id_2}"
+        return None
+    mock_key_manager.get_oauth_client_id.side_effect = mock_get_id
+    mock_key_manager.get_oauth_client_secret.side_effect = mock_get_secret
+    # --- END FIX ---
+
+    # Mock token endpoint to return different tokens based on client_id
+    def token_response(request):
+        content = request.content.decode()
+        payload = dict(item.split("=") for item in content.split("&")) # Simple form decode
+        if payload.get("client_id") == f"id_for_{service_id_1}":
+            return httpx.Response(200, json={"access_token": token_1, "token_type": "Bearer"})
+        elif payload.get("client_id") == f"id_for_{service_id_2}":
+            return httpx.Response(200, json={"access_token": token_2, "token_type": "Bearer"})
+        else:
+            return httpx.Response(401, json={"error": "mock_invalid_client"}) # Return JSON body for clarity
+    token_route = respx.post(TEST_OAUTH_TOKEN_URL).mock(side_effect=token_response)
+
+    client = AgentVaultClient()
+
+    # Get token for service 1
+    headers1 = await client._get_auth_headers(card1, mock_key_manager)
+    assert headers1 == {"Authorization": f"Bearer {token_1}"}
+    assert token_route.call_count == 1
+    assert client._token_cache[service_id_1] == (token_1, None)
+    assert service_id_2 not in client._token_cache
+
+    # Get token for service 2
+    headers2 = await client._get_auth_headers(card2, mock_key_manager)
+    assert headers2 == {"Authorization": f"Bearer {token_2}"}
+    assert token_route.call_count == 2
+    assert client._token_cache[service_id_2] == (token_2, None)
+
+    # Get token for service 1 again - should hit cache
+    headers3 = await client._get_auth_headers(card1, mock_key_manager)
+    assert headers3 == {"Authorization": f"Bearer {token_1}"}
+    assert token_route.call_count == 2 # No new call
+
 
 # --- Test initiate_task ---
 @pytest.mark.asyncio
@@ -328,9 +478,7 @@ async def test_initiate_task_oauth_success(agent_card_oauth2_fixture, mock_key_m
 
     # Mock A2A Endpoint
     expected_task_id = f"task-oauth-{uuid.uuid4()}"
-    # --- FIX: Use JSON serializable value for ID ---
     mock_a2a_response = {"jsonrpc": "2.0", "result": {"id": expected_task_id}, "id": "mock-req-id"}
-    # --- END FIX ---
     agent_url_str = str(agent_card_oauth2_fixture.url)
     route_a2a = respx.post(agent_url_str).mock(return_value=httpx.Response(200, json=mock_a2a_response))
 
