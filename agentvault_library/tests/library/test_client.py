@@ -385,7 +385,7 @@ async def test_get_auth_headers_oauth2_cache_different_services(agent_card_oauth
     card2_data["authSchemes"][0]["service_identifier"] = service_id_2
     card2 = AgentCard.model_validate(card2_data)
 
-    # --- FIX: Configure mock KeyManager side_effect ---
+    # Configure mock KeyManager side_effect
     def mock_get_id(sid):
         if sid == service_id_1: return f"id_for_{service_id_1}"
         if sid == service_id_2: return f"id_for_{service_id_2}"
@@ -396,7 +396,6 @@ async def test_get_auth_headers_oauth2_cache_different_services(agent_card_oauth
         return None
     mock_key_manager.get_oauth_client_id.side_effect = mock_get_id
     mock_key_manager.get_oauth_client_secret.side_effect = mock_get_secret
-    # --- END FIX ---
 
     # Mock token endpoint to return different tokens based on client_id
     def token_response(request):

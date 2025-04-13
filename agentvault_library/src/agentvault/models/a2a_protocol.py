@@ -14,14 +14,24 @@ import datetime
 # --- Core Enumerations ---
 
 class TaskState(str, Enum):
-    """Represents the possible states of an A2A task."""
-    # --- MODIFIED: Renamed states and added INPUT_REQUIRED ---
-    SUBMITTED = "SUBMITTED" # Renamed from PENDING
-    WORKING = "WORKING"     # Renamed from RUNNING
+    # --- MODIFIED: Renamed states, added INPUT_REQUIRED, updated docstring ---
+    """
+    Represents the possible states of an A2A task.
+
+    States:
+        SUBMITTED: Task received by the agent, awaiting execution.
+        WORKING: Task is actively being processed by the agent.
+        INPUT_REQUIRED: Task is paused, awaiting further input from the user/client.
+        COMPLETED: Task finished successfully.
+        FAILED: Task terminated due to an error during execution.
+        CANCELED: Task was canceled by user request before completion.
+    """
+    SUBMITTED = "SUBMITTED"     # Renamed from PENDING
+    WORKING = "WORKING"         # Renamed from RUNNING
+    INPUT_REQUIRED = "INPUT_REQUIRED" # Added new state
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
-    CANCELED = "CANCELED"   # Renamed from CANCELLED
-    INPUT_REQUIRED = "INPUT_REQUIRED" # Added new state
+    CANCELED = "CANCELED"       # Renamed from CANCELLED
     # --- END MODIFIED ---
 
 # --- Message Parts ---
