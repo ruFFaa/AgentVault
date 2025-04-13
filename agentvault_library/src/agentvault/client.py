@@ -99,12 +99,34 @@ class AgentVaultClient:
 
     async def initiate_task(
         self, agent_card: AgentCard, initial_message: Message, key_manager: KeyManager,
-        mcp_context: Optional[Dict[str, Any]] = None
+        mcp_context: Optional[Dict[str, Any]] = None,
+        webhook_url: Optional[str] = None # <-- Parameter added in previous task
     ) -> str:
         """
         Initiates a new task with the remote agent by sending the first message.
+
+        Args:
+            agent_card: The AgentCard of the target agent.
+            initial_message: The first message to send to initiate the task.
+            key_manager: An initialized KeyManager instance for retrieving credentials.
+            mcp_context: Optional dictionary containing MCP context data.
+            webhook_url: Optional URL for the agent to send push notifications to.
+
+        Returns:
+            The unique ID assigned to the newly created task by the agent.
+
+        Raises:
+            A2AAuthenticationError: If authentication fails (missing key, invalid creds).
+            A2AConnectionError: If connection to the agent endpoint fails.
+            A2ARemoteAgentError: If the agent returns a specific error response.
+            A2AMessageError: If the agent's response is malformed.
+            A2ATimeoutError: If the request times out.
+            A2AError: For other unexpected A2A protocol errors.
+            KeyManagementError: If there's an issue retrieving keys locally.
         """
         logger.info(f"Initiating task with agent: {agent_card.human_readable_id}")
+        if webhook_url:
+            logger.info(f"Webhook URL provided for push notifications: {webhook_url}")
         try:
             auth_headers = await self._get_auth_headers(agent_card, key_manager)
             message_to_send = initial_message
@@ -119,8 +141,16 @@ class AgentVaultClient:
                 else: logger.warning("Failed to format provided MCP context data. Proceeding without embedding it.")
 
             task_send_params = TaskSendParams(message=message_to_send, id=None)
+
             request_id = f"req-init-{uuid.uuid4()}"
             request_params_dict = task_send_params.model_dump(mode='json', exclude_none=True, by_alias=True)
+
+            # --- ADDED: Include webhookUrl in params if provided ---
+            if webhook_url:
+                request_params_dict['webhookUrl'] = webhook_url
+                logger.debug(f"Adding webhookUrl='{webhook_url}' to initiate task params.")
+            # --- END ADDED ---
+
             request_payload = {"jsonrpc": "2.0", "method": "tasks/send", "params": request_params_dict, "id": request_id}
             logger.debug(f"Initiate task request payload (id: {request_id})")
             response_data = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload, stream=False)

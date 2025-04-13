@@ -6,7 +6,7 @@ import uuid
 import datetime
 import asyncio
 import time
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, call, patch, AsyncMock
 
 # Import client, models, exceptions, and KeyManager
 from agentvault.client import AgentVaultClient, A2AEvent, CACHE_EXPIRY_BUFFER_SECONDS
@@ -438,7 +438,9 @@ async def test_initiate_task_success(agent_card_fixture, mock_key_manager, sampl
     mock_response = {"jsonrpc": "2.0", "result": {"id": expected_task_id}, "id": "req-init-static"}
     route = respx.post(AGENT_URL).mock(return_value=httpx.Response(200, json=mock_response))
     async with AgentVaultClient() as client:
-        task_id = await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager)
+        # --- MODIFIED: Pass webhook_url=None ---
+        task_id = await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager, webhook_url=None)
+        # --- END MODIFIED ---
     assert task_id == expected_task_id
     assert route.called
     request = route.calls[0].request; assert request.headers["x-api-key"] == TEST_API_KEY
@@ -451,16 +453,44 @@ async def test_initiate_task_with_mcp(agent_card_fixture, mock_key_manager, samp
     mock_response = {"jsonrpc": "2.0", "result": {"id": "task-mcp"}, "id": "req-init-mcp"}
     route = respx.post(AGENT_URL).mock(return_value=httpx.Response(200, json=mock_response))
     async with AgentVaultClient() as client:
-        await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager, mcp_context=mcp_data_structured)
+        # --- MODIFIED: Pass webhook_url=None ---
+        await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager, mcp_context=mcp_data_structured, webhook_url=None)
+        # --- END MODIFIED ---
     assert route.called; payload = json.loads(route.calls[0].request.content)
     assert payload["params"]["message"]["metadata"]["mcp_context"] == mcp_data_structured
+
+# --- ADDED: Test for webhookUrl in payload ---
+@pytest.mark.asyncio
+@respx.mock
+async def test_initiate_task_with_webhook_url(agent_card_fixture, mock_key_manager, sample_message):
+    """Test that webhookUrl is included in the request params when provided."""
+    webhook_url = "https://my.callback.example.com/notify"
+    expected_task_id = f"task-webhook-{uuid.uuid4()}"
+    mock_response = {"jsonrpc": "2.0", "result": {"id": expected_task_id}, "id": "req-init-webhook"}
+    route = respx.post(AGENT_URL).mock(return_value=httpx.Response(200, json=mock_response))
+
+    async with AgentVaultClient() as client:
+        task_id = await client.initiate_task(
+            agent_card_fixture, sample_message, mock_key_manager, webhook_url=webhook_url
+        )
+
+    assert task_id == expected_task_id
+    assert route.called
+    request = route.calls[0].request
+    payload = json.loads(request.content)
+    assert payload["method"] == "tasks/send"
+    assert payload["params"]["webhookUrl"] == webhook_url
+    assert payload["params"]["message"]["role"] == "user" # Ensure message is still there
+# --- END ADDED ---
 
 @pytest.mark.asyncio
 async def test_initiate_task_auth_error(agent_card_fixture, mock_key_manager, sample_message):
     mock_key_manager.get_key.return_value = None
     async with AgentVaultClient() as client:
         with pytest.raises(A2AAuthenticationError):
-            await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager)
+            # --- MODIFIED: Pass webhook_url=None ---
+            await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager, webhook_url=None)
+            # --- END MODIFIED ---
 
 @pytest.mark.asyncio
 @respx.mock # Keep respx mock for token endpoint
@@ -482,7 +512,9 @@ async def test_initiate_task_oauth_success(agent_card_oauth2_fixture, mock_key_m
     route_a2a = respx.post(agent_url_str).mock(return_value=httpx.Response(200, json=mock_a2a_response))
 
     async with AgentVaultClient() as client:
-        task_id = await client.initiate_task(agent_card_oauth2_fixture, sample_message, mock_key_manager)
+        # --- MODIFIED: Pass webhook_url=None ---
+        task_id = await client.initiate_task(agent_card_oauth2_fixture, sample_message, mock_key_manager, webhook_url=None)
+        # --- END MODIFIED ---
 
     assert task_id == expected_task_id
     assert route_a2a.called
@@ -498,7 +530,9 @@ async def test_initiate_task_remote_error(agent_card_fixture, mock_key_manager, 
     respx.post(AGENT_URL).mock(return_value=httpx.Response(200, json=error_response))
     async with AgentVaultClient() as client:
         with pytest.raises(A2ARemoteAgentError) as excinfo:
-            await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager)
+            # --- MODIFIED: Pass webhook_url=None ---
+            await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager, webhook_url=None)
+            # --- END MODIFIED ---
     assert "Agent failed" in str(excinfo.value); assert excinfo.value.status_code == -32000; assert excinfo.value.response_body == {"details": "..."}
 
 @pytest.mark.asyncio
@@ -507,7 +541,9 @@ async def test_initiate_task_invalid_response_json(agent_card_fixture, mock_key_
     respx.post(AGENT_URL).mock(return_value=httpx.Response(200, text="{not json"))
     async with AgentVaultClient() as client:
         with pytest.raises(A2AMessageError, match="Failed to decode JSON response"):
-            await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager)
+            # --- MODIFIED: Pass webhook_url=None ---
+            await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager, webhook_url=None)
+            # --- END MODIFIED ---
 
 @pytest.mark.asyncio
 @respx.mock
@@ -515,7 +551,9 @@ async def test_initiate_task_invalid_response_structure(agent_card_fixture, mock
     respx.post(AGENT_URL).mock(return_value=httpx.Response(200, json={"jsonrpc": "2.0", "result": {}, "id": "req-init-struct-err"}))
     async with AgentVaultClient() as client:
         with pytest.raises(A2AMessageError, match="Failed to validate task initiation result structure"):
-            await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager)
+            # --- MODIFIED: Pass webhook_url=None ---
+            await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager, webhook_url=None)
+            # --- END MODIFIED ---
 
 @pytest.mark.asyncio
 @respx.mock
@@ -523,7 +561,9 @@ async def test_initiate_task_connection_error(agent_card_fixture, mock_key_manag
     respx.post(AGENT_URL).mock(side_effect=httpx.ConnectError("Failed to connect"))
     async with AgentVaultClient() as client:
         with pytest.raises(A2AConnectionError, match="Connection failed"):
-            await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager)
+            # --- MODIFIED: Pass webhook_url=None ---
+            await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager, webhook_url=None)
+            # --- END MODIFIED ---
 
 @pytest.mark.asyncio
 @respx.mock
@@ -531,7 +571,9 @@ async def test_initiate_task_timeout_error(agent_card_fixture, mock_key_manager,
     respx.post(AGENT_URL).mock(side_effect=httpx.TimeoutException("Request timed out"))
     async with AgentVaultClient() as client:
         with pytest.raises(A2ATimeoutError, match="Request timed out"):
-            await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager)
+            # --- MODIFIED: Pass webhook_url=None ---
+            await client.initiate_task(agent_card_fixture, sample_message, mock_key_manager, webhook_url=None)
+            # --- END MODIFIED ---
 
 # --- Test send_message ---
 @pytest.mark.asyncio
