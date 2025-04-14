@@ -39,6 +39,9 @@
         "pytest-asyncio>=0.23,<0.24",
         "pytest-mock>=3.12,<4.0",
         "respx>=0.20,<0.21", # Reduced upper bound to match lock file
+        # --- ADDED: Testing utils dependency ---
+        "agentvault-testing-utils" # Version/path handled by Poetry below
+        # --- END ADDED ---
     ]
 
 # Build System (unchanged)
@@ -69,3 +72,6 @@ pytest = ">=7.0,<9.0"
 pytest-asyncio = ">=0.23,<0.24"
 pytest-mock = ">=3.12,<4.0"
 respx = ">=0.20,<0.21"
+# --- ADDED: Testing utils path dependency ---
+agentvault-testing-utils = {path = "../agentvault_testing_utils", develop = true}
+# --- END ADDED ---
