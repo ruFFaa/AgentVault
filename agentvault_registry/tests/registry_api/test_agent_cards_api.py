@@ -1,10 +1,10 @@
 import pytest
 import uuid
 import datetime
-# --- MODIFIED: Import AsyncMock ---
 from unittest.mock import patch, MagicMock, ANY, AsyncMock
+# --- MODIFIED: Import List ---
+from typing import Optional, List, Dict, Any, Tuple
 # --- END MODIFIED ---
-from typing import Optional, List
 
 from fastapi.testclient import TestClient # Import sync client
 from fastapi import status
@@ -150,11 +150,9 @@ def test_list_agent_cards_success(
     assert response_data["pagination"]["limit"] == 100
     assert response_data["pagination"]["offset"] == 0
 
-    # --- MODIFIED: Added tags=None ---
     mock_list.assert_awaited_once_with(
         db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=None
     )
-    # --- END MODIFIED ---
 
 
 @pytest.mark.parametrize(
@@ -178,24 +176,66 @@ def test_list_agent_cards_with_params(
         new_callable=AsyncMock, return_value=([], 0) # Use AsyncMock
     )
 
-    params = {"skip": skip, "limit": limit, "active_only": active_only}
+    # Build query params, handling list for tags
+    query_params = {"skip": skip, "limit": limit, "active_only": active_only}
     if search is not None:
-        params["search"] = search
-    # --- ADDED: Handle tags parameter for query ---
-    query_params = params.copy() # Avoid modifying dict during iteration
+        query_params["search"] = search
     if tags is not None:
-        # FastAPI handles list query params by repeating the key
-        query_params['tags'] = tags # Pass list directly to TestClient params
-    # --- END ADDED ---
+        # TestClient handles list params correctly when passed as a list
+        query_params['tags'] = tags
 
     response = sync_test_client.get(API_BASE_URL + "/", params=query_params) # Use query_params
 
     assert response.status_code == status.HTTP_200_OK
-    # --- MODIFIED: Added tags=tags ---
     mock_list.assert_awaited_once_with(
         db=mock_db_session, skip=skip, limit=limit, active_only=active_only, search=search, tags=tags
     )
-    # --- END MODIFIED ---
+
+# --- ADDED: Tag Filtering Tests ---
+def test_list_agent_cards_filter_single_tag(sync_test_client: TestClient, mock_db_session: MagicMock, mocker):
+    """Test filtering by a single tag."""
+    mock_list = mocker.patch("agentvault_registry.crud.agent_card.list_agent_cards", new_callable=AsyncMock, return_value=([], 0))
+    tag_to_filter = "weather"
+
+    response = sync_test_client.get(API_BASE_URL + "/", params={"tags": tag_to_filter})
+
+    assert response.status_code == status.HTTP_200_OK
+    mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=[tag_to_filter])
+
+def test_list_agent_cards_filter_multiple_tags(sync_test_client: TestClient, mock_db_session: MagicMock, mocker):
+    """Test filtering by multiple tags."""
+    mock_list = mocker.patch("agentvault_registry.crud.agent_card.list_agent_cards", new_callable=AsyncMock, return_value=([], 0))
+    tags_to_filter = ["tool", "internal"]
+
+    response = sync_test_client.get(API_BASE_URL + "/", params={"tags": tags_to_filter}) # Pass list
+
+    assert response.status_code == status.HTTP_200_OK
+    mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=tags_to_filter)
+
+def test_list_agent_cards_filter_tag_no_match(sync_test_client: TestClient, mock_db_session: MagicMock, mocker):
+    """Test filtering by a tag that returns no results."""
+    mock_list = mocker.patch("agentvault_registry.crud.agent_card.list_agent_cards", new_callable=AsyncMock, return_value=([], 0))
+    tag_to_filter = "nonexistent-tag"
+
+    response = sync_test_client.get(API_BASE_URL + "/", params={"tags": tag_to_filter})
+
+    assert response.status_code == status.HTTP_200_OK
+    resp_data = response.json()
+    assert resp_data["items"] == []
+    assert resp_data["pagination"]["total_items"] == 0
+    mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=[tag_to_filter])
+
+def test_list_agent_cards_filter_tags_and_search(sync_test_client: TestClient, mock_db_session: MagicMock, mocker):
+    """Test filtering by both tags and search term."""
+    mock_list = mocker.patch("agentvault_registry.crud.agent_card.list_agent_cards", new_callable=AsyncMock, return_value=([], 0))
+    tags_to_filter = ["nlp"]
+    search_term = "summary"
+
+    response = sync_test_client.get(API_BASE_URL + "/", params={"tags": tags_to_filter, "search": search_term})
+
+    assert response.status_code == status.HTTP_200_OK
+    mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=search_term, tags=tags_to_filter)
+# --- END ADDED ---
 
 
 # --- Test GET /agent-cards/{card_id} (Read) ---
@@ -209,7 +249,6 @@ def test_get_agent_card_success(
 ):
     """Test successfully retrieving a single agent card."""
     card_id = mock_agent_card_db_object.id
-    # Ensure the mock card from fixture has the mock developer attached
     mock_developer.is_verified = False # Set a specific state for this test
     mock_agent_card_db_object.developer = mock_developer
 
@@ -222,7 +261,6 @@ def test_get_agent_card_success(
 
     assert response.status_code == status.HTTP_200_OK
     response_data = response.json()
-    # Validate against the schema
     validated_response = schemas.AgentCardRead.model_validate(response_data)
     assert validated_response.id == card_id
     assert validated_response.name == mock_agent_card_db_object.name
@@ -238,7 +276,6 @@ def test_get_agent_card_includes_developer_verified(
     mocker
 ):
     """Test GET /agent-cards/{card_id} includes developer_is_verified."""
-    # Create specific mocks for this test
     test_dev = models.Developer(id=5, name="Verified Dev", api_key_hash="abc", is_verified=True) # Set verified True
     test_card_id = uuid.uuid4()
     test_card_data = {"name": "Verified Agent Card", "description": "Desc", "schemaVersion": "1.0", "humanReadableId": "vd/vac", "agentVersion": "1", "url": "http://localhost", "provider": {"name": "vd"}, "capabilities": {"a2aVersion": "1"}, "authSchemes": [{"scheme": "none"}]}
