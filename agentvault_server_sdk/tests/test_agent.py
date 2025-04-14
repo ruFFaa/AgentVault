@@ -6,13 +6,19 @@ from agentvault_server_sdk.agent import BaseA2AAgent
 
 # Import necessary types for method signatures (or use MagicMock if library unavailable)
 try:
-    from agentvault.models import Message, Task, TaskState, A2AEvent
+    # --- MODIFIED: Import TextPart ---
+    from agentvault.models import Message, Task, TaskState, A2AEvent, TextPart
+    # --- END MODIFIED ---
     _MODELS_AVAILABLE = True
 except ImportError:
     Message = MagicMock # type: ignore
     Task = MagicMock # type: ignore
     TaskState = MagicMock # type: ignore
     A2AEvent = MagicMock # type: ignore
+    # --- ADDED: Mock TextPart ---
+    class MockTextPart: pass
+    TextPart = MockTextPart # type: ignore
+    # --- END ADDED ---
     _MODELS_AVAILABLE = False
 
 
@@ -35,8 +41,13 @@ def test_base_agent_instantiation_no_metadata():
 @pytest.mark.asyncio
 async def test_handle_task_send_not_implemented(base_agent: BaseA2AAgent):
     """Verify handle_task_send raises NotImplementedError."""
+    # --- MODIFIED: Create a valid Message object ---
     # Create a mock message object or use MagicMock if models aren't available
-    mock_message = Message() if _MODELS_AVAILABLE else MagicMock()
+    if _MODELS_AVAILABLE:
+        mock_message = Message(role="user", parts=[TextPart(content="test")])
+    else:
+        mock_message = MagicMock() # Fallback if import failed
+    # --- END MODIFIED ---
     with pytest.raises(NotImplementedError):
         await base_agent.handle_task_send(task_id="task-123", message=mock_message)
 

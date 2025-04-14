@@ -1,4 +1,7 @@
 # Pydantic models for AgentVault Library
+# --- ADDED: Import Union ---
+from typing import Union
+# --- END ADDED ---
 
 # Expose the core Agent Card models for easier import
 from .agent_card import (
@@ -30,6 +33,10 @@ from .a2a_protocol import (
     TaskArtifactUpdateEvent,
 )
 
+# --- ADDED: Define A2AEvent Union ---
+A2AEvent = Union[TaskStatusUpdateEvent, TaskMessageEvent, TaskArtifactUpdateEvent]
+# --- END ADDED ---
+
 
 __all__ = [
     # Agent Card Models
@@ -56,5 +63,8 @@ __all__ = [
     "TaskStatusUpdateEvent",
     "TaskMessageEvent",
     "TaskArtifactUpdateEvent",
+    # --- ADDED: Export A2AEvent ---
+    "A2AEvent",
+    # --- END ADDED ---
 ]
 #

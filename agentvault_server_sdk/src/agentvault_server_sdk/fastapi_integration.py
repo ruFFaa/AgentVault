@@ -5,19 +5,12 @@ as A2A compliant API endpoints.
 
 import logging
 import json # Import json for JSONDecodeError handling
-# --- MODIFIED: Added AsyncGenerator ---
 from typing import Any, Dict, Optional, Union, AsyncGenerator
-# --- END MODIFIED ---
 
-
-# --- ADDED: Import pydantic ---
 import pydantic
-# --- END ADDED ---
 
-# --- MODIFIED: Import StreamingResponse ---
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.responses import StreamingResponse
-# --- END MODIFIED ---
+from fastapi.responses import StreamingResponse, JSONResponse
 
 
 # Import the base agent class
@@ -29,11 +22,8 @@ try:
         Message, Task, TaskState, A2AEvent,
         TaskSendParams, TaskSendResult, TaskGetParams, GetTaskResult,
         TaskCancelParams, TaskCancelResult,
-        # --- ADDED: Import specific event types for mapping ---
-        TaskStatusUpdateEvent, TaskMessageEvent, TaskArtifactUpdateEvent
-        # --- END ADDED ---
+        TaskStatusUpdateEvent, TaskMessageEvent, TaskArtifactUpdateEvent, Artifact
     )
-    # Import exceptions for potential error handling later
     from agentvault.exceptions import A2AError, A2ARemoteAgentError, A2AMessageError
     _AGENTVAULT_IMPORTED = True
 except ImportError:
@@ -52,11 +42,10 @@ except ImportError:
     class A2AError(Exception): pass # type: ignore
     class A2ARemoteAgentError(A2AError): pass # type: ignore
     class A2AMessageError(A2AError): pass # type: ignore
-    # --- ADDED: Placeholders for event types ---
     class TaskStatusUpdateEvent: pass # type: ignore
     class TaskMessageEvent: pass # type: ignore
     class TaskArtifactUpdateEvent: pass # type: ignore
-    # --- END ADDED ---
+    class Artifact: pass # type: ignore
     _AGENTVAULT_IMPORTED = False
 
 
@@ -80,21 +69,18 @@ def create_jsonrpc_error_response(
         error_obj["data"] = data
     return {"jsonrpc": "2.0", "error": error_obj, "id": req_id}
 
-# --- ADDED: Helper for Success Response ---
 def create_jsonrpc_success_response(
     req_id: Union[str, int, None], result: Any
 ) -> Dict[str, Any]:
     """Helper to create a standard JSON-RPC success response dictionary."""
     return {"jsonrpc": "2.0", "result": result, "id": req_id}
-# --- END ADDED ---
 
-# --- ADDED: SSEResponse Class ---
 class SSEResponse(StreamingResponse):
     """
     Custom FastAPI response class for Server-Sent Events (SSE).
 
     Formats A2AEvent objects yielded by an async generator into
-    the text/event-stream format.
+    the text/event-stream format. Includes error handling for the generator.
     """
     media_type = "text/event-stream"
 
@@ -128,13 +114,25 @@ class SSEResponse(StreamingResponse):
                         yield sse_message.encode("utf-8")
                     except Exception as e:
                         logger.error(f"Failed to serialize or format SSE event (type: {event_type}): {e}", exc_info=True)
-                        # Optionally yield an error event to the client? For now, just log and continue.
+                        # Yield an error event if serialization fails mid-stream
+                        try:
+                            error_data = json.dumps({"error": "serialization_error", "message": f"Failed to format event: {type(e).__name__}"})
+                            error_event = f"event: error\ndata: {error_data}\n\n"
+                            yield error_event.encode("utf-8")
+                        except Exception as format_err:
+                             logger.error(f"Failed to format SSE serialization error event: {format_err}")
             except Exception as e:
                  # Log errors from the source generator itself
                  logger.error(f"Error in source event generator for SSE: {e}", exc_info=True)
-                 # Optionally yield a final error event to the client here
-                 # error_event = f"event: error\ndata: {json.dumps({'message': 'Internal server error generating events.'})}\n\n"
-                 # yield error_event.encode("utf-8")
+                 # --- MODIFIED: Include error message in SSE data ---
+                 try:
+                     # Include the actual error message string
+                     error_data = json.dumps({"error": "stream_error", "message": f"Error generating events: {type(e).__name__}: {str(e)}"})
+                     error_event = f"event: error\ndata: {error_data}\n\n"
+                     yield error_event.encode("utf-8")
+                 except Exception as format_err:
+                     logger.error(f"Failed to format SSE stream error event: {format_err}")
+                 # --- END MODIFIED ---
             finally:
                  logger.debug("SSE event generator finished.")
 
@@ -146,33 +144,15 @@ class SSEResponse(StreamingResponse):
             media_type=self.media_type,
             **kwargs,
         )
-# --- END ADDED ---
 
 
 def create_a2a_router(
     agent: BaseA2AAgent,
     prefix: str = "",
     tags: Optional[list[str]] = None,
-    # dependencies: Optional[Sequence[Depends]] = None, # Add later if needed
-    # responses: Optional[Dict[Union[int, str], Dict[str, Any]]] = None, # Add later if needed
 ) -> APIRouter:
     """
-    Creates a FastAPI APIRouter that exposes the A2A protocol methods
-    (tasks/send, tasks/get, tasks/cancel, tasks/sendSubscribe) based on the
-    provided agent instance.
-
-    Handles JSON-RPC request parsing, routing to the appropriate agent handler
-    method, basic error handling, and response formatting.
-
-    Args:
-        agent: An instance of a class derived from BaseA2AAgent.
-        prefix: An optional path prefix for the router (e.g., "/a2a").
-        tags: Optional list of tags for OpenAPI documentation.
-        # dependencies: Optional sequence of FastAPI dependencies for the router.
-        # responses: Optional dictionary defining additional OpenAPI responses.
-
-    Returns:
-        A FastAPI APIRouter instance configured with the A2A endpoints.
+    Creates a FastAPI APIRouter that exposes the A2A protocol methods...
     """
     if tags is None:
         tags = ["A2A Protocol"]
@@ -180,27 +160,22 @@ def create_a2a_router(
     router = APIRouter(
         prefix=prefix,
         tags=tags,
-        # dependencies=dependencies,
-        # responses=responses,
     )
 
     logger.info(f"Creating A2A router for agent: {agent.__class__.__name__} with prefix '{prefix}'")
 
     @router.post(
-        "/", # Mount at the root of the router's prefix
-        # Define response model later when handling success cases
-        # response_model=Union[Dict[str, Any], StreamingResponse], # Example
+        "/",
         summary="A2A JSON-RPC Endpoint",
         description="Handles all A2A JSON-RPC requests (tasks/send, tasks/get, etc.)."
     )
     async def handle_a2a_request(
         request: Request,
-        # Inject the agent instance provided when creating the router
         agent_instance: BaseA2AAgent = Depends(lambda: agent)
     ) -> Response:
         """Handles incoming A2A JSON-RPC requests over POST."""
-        req_id: Union[str, int, None] = None # Initialize request ID
-        payload: Optional[Dict[str, Any]] = None # Initialize payload scope
+        req_id: Union[str, int, None] = None
+        payload: Optional[Dict[str, Any]] = None
 
         try:
             # 1. Parse JSON body
@@ -209,78 +184,71 @@ def create_a2a_router(
             except json.JSONDecodeError as e:
                 logger.warning(f"Failed to parse request body as JSON: {e}")
                 error_resp = create_jsonrpc_error_response(req_id, JSONRPC_PARSE_ERROR, "Parse error")
-                return Response(content=json.dumps(error_resp), status_code=status.HTTP_200_OK, media_type="application/json")
+                return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
 
             # 2. Basic JSON-RPC structure validation
+            # ... (validation logic remains the same) ...
             if not isinstance(payload, dict):
                 logger.warning("Invalid request: Payload is not a dictionary.")
                 error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INVALID_REQUEST, "Invalid Request: Payload must be a JSON object.")
-                return Response(content=json.dumps(error_resp), status_code=status.HTTP_200_OK, media_type="application/json")
+                return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
 
             jsonrpc_version = payload.get("jsonrpc")
             method = payload.get("method")
-            params = payload.get("params") # Can be dict or list, validation later
-            req_id = payload.get("id") # Can be null, str, int
+            params = payload.get("params")
+            req_id = payload.get("id")
 
-            # Validate required fields and jsonrpc version
             if not isinstance(method, str) or not method:
                 logger.warning("Invalid request: 'method' field is missing or not a string.")
                 error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INVALID_REQUEST, "Invalid Request: 'method' is required and must be a string.")
-                return Response(content=json.dumps(error_resp), status_code=status.HTTP_200_OK, media_type="application/json")
+                return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
 
             if jsonrpc_version != "2.0":
                 logger.warning(f"Invalid request: 'jsonrpc' field is not '2.0' (got: {jsonrpc_version}).")
                 error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INVALID_REQUEST, "Invalid Request: 'jsonrpc' must be '2.0'.")
-                return Response(content=json.dumps(error_resp), status_code=status.HTTP_200_OK, media_type="application/json")
+                return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
 
             if "id" not in payload:
                  logger.warning("Invalid request: 'id' field is missing.")
                  error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INVALID_REQUEST, "Invalid Request: 'id' is missing.")
-                 return Response(content=json.dumps(error_resp), status_code=status.HTTP_200_OK, media_type="application/json")
+                 return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
 
             logger.info(f"Received valid JSON-RPC request: method='{method}', id='{req_id}'")
 
+
             # --- Method Routing Logic ---
+            # ... (tasks/send, tasks/get, tasks/cancel logic remains the same, returning JSONResponse) ...
+
             if method == "tasks/send":
                 try:
-                    # Validate parameters using the Pydantic model
                     if not isinstance(params, dict):
-                         # --- MODIFIED: Raise specific error ---
                          raise pydantic.ValidationError.from_exception_data(
                              title="TaskSendParams",
                              line_errors=[{"type": "dict_type", "loc": ("params",), "msg": "Input should be a valid dictionary"}]
                          )
-                         # --- END MODIFIED ---
                     validated_params = TaskSendParams.model_validate(params)
                 except pydantic.ValidationError as e:
                     logger.warning(f"Invalid params for tasks/send: {e}")
                     error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INVALID_PARAMS, f"Invalid params: {e}")
-                    return Response(content=json.dumps(error_resp), status_code=status.HTTP_200_OK, media_type="application/json")
-
+                    return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
                 try:
-                    # Call the agent's handler method
                     task_id_result: str = await agent_instance.handle_task_send(
-                        task_id=validated_params.id,
-                        message=validated_params.message
+                        task_id=validated_params.id, message=validated_params.message
                     )
-                    # Wrap the result in the expected response model
                     send_result = TaskSendResult(id=task_id_result)
-                    # Create and return success response
                     success_resp = create_jsonrpc_success_response(req_id, send_result.model_dump(mode='json'))
-                    return Response(content=json.dumps(success_resp), status_code=status.HTTP_200_OK, media_type="application/json")
-                except A2AError as e: # Catch specific application errors from the agent
-                     logger.error(f"Agent error during tasks/send for id={req_id}: {e}", exc_info=True)
-                     # Use a generic application error code for now
+                    return JSONResponse(content=success_resp, status_code=status.HTTP_200_OK)
+                except A2AError as e:
+                     logger.error(f"Agent error during tasks/send for id={req_id}: {e}", exc_info=False)
                      error_resp = create_jsonrpc_error_response(req_id, JSONRPC_APP_ERROR, f"Agent processing error: {e}")
-                     return Response(content=json.dumps(error_resp), status_code=status.HTTP_200_OK, media_type="application/json")
-                except Exception as e: # Catch unexpected errors in the agent handler
+                     return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
+                except Exception as e:
                      logger.exception(f"Unexpected agent error during tasks/send for id={req_id}: {e}")
                      error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INTERNAL_ERROR, f"Internal agent error: {type(e).__name__}")
-                     return Response(content=json.dumps(error_resp), status_code=status.HTTP_200_OK, media_type="application/json")
+                     return JSONResponse(content=error_resp, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
             elif method == "tasks/get":
                 try:
-                    # Validate parameters
                     if not isinstance(params, dict):
                          raise pydantic.ValidationError.from_exception_data(
                              title="TaskGetParams",
@@ -290,35 +258,27 @@ def create_a2a_router(
                 except pydantic.ValidationError as e:
                     logger.warning(f"Invalid params for tasks/get: {e}")
                     error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INVALID_PARAMS, f"Invalid params: {e}")
-                    return Response(content=json.dumps(error_resp), status_code=status.HTTP_200_OK, media_type="application/json")
-
+                    return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
                 try:
-                    # Call the agent's handler method
                     task_result: Task = await agent_instance.handle_task_get(
                         task_id=validated_params.id
                     )
-                    # The result itself is the Task object
-                    # Use GetTaskResult alias if needed, but Task is the actual model
-                    # Ensure the returned object is actually a Task model instance
                     if not isinstance(task_result, Task):
                          logger.error(f"Agent handler for tasks/get returned unexpected type: {type(task_result)}")
                          raise TypeError("Agent handler must return a Task object for tasks/get")
-
-                    # Create and return success response
                     success_resp = create_jsonrpc_success_response(req_id, task_result.model_dump(mode='json', by_alias=True))
-                    return Response(content=json.dumps(success_resp), status_code=status.HTTP_200_OK, media_type="application/json")
-                except A2AError as e: # Catch specific application errors
-                     logger.error(f"Agent error during tasks/get for id={req_id}: {e}", exc_info=True)
+                    return JSONResponse(content=success_resp, status_code=status.HTTP_200_OK)
+                except A2AError as e:
+                     logger.error(f"Agent error during tasks/get for id={req_id}: {e}", exc_info=False)
                      error_resp = create_jsonrpc_error_response(req_id, JSONRPC_APP_ERROR, f"Agent processing error: {e}")
-                     return Response(content=json.dumps(error_resp), status_code=status.HTTP_200_OK, media_type="application/json")
-                except Exception as e: # Catch unexpected errors
+                     return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
+                except Exception as e:
                      logger.exception(f"Unexpected agent error during tasks/get for id={req_id}: {e}")
                      error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INTERNAL_ERROR, f"Internal agent error: {type(e).__name__}")
-                     return Response(content=json.dumps(error_resp), status_code=status.HTTP_200_OK, media_type="application/json")
+                     return JSONResponse(content=error_resp, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
             elif method == "tasks/cancel":
                 try:
-                    # Validate parameters
                     if not isinstance(params, dict):
                          raise pydantic.ValidationError.from_exception_data(
                              title="TaskCancelParams",
@@ -328,74 +288,66 @@ def create_a2a_router(
                 except pydantic.ValidationError as e:
                     logger.warning(f"Invalid params for tasks/cancel: {e}")
                     error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INVALID_PARAMS, f"Invalid params: {e}")
-                    return Response(content=json.dumps(error_resp), status_code=status.HTTP_200_OK, media_type="application/json")
-
+                    return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
                 try:
-                    # Call the agent's handler method
                     cancel_accepted: bool = await agent_instance.handle_task_cancel(
                         task_id=validated_params.id
                     )
-                    # Wrap the boolean result in the TaskCancelResult model
                     cancel_result = TaskCancelResult(success=cancel_accepted)
-                    # Create and return success response
                     success_resp = create_jsonrpc_success_response(req_id, cancel_result.model_dump(mode='json'))
-                    return Response(content=json.dumps(success_resp), status_code=status.HTTP_200_OK, media_type="application/json")
-                except A2AError as e: # Catch specific application errors
-                     logger.error(f"Agent error during tasks/cancel for id={req_id}: {e}", exc_info=True)
+                    return JSONResponse(content=success_resp, status_code=status.HTTP_200_OK)
+                except A2AError as e:
+                     logger.error(f"Agent error during tasks/cancel for id={req_id}: {e}", exc_info=False)
                      error_resp = create_jsonrpc_error_response(req_id, JSONRPC_APP_ERROR, f"Agent processing error: {e}")
-                     return Response(content=json.dumps(error_resp), status_code=status.HTTP_200_OK, media_type="application/json")
-                except Exception as e: # Catch unexpected errors
+                     return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
+                except Exception as e:
                      logger.exception(f"Unexpected agent error during tasks/cancel for id={req_id}: {e}")
                      error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INTERNAL_ERROR, f"Internal agent error: {type(e).__name__}")
-                     return Response(content=json.dumps(error_resp), status_code=status.HTTP_200_OK, media_type="application/json")
+                     return JSONResponse(content=error_resp, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
             elif method == "tasks/sendSubscribe":
                 task_id: Optional[str] = None
                 try:
-                    # Basic validation: params must be a dict with a non-empty string 'id'
+                    # Basic validation
                     if not isinstance(params, dict):
                         raise ValueError("Params must be a dictionary.")
                     task_id = params.get("id")
                     if not isinstance(task_id, str) or not task_id:
                         raise ValueError("'id' parameter is required and must be a non-empty string.")
 
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Invalid params for tasks/sendSubscribe: {e}")
-                    error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INVALID_PARAMS, f"Invalid params: {e}")
-                    return Response(content=json.dumps(error_resp), status_code=status.HTTP_200_OK, media_type="application/json")
-
-                try:
-                    # Call the agent's handler method to get the event generator
+                    # --- MODIFIED: Call agent handler directly, let exceptions propagate to SSEResponse ---
+                    # If this call succeeds, it returns the generator for SSEResponse
+                    # If it fails, the exception will be caught by the outer try/except
                     event_generator = agent_instance.handle_subscribe_request(task_id=task_id)
-
-                    # --- MODIFIED: Return SSEResponse ---
                     logger.info(f"Subscription request successful for task {task_id}. Starting SSE stream.")
-                    # Return the SSEResponse, passing the generator
                     return SSEResponse(content=event_generator)
                     # --- END MODIFIED ---
 
-                except A2AError as e: # Catch specific application errors
-                     logger.error(f"Agent error during tasks/sendSubscribe for id={req_id}: {e}", exc_info=True)
-                     # Need to return a JSON-RPC error *before* starting the stream
-                     error_resp = create_jsonrpc_error_response(req_id, JSONRPC_APP_ERROR, f"Agent processing error: {e}")
-                     return Response(content=json.dumps(error_resp), status_code=status.HTTP_200_OK, media_type="application/json")
-                except Exception as e: # Catch unexpected errors
-                     logger.exception(f"Unexpected agent error during tasks/sendSubscribe for id={req_id}: {e}")
-                     error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INTERNAL_ERROR, f"Internal agent error: {type(e).__name__}")
-                     return Response(content=json.dumps(error_resp), status_code=status.HTTP_200_OK, media_type="application/json")
+                except (ValueError, TypeError, pydantic.ValidationError) as e: # Catch validation errors
+                    logger.warning(f"Invalid params for tasks/sendSubscribe: {e}")
+                    error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INVALID_PARAMS, f"Invalid params: {e}")
+                    return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
+                # --- REMOVED: Specific error handling here, let outer handler or SSEResponse handle ---
 
             else:
                 # Handle Method Not Found error
                 logger.warning(f"Method not found: '{method}'")
                 error_resp = create_jsonrpc_error_response(req_id, JSONRPC_METHOD_NOT_FOUND, "Method not found")
-                return Response(content=json.dumps(error_resp), status_code=status.HTTP_200_OK, media_type="application/json")
+                return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
 
         except Exception as e:
-            # --- TODO: Task 2.1.A.16: Refine top-level exception handling ---
-            logger.exception(f"Unexpected internal server error processing request id={req_id}")
-            # Ensure req_id is captured even if parsing failed early
-            final_req_id = req_id if payload and "id" in payload else None
-            error_resp = create_jsonrpc_error_response(final_req_id, JSONRPC_INTERNAL_ERROR, f"Internal server error: {type(e).__name__}")
-            return Response(content=json.dumps(error_resp), status_code=status.HTTP_200_OK, media_type="application/json")
+            # --- MODIFIED: Catch A2AError specifically here too ---
+            if isinstance(e, A2AError):
+                 logger.error(f"Agent error processing request id={req_id}: {e}", exc_info=False)
+                 error_resp = create_jsonrpc_error_response(req_id, JSONRPC_APP_ERROR, f"Agent processing error: {e}")
+                 return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK) # Return 200 for JSON-RPC app errors
+            else:
+                 # --- END MODIFIED ---
+                 logger.exception(f"Unexpected internal server error processing request id={req_id}")
+                 final_req_id = req_id if payload and "id" in payload else None
+                 error_resp = create_jsonrpc_error_response(final_req_id, JSONRPC_INTERNAL_ERROR, f"Internal server error: {type(e).__name__}")
+                 # --- MODIFIED: Return 500 for truly unexpected errors ---
+                 return JSONResponse(content=error_resp, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                 # --- END MODIFIED ---
 
     return router

@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "agentvault-testing-utils"
+version = "0.1.0"
+description = "Shared testing utilities (mocks, fixtures, helpers) for the AgentVault ecosystem."
+authors = ["Raphael Zbigniew Jeziorny <AgentVault@proton.me>"]
+license = "Apache-2.0"
+readme = "README.md"
+packages = [{include = "agentvault_testing_utils", from = "src"}]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.12"
+# Core library is needed for models/exceptions used in mocks/fixtures
+agentvault = {path = "../agentvault_library", develop = true}
+# Testing framework dependencies
+pytest = ">=7.0,<9.0"
+httpx = ">=0.27,<0.29" # For test client interactions
+respx = ">=0.20,<0.21" # For mocking HTTP requests
+
+# Add dev dependencies if needed specifically for developing the utils themselves
+# [tool.poetry.group.dev.dependencies]
+# pytest-asyncio = "..." # Example
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
