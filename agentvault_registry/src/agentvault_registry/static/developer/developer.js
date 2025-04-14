@@ -54,7 +54,11 @@ document.addEventListener('DOMContentLoaded', () => {
         validateCardButton.addEventListener('click', handleValidateCard);
     }
     // --- END ADDED ---
-    // TODO: Add listener for submitCardButton later
+    // --- ADDED: Event listener for submit button ---
+    if (submitCardButton) {
+        submitCardButton.addEventListener('click', handleSubmitNewCard);
+    }
+    // --- END ADDED ---
 
     checkLoginStatus();
 });
@@ -272,7 +276,7 @@ async function makeAuthenticatedRequest(url, options = {}) {
     return response;
 }
 
-// --- ADDED: Validation Handler ---
+// Validation Handler
 async function handleValidateCard() {
     console.log("Validate button clicked.");
     if (!agentCardJsonTextarea || !submitStatus || !validationErrorsPre) {
@@ -344,8 +348,82 @@ async function handleValidateCard() {
         submitStatus.style.color = 'red';
     }
 }
+
+// --- ADDED: Submit Handler ---
+async function handleSubmitNewCard() {
+    console.log("Submit New Card button clicked.");
+    if (!agentCardJsonTextarea || !submitStatus || !validationErrorsPre) {
+        console.error("Required elements for submission not found.");
+        return;
+    }
+
+    const jsonText = agentCardJsonTextarea.value;
+    submitStatus.textContent = ''; // Clear previous status
+    submitStatus.style.color = 'inherit'; // Reset color
+    validationErrorsPre.textContent = ''; // Clear previous errors
+    validationErrorsPre.style.color = 'red'; // Set error color
+
+    if (!jsonText.trim()) {
+        validationErrorsPre.textContent = 'Error: JSON input cannot be empty.';
+        return;
+    }
+
+    let parsedJson;
+    try {
+        parsedJson = JSON.parse(jsonText);
+    } catch (e) {
+        console.error("JSON parsing error:", e);
+        validationErrorsPre.textContent = `Error: Invalid JSON format.\n${e.message}`;
+        return;
+    }
+
+    const requestBody = { card_data: parsedJson };
+    const submitUrl = `${API_BASE_PATH}/agent-cards/`;
+
+    console.debug(`Sending submit request to: ${submitUrl}`);
+    submitStatus.textContent = 'Submitting...';
+
+    try {
+        // Use the authenticated helper
+        const response = await makeAuthenticatedRequest(submitUrl, {
+            method: 'POST',
+            body: JSON.stringify(requestBody),
+            // Content-Type header is added by makeAuthenticatedRequest
+        });
+
+        // Check for specific API errors (besides 401/403 handled by helper)
+        if (response.status === 201) {
+            const newCard = await response.json();
+            submitStatus.textContent = `Agent Card submitted successfully! ID: ${newCard.id}`;
+            submitStatus.style.color = 'green';
+            validationErrorsPre.textContent = '';
+            agentCardJsonTextarea.value = ''; // Clear textarea on success
+            loadOwnedCards(); // Refresh the list
+        } else if (response.status === 422) {
+            const errorData = await response.json();
+            console.error("Submission validation error:", errorData);
+            submitStatus.textContent = 'Submission Failed (Validation Error).';
+            submitStatus.style.color = 'red';
+            validationErrorsPre.textContent = `Validation Errors:\n${errorData.detail || 'Unknown validation error.'}`;
+        } else {
+            // Handle other non-2xx errors
+            let errorDetail = `HTTP error! status: ${response.status}`;
+            try {
+                const errorData = await response.json();
+                errorDetail = errorData.detail || errorDetail;
+            } catch (e) { /* ignore if body isn't json */ }
+            throw new Error(errorDetail);
+        }
+
+    } catch (error) {
+        // Catches errors from makeAuthenticatedRequest (like 401/403) or network errors
+        console.error("Error during submission request:", error);
+        submitStatus.textContent = `Error during submission: ${escapeHTML(error.message || String(error))}`;
+        submitStatus.style.color = 'red';
+    }
+}
 // --- END ADDED ---
 
 
-// TODO: Add event listeners for submitCardButton later
-// TODO: Implement submitNewCard function
+// TODO: Implement handleEditCard logic
+// TODO: Implement handleDeactivateCard logic
