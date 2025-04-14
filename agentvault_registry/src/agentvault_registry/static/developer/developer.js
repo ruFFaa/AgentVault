@@ -6,6 +6,22 @@ const API_KEY_STORAGE_ITEM = 'developerApiKey';
 // DOM Elements
 let loginSection, dashboardSection, apiKeyInput, loginButton, loginError, logoutButton, myCardsList, submitStatus;
 
+// --- ADDED: Helper function to escape HTML ---
+function escapeHTML(str) {
+    if (str === null || str === undefined) return '';
+    return String(str).replace(/[&<>"']/g, function (match) {
+        return {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[match];
+    });
+}
+// --- END ADDED ---
+
+
 document.addEventListener('DOMContentLoaded', () => {
     // Assign elements after DOM is loaded
     loginSection = document.getElementById('login-section');
@@ -109,35 +125,104 @@ function handleLogout() {
     showLogin();
 }
 
-// Placeholder - will be implemented later
+// --- MODIFIED: Updated loadOwnedCards ---
 async function loadOwnedCards() {
-    console.log("Placeholder: loadOwnedCards() called.");
-    if (myCardsList) {
-        myCardsList.innerHTML = '<p>Fetching your agent cards...</p>';
-        // TODO: Implement API call using makeAuthenticatedRequest
-        // Example structure:
-        try {
-            // Use owned_only=true parameter
-            const response = await makeAuthenticatedRequest(`${API_BASE_PATH}/agent-cards/?owned_only=true`, { method: 'GET' });
-            if (!response.ok) {
-                 // Try to get error detail from response
-                 let errorDetail = `HTTP error! status: ${response.status}`;
-                 try {
-                     const errorData = await response.json();
-                     errorDetail = errorData.detail || errorDetail;
-                 } catch (e) { /* ignore if body isn't json */ }
-                 throw new Error(errorDetail);
-            }
-            const data = await response.json();
-            // renderOwnedCards(data.items); // Need render function
-            myCardsList.innerHTML = `<p>Card loading successful (but rendering not implemented yet). Found ${data.items.length} cards.</p>`; // Placeholder content
-        } catch (error) {
-            console.error("Error loading owned cards:", error);
-            myCardsList.innerHTML = `<p style="color: red;">Error loading your agent cards: ${error.message || error}</p>`;
+    console.log("loadOwnedCards() called.");
+    if (!myCardsList) return; // Exit if list element doesn't exist
+
+    myCardsList.innerHTML = '<p>Fetching your agent cards...</p>';
+    try {
+        // Use owned_only=true parameter
+        const response = await makeAuthenticatedRequest(`${API_BASE_PATH}/agent-cards/?owned_only=true`, { method: 'GET' });
+        if (!response.ok) {
+             // Try to get error detail from response
+             let errorDetail = `HTTP error! status: ${response.status}`;
+             try {
+                 const errorData = await response.json();
+                 errorDetail = errorData.detail || errorDetail;
+             } catch (e) { /* ignore if body isn't json */ }
+             throw new Error(errorDetail);
         }
-        // myCardsList.innerHTML = '<p>Card loading not implemented yet.</p>'; // Placeholder content
+        const data = await response.json();
+        console.debug("Received owned cards data:", data);
+        // Call the rendering function with the items
+        renderOwnedCards(data.items || []); // Pass empty array if items is missing
+    } catch (error) {
+        console.error("Error loading owned cards:", error);
+        myCardsList.innerHTML = `<p style="color: red;">Error loading your agent cards: ${escapeHTML(error.message || String(error))}</p>`;
     }
 }
+// --- END MODIFIED ---
+
+// --- ADDED: renderOwnedCards function ---
+function renderOwnedCards(cards) {
+    console.log(`Rendering ${cards.length} owned cards.`);
+    if (!myCardsList) return; // Should exist, but safety check
+
+    myCardsList.innerHTML = ''; // Clear previous content
+
+    if (!cards || cards.length === 0) {
+        myCardsList.innerHTML = '<p>No agent cards found for this developer.</p>';
+        return;
+    }
+
+    cards.forEach(card => {
+        const cardDiv = document.createElement('div');
+        cardDiv.className = 'agent-card'; // Reuse existing style if desired
+
+        const nameEl = document.createElement('h4');
+        nameEl.textContent = card.name || 'Unnamed Card';
+
+        const idEl = document.createElement('small');
+        idEl.textContent = `ID: ${card.id}`;
+        idEl.style.display = 'block'; // Make ID appear on its own line
+        idEl.style.marginBottom = '10px';
+
+        const descEl = document.createElement('p');
+        descEl.textContent = card.description || 'No description.';
+        descEl.style.marginBottom = '10px';
+
+        const buttonDiv = document.createElement('div'); // Container for buttons
+
+        const editButton = document.createElement('button');
+        editButton.textContent = 'Edit';
+        editButton.dataset.cardId = card.id; // Store ID for later use
+        editButton.onclick = () => handleEditCard(card.id); // Placeholder handler
+        editButton.style.marginRight = '5px';
+
+        const deactivateButton = document.createElement('button');
+        deactivateButton.textContent = 'Deactivate';
+        deactivateButton.dataset.cardId = card.id;
+        deactivateButton.onclick = () => handleDeactivateCard(card.id); // Placeholder handler
+        deactivateButton.style.backgroundColor = '#ffc107'; // Warning color
+        deactivateButton.style.color = '#333';
+
+        buttonDiv.appendChild(editButton);
+        buttonDiv.appendChild(deactivateButton);
+
+        cardDiv.appendChild(nameEl);
+        cardDiv.appendChild(idEl);
+        cardDiv.appendChild(descEl);
+        cardDiv.appendChild(buttonDiv);
+
+        myCardsList.appendChild(cardDiv);
+    });
+}
+
+// Placeholder handlers for buttons
+function handleEditCard(cardId) {
+    console.log(`Placeholder: Edit button clicked for card ID: ${cardId}`);
+    alert(`Edit functionality for card ${cardId} not implemented yet.`);
+    // TODO: Implement logic to populate the submit form with this card's data
+}
+
+function handleDeactivateCard(cardId) {
+    console.log(`Placeholder: Deactivate button clicked for card ID: ${cardId}`);
+    alert(`Deactivate functionality for card ${cardId} not implemented yet.`);
+    // TODO: Implement API call to DELETE /agent-cards/{card_id} and refresh list
+}
+// --- END ADDED ---
+
 
 // Helper for making authenticated requests
 async function makeAuthenticatedRequest(url, options = {}) {
@@ -181,6 +266,5 @@ async function makeAuthenticatedRequest(url, options = {}) {
 
 
 // TODO: Add event listeners for validate, submit buttons
-// TODO: Implement renderOwnedCards function
 // TODO: Implement validateCardData function
 // TODO: Implement submitNewCard function
