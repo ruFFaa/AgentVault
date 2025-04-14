@@ -1,0 +1,52 @@
+/* Styles specific to the Developer Portal */
+
+#login-section, #dashboard-section {
+    margin-bottom: 20px;
+    padding: 15px;
+    border: 1px solid #eee;
+    background-color: #fdfdfd;
+}
+
+#login-section label {
+    margin-right: 5px;
+}
+
+#login-section input[type="password"] {
+    min-width: 300px;
+    padding: 8px;
+    margin-right: 10px;
+}
+
+#dashboard-section h2, #dashboard-section h3 {
+    margin-top: 0;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 5px;
+    margin-bottom: 15px;
+}
+
+#my-cards-list .agent-card { /* Reuse some styling */
+    border: 1px solid #e0e0e0;
+    padding: 10px;
+    margin-bottom: 10px;
+    background-color: #fff;
+}
+
+#submit-card-section textarea {
+    width: 95%;
+    margin-bottom: 10px;
+    font-family: monospace;
+}
+
+#submit-card-section button {
+    margin-right: 10px;
+    padding: 8px 15px;
+}
+
+#logout-button {
+    float: right;
+    padding: 5px 10px;
+    background-color: #dc3545;
+    color: white;
+    border: none;
+    cursor: pointer;
+}

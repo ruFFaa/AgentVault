@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentVault Developer Portal</title>
+    <!-- Link to main style and potentially a developer-specific one -->
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/developer/developer.css">
+</head>
+<body>
+    <header>
+        <h1>AgentVault Developer Portal</h1>
+        <nav>
+            <a href="/ui">Back to Public Registry</a>
+        </nav>
+    </header>
+    <main>
+        <section id="login-section">
+            <h2>Developer Login</h2>
+            <label for="developer-api-key">API Key:</label>
+            <input type="password" id="developer-api-key" placeholder="Enter your API key">
+            <button id="login-button">Login</button>
+            <p id="login-error" style="color: red; display: none;"></p>
+            <p><small>Your API key will be stored in session storage for this browser session only.</small></p>
+        </section>
+
+        <section id="dashboard-section" style="display: none;">
+            <h2>My Dashboard</h2>
+            <button id="logout-button">Logout</button>
+
+            <section id="my-cards-section">
+                <h3>My Agent Cards</h3>
+                <div id="my-cards-list">
+                    <p>Loading your agents...</p>
+                    <!-- Cards will be loaded here -->
+                </div>
+            </section>
+
+            <hr>
+
+            <section id="submit-card-section">
+                <h3>Submit/Update Agent Card</h3>
+                <label for="agent-card-json">Agent Card JSON:</label><br>
+                <textarea id="agent-card-json" rows="15" cols="80" placeholder='Paste your agent-card.json content here...'></textarea><br>
+                <button id="validate-card-button">Validate Card Data</button>
+                <button id="submit-card-button">Submit New Card</button>
+                <!-- Update button will be added dynamically -->
+                <p id="submit-status" style="margin-top: 10px;"></p>
+                <pre id="validation-errors" style="color: red; white-space: pre-wrap;"></pre>
+            </section>
+        </section>
+    </main>
+    <footer>
+        <p>AgentVault Developer Portal</p>
+    </footer>
+    <script src="/static/developer/developer.js"></script>
+</body>
+</html>
