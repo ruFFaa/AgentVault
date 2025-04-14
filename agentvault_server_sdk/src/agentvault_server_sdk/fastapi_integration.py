@@ -5,16 +5,22 @@ as A2A compliant API endpoints.
 
 import logging
 import json # Import json for JSONDecodeError handling
-from typing import Any, Dict, Optional, Union, AsyncGenerator
+import inspect
+import asyncio # Keep asyncio import
+from typing import Any, Dict, Optional, Union, AsyncGenerator, Callable, TypeVar, List
 
 import pydantic
+from pydantic import RootModel
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse, JSONResponse
 
-
-# Import the base agent class
+# Import the base agent class and state management
 from .agent import BaseA2AAgent
+# --- MODIFIED: Import state classes ---
+from .state import BaseTaskStore, InMemoryTaskStore, TaskContext
+# --- END MODIFIED ---
+
 
 # Import necessary models from the core library
 try:
@@ -59,6 +65,25 @@ JSONRPC_INVALID_PARAMS = -32602
 JSONRPC_INTERNAL_ERROR = -32603
 # Application specific errors: -32000 to -32099
 JSONRPC_APP_ERROR = -32000 # Generic application error
+
+# --- Decorator Definition ---
+F = TypeVar('F', bound=Callable[..., Any])
+
+def a2a_method(method_name: str) -> Callable[[F], F]:
+    """
+    Decorator to mark agent methods as handlers for specific A2A JSON-RPC methods.
+
+    Args:
+        method_name: The JSON-RPC method string (e.g., "tasks/send", "custom/my_method").
+    """
+    def _decorator(func: F) -> F:
+        if not asyncio.iscoroutinefunction(func):
+            raise TypeError(f"A2A method handler '{func.__name__}' must be an async function (defined with 'async def').")
+        setattr(func, '_a2a_method_name', method_name)
+        logger.debug(f"Marking method '{func.__name__}' as handler for A2A method '{method_name}'")
+        return func
+    return _decorator
+
 
 def create_jsonrpc_error_response(
     req_id: Union[str, int, None], code: int, message: str, data: Optional[Any] = None
@@ -150,6 +175,9 @@ def create_a2a_router(
     agent: BaseA2AAgent,
     prefix: str = "",
     tags: Optional[list[str]] = None,
+    # --- ADDED: task_store argument ---
+    task_store: Optional[BaseTaskStore] = None,
+    # --- END ADDED ---
 ) -> APIRouter:
     """
     Creates a FastAPI APIRouter that exposes the A2A protocol methods...
@@ -157,12 +185,45 @@ def create_a2a_router(
     if tags is None:
         tags = ["A2A Protocol"]
 
+    # --- ADDED: Instantiate default task store if none provided ---
+    if task_store is None:
+        logger.info("No task store provided, using default InMemoryTaskStore.")
+        task_store = InMemoryTaskStore()
+    final_task_store = task_store # Use final variable for closure
+    # --- END ADDED ---
+
     router = APIRouter(
         prefix=prefix,
         tags=tags,
     )
 
-    logger.info(f"Creating A2A router for agent: {agent.__class__.__name__} with prefix '{prefix}'")
+    logger.info(f"Creating A2A router for agent: {agent.__class__.__name__} with prefix '{prefix}' using task store: {final_task_store.__class__.__name__}")
+
+    # --- ADDED: Inspect agent for decorated methods ---
+    decorated_methods: Dict[str, Callable] = {}
+    logger.debug(f"Inspecting agent instance '{agent.__class__.__name__}' for @a2a_method decorators...")
+    try:
+        for name, method_func in inspect.getmembers(agent, predicate=inspect.iscoroutinefunction):
+            if hasattr(method_func, '_a2a_method_name'):
+                a2a_name = getattr(method_func, '_a2a_method_name')
+                if isinstance(a2a_name, str) and a2a_name:
+                    if a2a_name in decorated_methods:
+                         logger.warning(f"Duplicate @a2a_method name '{a2a_name}' found on method '{name}'. Overwriting previous handler ({decorated_methods[a2a_name].__name__}).")
+                    decorated_methods[a2a_name] = method_func
+                    logger.info(f"  Found A2A method: '{a2a_name}' handled by '{name}'")
+                else:
+                    logger.warning(f"Method '{name}' has '_a2a_method_name' attribute, but it's not a valid string: {a2a_name!r}")
+    except Exception as inspect_err:
+        logger.error(f"Error during inspection of agent methods: {inspect_err}", exc_info=True)
+        # Decide if this should be fatal or just log and continue without decorators
+        # raise RuntimeError("Failed to inspect agent for decorated methods.") from inspect_err
+    logger.debug(f"Finished inspection. Found {len(decorated_methods)} decorated methods.")
+    # --- END ADDED ---
+
+    # --- ADDED: Dependency function for task store ---
+    def get_task_store_dependency() -> BaseTaskStore:
+        return final_task_store
+    # --- END ADDED ---
 
     @router.post(
         "/",
@@ -171,7 +232,10 @@ def create_a2a_router(
     )
     async def handle_a2a_request(
         request: Request,
-        agent_instance: BaseA2AAgent = Depends(lambda: agent)
+        agent_instance: BaseA2AAgent = Depends(lambda: agent),
+        # --- ADDED: Inject task store dependency ---
+        task_store_dep: BaseTaskStore = Depends(get_task_store_dependency)
+        # --- END ADDED ---
     ) -> Response:
         """Handles incoming A2A JSON-RPC requests over POST."""
         req_id: Union[str, int, None] = None
@@ -195,7 +259,7 @@ def create_a2a_router(
 
             jsonrpc_version = payload.get("jsonrpc")
             method = payload.get("method")
-            params = payload.get("params")
+            params = payload.get("params") # Keep as raw dict/list/None for now
             req_id = payload.get("id")
 
             if not isinstance(method, str) or not method:
@@ -216,10 +280,108 @@ def create_a2a_router(
             logger.info(f"Received valid JSON-RPC request: method='{method}', id='{req_id}'")
 
 
-            # --- Method Routing Logic ---
-            # ... (tasks/send, tasks/get, tasks/cancel logic remains the same, returning JSONResponse) ...
+            # --- MODIFIED: Method Routing Logic ---
+            handler_func: Optional[Callable] = decorated_methods.get(method)
 
-            if method == "tasks/send":
+            if handler_func:
+                logger.info(f"Routing request for method '{method}' to decorated handler '{handler_func.__name__}'")
+                # --- ADDED: Dynamic parameter validation and handler call ---
+                try:
+                    # 1. Get signature and build Pydantic fields
+                    sig = inspect.signature(handler_func)
+                    param_fields: Dict[str, Any] = {}
+                    # --- MODIFIED: Inject task_store dependency if requested ---
+                    handler_needs_task_store = False
+                    for param_name, param in sig.parameters.items():
+                        if param_name in ('self', 'cls'): # Skip self/cls
+                            continue
+                        # Check if the handler expects the task store
+                        if param.annotation is BaseTaskStore or \
+                           (isinstance(param.annotation, type) and issubclass(param.annotation, BaseTaskStore)):
+                            handler_needs_task_store = True
+                            continue # Don't add task_store to the dynamic model
+
+                        param_annotation = param.annotation
+                        param_default = param.default
+                        default_value = ... if param_default is inspect.Parameter.empty else param_default
+                        annotation_to_use = Any if param_annotation is inspect.Parameter.empty else param_annotation
+                        param_fields[param_name] = (annotation_to_use, default_value)
+                    # --- END MODIFIED ---
+
+                    # 2. Create dynamic model
+                    ParamsModel = pydantic.create_model(
+                        f'{handler_func.__name__}Params',
+                        **param_fields # type: ignore
+                    )
+                    logger.debug(f"Created dynamic Pydantic model for params: {ParamsModel.__name__} with fields {param_fields}")
+
+                    # 3. Validate incoming params
+                    params_dict = params if isinstance(params, dict) else {}
+                    validated_params_model = ParamsModel.model_validate(params_dict)
+                    validated_params_dict = validated_params_model.model_dump()
+                    logger.debug(f"Validated params for '{method}': {validated_params_dict}")
+
+                    # --- MODIFIED: Add task_store to call if needed ---
+                    call_kwargs = validated_params_dict
+                    if handler_needs_task_store:
+                        call_kwargs['task_store'] = task_store_dep
+                        logger.debug(f"Injecting task_store dependency into handler '{handler_func.__name__}'")
+                    # --- END MODIFIED ---
+
+                    # 4. Call the handler with validated parameters
+                    result = await handler_func(**call_kwargs)
+
+                    # --- ADDED: Return value validation ---
+                    return_annotation = sig.return_annotation
+                    # --- MODIFIED: Check for None and empty ---
+                    if return_annotation is not inspect.Parameter.empty and return_annotation is not type(None):
+                    # --- END MODIFIED ---
+                        try:
+                            # --- MODIFIED: Use RootModel for non-BaseModel types ---
+                            is_pydantic_model = False
+                            if inspect.isclass(return_annotation) and issubclass(return_annotation, pydantic.BaseModel):
+                                is_pydantic_model = True
+
+                            if is_pydantic_model:
+                                return_annotation.model_validate(result) # type: ignore
+                            else:
+                                ReturnTypeModel = RootModel[return_annotation] # type: ignore
+                                ReturnTypeModel.model_validate(result)
+                            # --- END MODIFIED ---
+                            logger.debug(f"Return value validated successfully against annotation: {return_annotation}")
+                        except pydantic.ValidationError as e:
+                            logger.error(f"Invalid return value type from handler '{handler_func.__name__}' for method '{method}'. Expected '{return_annotation}', got '{type(result)}'. Validation error: {e}")
+                            error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INTERNAL_ERROR, f"Internal agent error: Invalid return type from handler for method '{method}'.")
+                            return JSONResponse(content=error_resp, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                        except Exception as e: # Catch other potential validation/create_model errors
+                             logger.exception(f"Unexpected error during return value validation for handler '{handler_func.__name__}'")
+                             error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INTERNAL_ERROR, "Internal agent error during return validation.")
+                             return JSONResponse(content=error_resp, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    # --- END ADDED ---
+
+                    success_resp = create_jsonrpc_success_response(req_id, result)
+                    return JSONResponse(content=success_resp, status_code=status.HTTP_200_OK)
+
+                except pydantic.ValidationError as e:
+                    logger.warning(f"Invalid params for decorated method '{method}': {e}")
+                    error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INVALID_PARAMS, f"Invalid params: {e}")
+                    return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
+                except A2AError as e:
+                     logger.error(f"Agent error during decorated method '{method}' for id={req_id}: {e}", exc_info=False)
+                     error_resp = create_jsonrpc_error_response(req_id, JSONRPC_APP_ERROR, f"Agent processing error: {e}")
+                     return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
+                except TypeError as e: # Catch issues calling handler with wrong args
+                     logger.error(f"TypeError calling decorated method '{method}' for id={req_id}: {e}", exc_info=True)
+                     error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INVALID_PARAMS, f"Invalid parameters for method '{method}': {e}")
+                     return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
+                except Exception as e:
+                     logger.exception(f"Unexpected agent error during decorated method '{method}' for id={req_id}: {e}")
+                     error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INTERNAL_ERROR, f"Internal agent error: {type(e).__name__}")
+                     return JSONResponse(content=error_resp, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                # --- END ADDED ---
+
+            # Fallback to standard handle_ methods if no decorator found
+            elif method == "tasks/send":
                 try:
                     if not isinstance(params, dict):
                          raise pydantic.ValidationError.from_exception_data(
@@ -232,9 +394,11 @@ def create_a2a_router(
                     error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INVALID_PARAMS, f"Invalid params: {e}")
                     return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
                 try:
+                    # --- MODIFIED: Pass task_store_dep ---
                     task_id_result: str = await agent_instance.handle_task_send(
-                        task_id=validated_params.id, message=validated_params.message
+                        task_id=validated_params.id, message=validated_params.message #, task_store=task_store_dep # Add if handle_task_send needs it
                     )
+                    # --- END MODIFIED ---
                     send_result = TaskSendResult(id=task_id_result)
                     success_resp = create_jsonrpc_success_response(req_id, send_result.model_dump(mode='json'))
                     return JSONResponse(content=success_resp, status_code=status.HTTP_200_OK)
@@ -260,9 +424,11 @@ def create_a2a_router(
                     error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INVALID_PARAMS, f"Invalid params: {e}")
                     return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
                 try:
+                    # --- MODIFIED: Pass task_store_dep ---
                     task_result: Task = await agent_instance.handle_task_get(
-                        task_id=validated_params.id
+                        task_id=validated_params.id #, task_store=task_store_dep # Add if handle_task_get needs it
                     )
+                    # --- END MODIFIED ---
                     if not isinstance(task_result, Task):
                          logger.error(f"Agent handler for tasks/get returned unexpected type: {type(task_result)}")
                          raise TypeError("Agent handler must return a Task object for tasks/get")
@@ -290,9 +456,11 @@ def create_a2a_router(
                     error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INVALID_PARAMS, f"Invalid params: {e}")
                     return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
                 try:
+                    # --- MODIFIED: Pass task_store_dep ---
                     cancel_accepted: bool = await agent_instance.handle_task_cancel(
-                        task_id=validated_params.id
+                        task_id=validated_params.id #, task_store=task_store_dep # Add if handle_task_cancel needs it
                     )
+                    # --- END MODIFIED ---
                     cancel_result = TaskCancelResult(success=cancel_accepted)
                     success_resp = create_jsonrpc_success_response(req_id, cancel_result.model_dump(mode='json'))
                     return JSONResponse(content=success_resp, status_code=status.HTTP_200_OK)
@@ -315,25 +483,27 @@ def create_a2a_router(
                     if not isinstance(task_id, str) or not task_id:
                         raise ValueError("'id' parameter is required and must be a non-empty string.")
 
-                    # --- MODIFIED: Call agent handler directly, let exceptions propagate to SSEResponse ---
-                    # If this call succeeds, it returns the generator for SSEResponse
-                    # If it fails, the exception will be caught by the outer try/except
-                    event_generator = agent_instance.handle_subscribe_request(task_id=task_id)
+                    # --- MODIFIED: Pass task_store_dep ---
+                    event_generator = agent_instance.handle_subscribe_request(
+                        task_id=task_id #, task_store=task_store_dep # Add if handle_subscribe_request needs it
+                    )
+                    # --- END MODIFIED ---
                     logger.info(f"Subscription request successful for task {task_id}. Starting SSE stream.")
                     return SSEResponse(content=event_generator)
-                    # --- END MODIFIED ---
 
                 except (ValueError, TypeError, pydantic.ValidationError) as e: # Catch validation errors
                     logger.warning(f"Invalid params for tasks/sendSubscribe: {e}")
                     error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INVALID_PARAMS, f"Invalid params: {e}")
                     return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
-                # --- REMOVED: Specific error handling here, let outer handler or SSEResponse handle ---
+
+            # --- REMOVED temporary elif handler_func block ---
 
             else:
                 # Handle Method Not Found error
                 logger.warning(f"Method not found: '{method}'")
                 error_resp = create_jsonrpc_error_response(req_id, JSONRPC_METHOD_NOT_FOUND, "Method not found")
                 return JSONResponse(content=error_resp, status_code=status.HTTP_200_OK)
+            # --- END MODIFIED ---
 
         except Exception as e:
             # --- MODIFIED: Catch A2AError specifically here too ---

@@ -143,20 +143,28 @@ class TaskCancelResult(BaseModel):
 
 class TaskStatusUpdateEvent(BaseModel):
     """Event sent via SSE when the task's status changes."""
+    # --- ADDED: model_config ---
+    model_config = ConfigDict(populate_by_name=True)
+    # --- END ADDED ---
     task_id: str = Field(..., alias="taskId", description="The ID of the task being updated.")
     state: TaskState = Field(..., description="The new state of the task.")
     timestamp: datetime.datetime = Field(..., description="Timestamp of the status update.")
     message: Optional[str] = Field(None, description="Optional message accompanying the status change (e.g., error details).")
-    # Include relevant parts of the Task model if needed (e.g., updated_at)
 
 class TaskMessageEvent(BaseModel):
     """Event sent via SSE when a new message is added to the task."""
+    # --- ADDED: model_config ---
+    model_config = ConfigDict(populate_by_name=True)
+    # --- END ADDED ---
     task_id: str = Field(..., alias="taskId", description="The ID of the task.")
     message: Message = Field(..., description="The new message added to the task.")
     timestamp: datetime.datetime = Field(..., description="Timestamp of the event.")
 
 class TaskArtifactUpdateEvent(BaseModel):
     """Event sent via SSE when an artifact is created or updated."""
+    # --- ADDED: model_config ---
+    model_config = ConfigDict(populate_by_name=True)
+    # --- END ADDED ---
     task_id: str = Field(..., alias="taskId", description="The ID of the task.")
     artifact: Artifact = Field(..., description="The artifact that was created or updated.")
     timestamp: datetime.datetime = Field(..., description="Timestamp of the artifact update.")
