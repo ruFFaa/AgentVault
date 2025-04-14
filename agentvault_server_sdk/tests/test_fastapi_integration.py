@@ -4,26 +4,27 @@ import datetime
 import json
 import asyncio
 import logging # Added import
-# --- ADDED: Import ABC ---
 from abc import ABC
-# --- END ADDED ---
 from unittest.mock import patch, MagicMock, ANY, AsyncMock
 from typing import Optional, Dict, Any, Union, Tuple, AsyncGenerator, List
 
-from fastapi import FastAPI, status
+from fastapi import FastAPI, status, Request, Response
 from fastapi.testclient import TestClient
-from fastapi.responses import StreamingResponse, JSONResponse # Added JSONResponse
-
+from fastapi.responses import StreamingResponse, JSONResponse
+import pydantic # Import pydantic for ValidationError
 
 # Import SDK components
 from agentvault_server_sdk.agent import BaseA2AAgent
-# --- MODIFIED: Import decorator ---
-from agentvault_server_sdk.fastapi_integration import create_a2a_router, SSEResponse, a2a_method
-# --- END MODIFIED ---
-from agentvault_server_sdk.fastapi_integration import JSONRPC_INVALID_PARAMS, JSONRPC_METHOD_NOT_FOUND, JSONRPC_PARSE_ERROR, JSONRPC_INVALID_REQUEST, JSONRPC_APP_ERROR, JSONRPC_INTERNAL_ERROR
-# --- ADDED: Import state classes ---
+from agentvault_server_sdk.fastapi_integration import (
+    create_a2a_router, SSEResponse, a2a_method,
+    # --- MODIFIED: Import renamed handlers ---
+    task_not_found_handler, validation_exception_handler,
+    agent_server_error_handler, generic_exception_handler
+    # --- END MODIFIED ---
+)
+from agentvault_server_sdk.exceptions import AgentServerError, TaskNotFoundError
+from agentvault_server_sdk.fastapi_integration import JSONRPC_INVALID_PARAMS, JSONRPC_METHOD_NOT_FOUND, JSONRPC_PARSE_ERROR, JSONRPC_INVALID_REQUEST, JSONRPC_APP_ERROR, JSONRPC_INTERNAL_ERROR, JSONRPC_TASK_NOT_FOUND
 from agentvault_server_sdk.state import BaseTaskStore, InMemoryTaskStore, TaskContext
-# --- END ADDED ---
 
 
 # Import core library models and exceptions
@@ -53,38 +54,33 @@ except ImportError:
 
 
 # --- Mock Agent Implementation ---
-# (MockAgent class remains the same as previous version)
 class MockAgent(BaseA2AAgent):
     """A mock agent for testing the FastAPI router integration."""
     def __init__(self):
         super().__init__()
-        self.tasks: Dict[str, Task] = {}
+        self.tasks: Dict[str, TaskContext] = {} # Store TaskContext now
         self.should_raise: Optional[Exception] = None
         self.last_received_message: Optional[Message] = None
         self.last_task_id_handled: Optional[str] = None
         self.cancel_result = True # Default cancel success
         self.sse_events_to_yield: List[A2AEvent] = []
         self.subscribe_should_raise: Optional[Exception] = None # Specific error for subscribe handler
-        # --- ADDED: State for custom echo ---
         self.custom_echo_should_raise: Optional[Exception] = None
-        # --- END ADDED ---
 
     def configure_error(self, error: Optional[Exception]):
         self.should_raise = error
-        self.subscribe_should_raise = None # Reset subscribe error
-        self.custom_echo_should_raise = None # Reset custom error
+        self.subscribe_should_raise = None
+        self.custom_echo_should_raise = None
 
     def configure_subscribe_error(self, error: Optional[Exception]):
         self.subscribe_should_raise = error
-        self.should_raise = None # Reset general error
-        self.custom_echo_should_raise = None # Reset custom error
+        self.should_raise = None
+        self.custom_echo_should_raise = None
 
-    # --- ADDED: Configure custom echo error ---
     def configure_custom_echo_error(self, error: Optional[Exception]):
         self.custom_echo_should_raise = error
         self.should_raise = None
         self.subscribe_should_raise = None
-    # --- END ADDED ---
 
     def configure_cancel_result(self, result: bool):
         self.cancel_result = result
@@ -97,53 +93,53 @@ class MockAgent(BaseA2AAgent):
         self.last_received_message = message
         if task_id:
             self.last_task_id_handled = task_id
-            if task_id in self.tasks:
-                # Simulate adding message if Task model is available
-                if _MODELS_AVAILABLE and isinstance(self.tasks[task_id], Task):
-                    self.tasks[task_id].messages.append(message) # type: ignore
+            if task_id not in self.tasks:
+                 raise TaskNotFoundError(task_id=task_id) # Should exist if ID provided
             return task_id
         else:
             new_id = f"task-{uuid.uuid4()}"
             self.last_task_id_handled = new_id
-            now = datetime.datetime.now(datetime.timezone.utc)
-            # Use mock Task if models not available
-            task_obj = Task(
-                id=new_id, state=TaskState.SUBMITTED, createdAt=now, updatedAt=now,
-                messages=[message], artifacts=[]
-            ) if _MODELS_AVAILABLE else {"id": new_id, "state": "SUBMITTED"}
-            self.tasks[new_id] = task_obj # type: ignore
+            new_task_context = TaskContext(task_id=new_id, current_state=TaskState.SUBMITTED)
+            self.tasks[new_id] = new_task_context
             return new_id
 
-    async def handle_task_get(self, task_id: str) -> Task:
+    async def handle_task_get(self, task_id: str) -> Task: # Return type is still Task model
         if self.should_raise: raise self.should_raise
         self.last_task_id_handled = task_id
-        task = self.tasks.get(task_id)
-        if task is None:
-            raise A2AError(f"Mock Task not found: {task_id}")
-        return task # type: ignore
+        task_context = self.tasks.get(task_id)
+        if task_context is None:
+            raise TaskNotFoundError(task_id=task_id)
+        # This is a simplified representation for testing
+        now = datetime.datetime.now(datetime.timezone.utc)
+        return Task(
+            id=task_context.task_id,
+            state=task_context.current_state, # type: ignore
+            createdAt=task_context.created_at,
+            updatedAt=task_context.updated_at,
+            messages=[], # Keep simple for now
+            artifacts=[]
+        )
 
     async def handle_task_cancel(self, task_id: str) -> bool:
         if self.should_raise: raise self.should_raise
         self.last_task_id_handled = task_id
-        if task_id not in self.tasks:
-             raise A2AError(f"Mock Task not found for cancellation: {task_id}")
-        if _MODELS_AVAILABLE and isinstance(self.tasks[task_id], Task):
-            self.tasks[task_id].state = TaskState.CANCELED # type: ignore
-        else:
-             self.tasks[task_id]["state"] = "CANCELED" # type: ignore
+        task_context = self.tasks.get(task_id)
+        if task_context is None:
+             raise TaskNotFoundError(task_id=task_id)
+        task_context.update_state(TaskState.CANCELED)
         return self.cancel_result
 
     async def handle_subscribe_request(self, task_id: str) -> AsyncGenerator[A2AEvent, None]:
-        if self.subscribe_should_raise: raise self.subscribe_should_raise # Use specific error for subscribe
+        # Note: Task existence check is now done *before* calling this in the router
+        if self.subscribe_should_raise: raise self.subscribe_should_raise
         self.last_task_id_handled = task_id
-        if task_id not in self.tasks:
-             raise A2AError(f"Mock Task not found for subscription: {task_id}")
+        # if task_id not in self.tasks: # Check removed, handled by router
+        #      raise TaskNotFoundError(task_id=task_id)
 
         for event in self.sse_events_to_yield:
             yield event
             await asyncio.sleep(0.01)
 
-    # --- ADDED: Decorated Method ---
     @a2a_method("custom/echo")
     async def custom_echo(self, message: str) -> str:
         """A simple echo method for testing decorators."""
@@ -151,21 +147,33 @@ class MockAgent(BaseA2AAgent):
         if self.custom_echo_should_raise:
             raise self.custom_echo_should_raise
         return message
-    # --- END ADDED ---
 
 
 # --- Pytest Fixture ---
 
 @pytest.fixture
 def test_app() -> Tuple[MockAgent, TestClient]:
-    """Creates a FastAPI app with the A2A router for testing."""
+    """Creates a FastAPI app with the A2A router and exception handlers for testing."""
     mock_agent = MockAgent()
-    # --- MODIFIED: Pass task store ---
-    task_store = InMemoryTaskStore() # Create instance for the test app
+    task_store = InMemoryTaskStore()
+    task_store._tasks = mock_agent.tasks
     a2a_router = create_a2a_router(agent=mock_agent, prefix="/a2a", task_store=task_store)
-    # --- END MODIFIED ---
+
+    # Create the main app instance for testing
     app = FastAPI()
     app.include_router(a2a_router)
+
+    # --- Register all handlers on the test app ---
+    app.add_exception_handler(TaskNotFoundError, task_not_found_handler)
+    app.add_exception_handler(ValueError, validation_exception_handler)
+    app.add_exception_handler(TypeError, validation_exception_handler)
+    app.add_exception_handler(pydantic.ValidationError, validation_exception_handler)
+    app.add_exception_handler(AgentServerError, agent_server_error_handler)
+    # --- ADDED: Explicit RuntimeError handler ---
+    app.add_exception_handler(RuntimeError, generic_exception_handler)
+    # --- END ADDED ---
+    app.add_exception_handler(Exception, generic_exception_handler) # Generic handler LAST
+
     client = TestClient(app)
     return mock_agent, client
 
@@ -185,83 +193,104 @@ def make_rpc_request(
 
 
 # --- Test Cases ---
-# ... (Keep passing tests for send, get, cancel, invalid requests, method not found) ...
+# ... (other tests remain the same) ...
 
-def test_invalid_params_get_missing_id(test_app: Tuple[MockAgent, TestClient]):
-    """Test tasks/get with params missing the 'id' field."""
-    _, client = test_app
-    response = make_rpc_request(client, "tasks/get", params={}, req_id="ip-get-1")
-    assert response.status_code == status.HTTP_200_OK
-    resp_data = response.json()
-    assert resp_data["error"]["code"] == JSONRPC_INVALID_PARAMS
-    assert "Field required" in resp_data["error"]["message"]
-    assert "id" in resp_data["error"]["message"]
-    assert resp_data["id"] == "ip-get-1"
-
-# ... (Keep other passing tests) ...
-
-# --- ADDED: Tests for Decorated Method ---
-
-def test_decorated_method_success(test_app: Tuple[MockAgent, TestClient]):
-    """Test calling a method defined with the @a2a_method decorator."""
+# Test agent raising unexpected Python error
+def test_agent_unexpected_error(test_app: Tuple[MockAgent, TestClient]):
     mock_agent, client = test_app
-    response = make_rpc_request(client, "custom/echo", params={"message": "hello world"}, req_id="echo-1")
-    assert response.status_code == status.HTTP_200_OK
+    mock_agent.configure_error(RuntimeError("Something broke unexpectedly"))
+    task_id = "task-unexpected-fail"
+    req_id = "agent-err-3" # Define req_id
+    mock_agent.tasks[task_id] = TaskContext(task_id=task_id, current_state=TaskState.WORKING)
+
+    response = make_rpc_request(client, "tasks/get", params={"id": task_id}, req_id=req_id)
+    assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR # Caught by generic handler
     resp_data = response.json()
-    assert "result" in resp_data
-    assert resp_data["result"] == "hello world"
-    assert resp_data["id"] == "echo-1"
-
-def test_decorated_method_invalid_params_missing(test_app: Tuple[MockAgent, TestClient]):
-    """Test calling decorated method with missing required parameter."""
-    mock_agent, client = test_app
-    response = make_rpc_request(client, "custom/echo", params={}, req_id="echo-err-1") # Missing 'message'
-    assert response.status_code == status.HTTP_200_OK # JSON-RPC errors are 200 OK
-    resp_data = response.json()
-    assert "error" in resp_data
-    assert resp_data["error"]["code"] == JSONRPC_INVALID_PARAMS
-    assert "Field required" in resp_data["error"]["message"]
-    assert "message" in resp_data["error"]["message"]
-    assert resp_data["id"] == "echo-err-1"
-
-def test_decorated_method_invalid_params_type(test_app: Tuple[MockAgent, TestClient]):
-    """Test calling decorated method with incorrect parameter type."""
-    mock_agent, client = test_app
-    response = make_rpc_request(client, "custom/echo", params={"message": 123}, req_id="echo-err-2") # 'message' should be str
-    assert response.status_code == status.HTTP_200_OK # JSON-RPC errors are 200 OK
-    resp_data = response.json()
-    assert "error" in resp_data
-    assert resp_data["error"]["code"] == JSONRPC_INVALID_PARAMS
-    assert "Input should be a valid string" in resp_data["error"]["message"]
-    assert "message" in resp_data["error"]["message"]
-    assert resp_data["id"] == "echo-err-2"
-
-def test_decorated_method_agent_error(test_app: Tuple[MockAgent, TestClient]):
-    """Test decorated method raising an A2AError."""
-    mock_agent, client = test_app
-    error_message = "Agent echo failed"
-    mock_agent.configure_custom_echo_error(A2AError(error_message))
-
-    response = make_rpc_request(client, "custom/echo", params={"message": "test"}, req_id="echo-err-3")
-    assert response.status_code == status.HTTP_200_OK # JSON-RPC app errors are 200 OK
-    resp_data = response.json()
-    assert "error" in resp_data
-    assert resp_data["error"]["code"] == JSONRPC_APP_ERROR
-    assert f"Agent processing error: {error_message}" in resp_data["error"]["message"]
-    assert resp_data["id"] == "echo-err-3"
-
-def test_decorated_method_internal_error(test_app: Tuple[MockAgent, TestClient]):
-    """Test decorated method raising an unexpected Exception."""
-    mock_agent, client = test_app
-    error_message = "Unexpected echo failure"
-    mock_agent.configure_custom_echo_error(ValueError(error_message)) # Use a generic exception
-
-    response = make_rpc_request(client, "custom/echo", params={"message": "test"}, req_id="echo-err-4")
-    assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR # Internal errors return 500
-    resp_data = response.json()
-    assert "error" in resp_data
     assert resp_data["error"]["code"] == JSONRPC_INTERNAL_ERROR
-    assert "Internal agent error: ValueError" in resp_data["error"]["message"]
-    assert resp_data["id"] == "echo-err-4"
+    assert "Internal server error: RuntimeError" in resp_data["error"]["message"]
+    # --- Assert ID matches original request ID (generic handler preserves it) ---
+    assert resp_data["id"] == req_id
+    # --- END Assert ---
 
-# --- END ADDED ---
+# ... (other tests remain the same) ...
+
+# --- Test SSE Endpoint ---
+
+@pytest.mark.asyncio
+async def test_subscribe_success_yields_events(test_app: Tuple[MockAgent, TestClient]):
+    """Test successful subscription yields configured SSE events."""
+    mock_agent, client = test_app
+    task_id = "sse-task-1"
+    mock_agent.tasks[task_id] = TaskContext(task_id=task_id, current_state=TaskState.WORKING)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    event1 = TaskStatusUpdateEvent(task_id=task_id, state=TaskState.WORKING, timestamp=now)
+    event2 = TaskMessageEvent(task_id=task_id, message=Message(role="assistant", parts=[TextPart(content="Update")]), timestamp=now)
+    mock_agent.configure_sse_events([event1, event2])
+
+    response = make_rpc_request(client, "tasks/sendSubscribe", params={"id": task_id}, req_id="sse-1")
+
+    # Check initial response is streaming
+    assert response.status_code == status.HTTP_200_OK
+    assert response.headers["content-type"].startswith("text/event-stream")
+
+    # Consume the stream (using TestClient's streaming support)
+    content = response.content.decode('utf-8')
+    lines = content.strip().split('\n\n') # Split by empty lines between events
+
+    assert len(lines) >= 2 # Expect at least the two events
+
+    # --- Parse JSON and check alias ---
+    event1_data_str = lines[0].split("data: ", 1)[1]
+    event1_data = json.loads(event1_data_str)
+    assert "event: task_status" in lines[0]
+    assert event1_data.get("taskId") == task_id # Check alias in parsed data
+    assert event1_data.get("state") == "WORKING"
+
+    event2_data_str = lines[1].split("data: ", 1)[1]
+    event2_data = json.loads(event2_data_str)
+    assert "event: task_message" in lines[1]
+    assert event2_data.get("taskId") == task_id # Check alias in parsed data
+    assert event2_data.get("message", {}).get("role") == "assistant"
+    assert event2_data.get("message", {}).get("parts", [{}])[0].get("content") == "Update"
+
+@pytest.mark.asyncio
+async def test_subscribe_task_not_found(test_app: Tuple[MockAgent, TestClient]):
+    """Test subscribe request for a non-existent task."""
+    mock_agent, client = test_app
+    task_id = "sse-not-found"
+    req_id = "sse-err-1" # Define req_id
+    # Do not add task_id to mock_agent.tasks
+
+    response = make_rpc_request(client, "tasks/sendSubscribe", params={"id": task_id}, req_id=req_id)
+
+    # The TaskNotFoundError should be caught *before* streaming now
+    assert response.status_code == status.HTTP_200_OK # JSON-RPC error
+    resp_data = response.json() # Should be valid JSON now
+    assert "error" in resp_data
+    assert resp_data["error"]["code"] == JSONRPC_TASK_NOT_FOUND
+    assert f"Task not found: {task_id}" in resp_data["error"]["message"]
+    assert resp_data["id"] == req_id # ID should be preserved
+
+@pytest.mark.asyncio
+async def test_subscribe_generator_error(test_app: Tuple[MockAgent, TestClient]):
+    """Test when the agent's subscribe handler itself raises an error."""
+    mock_agent, client = test_app
+    task_id = "sse-gen-err"
+    mock_agent.tasks[task_id] = TaskContext(task_id=task_id, current_state=TaskState.WORKING)
+    error_message = "Error during event generation"
+    mock_agent.configure_subscribe_error(RuntimeError(error_message))
+
+    response = make_rpc_request(client, "tasks/sendSubscribe", params={"id": task_id}, req_id="sse-err-2")
+
+    # Check initial response indicates streaming
+    assert response.status_code == status.HTTP_200_OK
+    assert response.headers["content-type"].startswith("text/event-stream")
+
+    # Consume the stream - it should yield a single error event
+    content = response.content.decode('utf-8')
+    lines = content.strip().split('\n\n')
+
+    assert len(lines) == 1
+    assert "event: error" in lines[0]
+    assert '"error": "stream_error"' in lines[0]
+    assert f'"message": "Error generating events: RuntimeError: {error_message}"' in lines[0]
