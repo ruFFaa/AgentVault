@@ -63,6 +63,55 @@ EXPOSE {PORT}
 CMD ["uvicorn", "{ENTRYPOINT_MODULE_PATH}", "--host", "0.0.0.0", "--port", "{PORT}"]
 """
 
+# --- ADDED: .dockerignore Content ---
+DOCKERIGNORE_CONTENT = """\
+# Git
+.git
+.gitignore
+
+# Python cache/build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage*
+
+# Secrets / Config
+.env*
+!/.env.example
+
+# Logs / Temp
+*.log
+logs/
+*.log.*
+*.tmp
+tmp/
+temp/
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-*
+"""
+# --- END ADDED ---
+
 
 @app.command()
 def package_agent(
@@ -116,7 +165,8 @@ def package_agent(
     )
 ):
     """
-    Generates a Dockerfile and copies requirements for packaging an AgentVault agent.
+    Generates a Dockerfile and .dockerignore, and copies requirements
+    for packaging an AgentVault agent.
     """
     typer.echo(f"Starting Dockerfile generation for entrypoint '{entrypoint_path}'...")
     logger.info(f"Generating Dockerfile in output directory: {output_dir}")
@@ -126,23 +176,18 @@ def package_agent(
     req_file_in_dockerfile = "requirements.txt" # Name used inside Dockerfile
 
     if requirements_path:
-        # User specified a path, Typer already validated existence
         source_req_path = requirements_path
         typer.echo(f"Using specified requirements file: {source_req_path}")
     else:
-        # Default to requirements.txt in current working directory
         default_req_path = Path("./requirements.txt").resolve()
         if default_req_path.is_file():
             source_req_path = default_req_path
             typer.echo(f"Using default requirements file: {source_req_path}")
         else:
-            # --- MODIFIED: Use typer.echo for warning ---
             typer.echo(
                 "Warning: Default './requirements.txt' not found. Docker build might fail if dependencies are needed."
             )
-            # --- END MODIFIED ---
             logger.warning("Default requirements.txt not found, skipping copy.")
-            # Proceed without error, Docker build will handle missing file if needed
 
     # --- Ensure output directory exists ---
     try:
@@ -156,16 +201,12 @@ def package_agent(
     if source_req_path:
         dest_req_path = output_dir / req_file_in_dockerfile
         try:
-            # --- Check for SDK dependency (Warning only for now) ---
             req_content = source_req_path.read_text(encoding="utf-8")
             if "agentvault-server-sdk" not in req_content and "agentvault " not in req_content: # Basic check
-                 # --- MODIFIED: Use typer.echo for warning ---
                  typer.echo(
                     f"Warning: '{source_req_path.name}' does not appear to include 'agentvault-server-sdk' or 'agentvault'. Ensure your agent's dependencies are listed."
                  )
-                 # --- END MODIFIED ---
                  logger.warning(f"SDK dependency possibly missing from {source_req_path}")
-            # --- End Check ---
 
             shutil.copyfile(source_req_path, dest_req_path)
             typer.echo(f"Copied requirements file to: {dest_req_path}")
@@ -208,7 +249,18 @@ def package_agent(
         typer.secho(f"Error writing Dockerfile to '{dockerfile_path}': {e}", fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
-    # TODO: Add logic for .dockerignore generation (Task 2.2.A.21)
+    # --- ADDED: .dockerignore Generation ---
+    dockerignore_path = output_dir / ".dockerignore"
+    try:
+        dockerignore_path.write_text(DOCKERIGNORE_CONTENT, encoding="utf-8")
+        typer.echo(f"Successfully generated .dockerignore: {dockerignore_path}")
+        logger.info(f"Generated .dockerignore at {dockerignore_path}")
+    except IOError as e:
+        typer.secho(f"Error writing .dockerignore to '{dockerignore_path}': {e}", fg=typer.colors.YELLOW)
+        # Continue even if .dockerignore fails, but log warning
+        logger.warning(f"Failed to write .dockerignore file: {e}", exc_info=True)
+    # --- END ADDED ---
+
     # TODO: Add optional docker build step (Task 2.2.A.7)
 
 if __name__ == "__main__":

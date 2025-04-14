@@ -5,13 +5,13 @@ import os # Import os for chdir
 import logging # Import logging for caplog
 
 # Import the Typer app instance
-from agentvault_server_sdk.packager.cli import app
+from agentvault_server_sdk.packager.cli import app, DOCKERIGNORE_CONTENT # Import content for check
 
 # Instantiate CliRunner with mix_stderr=True
 runner = CliRunner(mix_stderr=True)
 
 def test_package_agent_dockerfile_generation(tmp_path: Path):
-    """Test that the 'package' command generates a Dockerfile."""
+    """Test that the 'package' command generates a Dockerfile and .dockerignore."""
     output_dir = tmp_path / "package_output"
     entrypoint = "my_agent.main:app"
     python_version = "3.10"
@@ -36,19 +36,31 @@ def test_package_agent_dockerfile_generation(tmp_path: Path):
     print(f"CLI Output:\n{result.output}") # Print combined output
     assert result.exit_code == 0, f"CLI command failed with exit code {result.exit_code}"
 
+    # Check Dockerfile
     dockerfile_path = output_dir / "Dockerfile"
     assert dockerfile_path.is_file(), "Dockerfile was not created"
+    dockerfile_content = dockerfile_path.read_text()
+    assert f"FROM python:{python_version}-{suffix}" in dockerfile_content
+    assert 'WORKDIR /app' in dockerfile_content
+    assert 'COPY requirements.txt ./' in dockerfile_content
+    assert f'pip install --no-cache-dir -r requirements.txt' in dockerfile_content
+    assert f'COPY --from=builder /usr/local/lib/python{python_major_minor}/site-packages' in dockerfile_content
+    assert 'USER appuser' in dockerfile_content
+    # --- MODIFIED: Use correct variable name ---
+    assert f'EXPOSE {port}' in dockerfile_content
+    # --- END MODIFIED ---
+    assert f'CMD ["uvicorn", "{entrypoint}", "--host", "0.0.0.0", "--port", "{port}"]' in dockerfile_content
 
-    content = dockerfile_path.read_text()
-    # Check for key rendered values
-    assert f"FROM python:{python_version}-{suffix}" in content
-    assert 'WORKDIR /app' in content # Default app dir
-    assert 'COPY requirements.txt ./' in content # Default requirements file name
-    assert f'pip install --no-cache-dir -r requirements.txt' in content
-    assert f'COPY --from=builder /usr/local/lib/python{python_major_minor}/site-packages' in content
-    assert 'USER appuser' in content
-    assert f'EXPOSE {port}' in content
-    assert f'CMD ["uvicorn", "{entrypoint}", "--host", "0.0.0.0", "--port", "{port}"]' in content
+    # Check .dockerignore
+    dockerignore_path = output_dir / ".dockerignore"
+    assert dockerignore_path.is_file(), ".dockerignore was not created"
+    ignore_content = dockerignore_path.read_text()
+    assert "__pycache__/" in ignore_content # Check a few key patterns
+    assert ".venv/" in ignore_content
+    assert ".git" in ignore_content
+    assert "*.log" in ignore_content
+    assert DOCKERIGNORE_CONTENT in ignore_content # Check if the full template content is present
+
 
 def test_package_agent_requires_output_dir():
     """Test that the command fails if output directory is missing."""
@@ -93,7 +105,6 @@ def test_package_agent_with_requirements_file(tmp_path: Path):
     assert "COPY requirements.txt ./" in dockerfile_content
     assert "pip install --no-cache-dir -r requirements.txt" in dockerfile_content
 
-# --- MODIFIED: Use caplog fixture ---
 def test_package_agent_default_requirements_exists(tmp_path: Path, monkeypatch, caplog):
     """Test using the default requirements.txt when it exists."""
     caplog.set_level(logging.WARNING) # Capture WARNING level logs
@@ -120,11 +131,9 @@ def test_package_agent_default_requirements_exists(tmp_path: Path, monkeypatch, 
     copied_req_path = output_dir / "requirements.txt"
     assert copied_req_path.is_file(), "Default requirements file was not copied"
     assert copied_req_path.read_text() == default_req_content
-    # --- MODIFIED: Assert warning is in caplog.text ---
+    # Assert warning is in caplog.text
     assert "SDK dependency possibly missing" in caplog.text
-    # --- END MODIFIED ---
 
-# --- MODIFIED: Use caplog fixture ---
 def test_package_agent_default_requirements_missing(tmp_path: Path, monkeypatch, caplog):
     """Test when default requirements.txt is missing."""
     caplog.set_level(logging.WARNING) # Capture WARNING level logs
@@ -149,8 +158,7 @@ def test_package_agent_default_requirements_missing(tmp_path: Path, monkeypatch,
     assert result.exit_code == 0 # Should not fail, just warn
     copied_req_path = output_dir / "requirements.txt"
     assert not copied_req_path.exists(), "Requirements file should not have been copied"
-    # --- MODIFIED: Assert warning is in caplog.text ---
+    # Assert warning is in caplog.text
     assert "Default requirements.txt not found, skipping copy" in caplog.text
-    # --- END MODIFIED ---
 
-# TODO: Add tests for .dockerignore generation
+# TODO: Add tests for .dockerignore generation (This test adds the check to the main generation test)
