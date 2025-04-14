@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "agentvault-server-sdk"
+version = "0.1.0"
+description = "Server SDK for building AgentVault A2A compliant agents."
+authors = ["Raphael Zbigniew Jeziorny <AgentVault@proton.me>"]
+license = "Apache-2.0"
+readme = "README.md"
+packages = [{include = "agentvault_server_sdk", from = "src"}]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.12"
+fastapi = ">=0.111,<0.112"
+agentvault = {path = "../agentvault_library", develop = true} # CORRECTED: Removed version key
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.0,<9.0"
+pytest-asyncio = ">=0.23,<0.24"
+# Add httpx, respx etc. later as needed for testing
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
