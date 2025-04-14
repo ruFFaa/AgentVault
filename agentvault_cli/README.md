@@ -1,47 +1,45 @@
-# AgentVault CLI Client (`agentvault-cli`)
+# AgentVault CLI
 
-This directory contains the source code for the `agentvault-cli`, a reference command-line client for the AgentVault ecosystem.
+The `agentvault_cli` provides a command-line interface for interacting with the AgentVault ecosystem. You can manage local credentials, discover agents in the registry, and run tasks on remote A2A agents.
 
-**Purpose:**
+## Installation
 
-This tool demonstrates how to use the `agentvault` core library to:
+*(Instructions to be added later once packaging is finalized)*
 
-*   Securely configure local API keys and OAuth 2.0 credentials required by remote agents.
-*   Discover agents listed in the AgentVault Registry API.
-*   Load agent definitions directly via URL or local file.
-*   Initiate and interact with remote agents using the A2A protocol.
+## Usage
 
-**Installation:**
+The main commands are:
+
+*   `agentvault_cli config`: Manage local API keys and OAuth credentials.
+*   `agentvault_cli discover`: Find agents listed in the AgentVault Registry.
+*   `agentvault_cli run`: Execute tasks on remote A2A agents.
+
+Use `--help` with any command for more details (e.g., `agentvault_cli run --help`).
+
+## Usage Tips
+
+### Re-running `run` Commands
+
+The `agentvault_cli run` command can sometimes involve long agent identifiers or input strings. To easily recall and reuse previous commands:
+
+*   **Shell History Search (Ctrl+R):** Most shells allow you to search your command history interactively. Press `Ctrl+R` and start typing parts of the command you want to find (e.g., `run`, the agent ID, part of the input).
+*   **`history` Command:** Use `history | grep agentvault_cli run` (or similar filter) to list previous run commands. You can then execute a specific command number (e.g., `!123`).
+*   **`fzf` (Fuzzy Finder):** If you have `fzf` installed, you can pipe your history to it for interactive fuzzy searching: `history | fzf`. Select the desired command and press Enter to execute it. This is very powerful for quickly finding complex commands.
+
+### Interactive Agent Selection (`discover` + `fzf`)
+
+If you have command-line tools like `fzf` (fuzzy finder) and `awk` installed, you can create powerful interactive workflows. For example, to discover agents, select one interactively, and then immediately run a task on it:
 
 ```bash
-# Install from PyPI (once published)
-pip install agentvault-cli
+# Example: Discover agents matching "weather", select one, run with input
+agentvault_cli discover weather | fzf --height 40% --border --header "Select Agent:" | awk '{print $1}' | xargs -I {} agentvault_cli run --agent {} --input "What is the forecast for London?"
+```
 
-# For development (from the agentvault root directory)
-# Ensure root .venv is created and activated first (see main project README)
-pip install -e ".\agentvault_cli\[dev]"```
+**Explanation:**
 
-**Usage:**
+1.  `agentvault_cli discover weather`: Lists agents matching "weather".
+2.  `| fzf ...`: Pipes the list to `fzf` for interactive selection.
+3.  `| awk '{print $1}'`: Extracts the first column (the Agent ID) from the line selected in `fzf`. *Note: You might need to adjust `$1` if the ID is in a different column based on your terminal width or `discover` output format.*
+4.  `| xargs -I {} ...`: Takes the extracted ID (`{}`) and inserts it into the `agentvault_cli run` command.
 
-*(Usage examples remain the same)*
-
-### Discovering Agents
-...
-### Running an Agent Task
-... *(Ensure any state examples use SUBMITTED, WORKING, COMPLETED, etc.)*
-
-**Configuration:**
-
-Local API keys and OAuth 2.0 credentials are managed using the `config` subcommand. See `agentvault_cli config --help`.
-
-*   **API Keys:** Use `config set <service-id> --env`, `config set <service-id> --file <path>`, or `config set <service-id> --keyring` to configure how the CLI finds API keys.
-*   **OAuth 2.0 Credentials:** Use `config set <service-id> --oauth-configure` to securely store Client ID and Client Secret (prefers OS keyring).
-*   **Checking Configuration:** Use `config get <service-id>` to see how credentials for a service are being sourced. Use `--show-key` (with caution) or `--show-oauth-id` to view masked keys or Client IDs.
-
-Keys/credentials are loaded based on environment variables, specified files, or the OS keyring as configured.
-
-**Future Enhancements:**
-
-*   Support for a client-side configuration file (e.g., `~/.config/agentvault/config.toml`) to set defaults for registry URL, timeouts, etc.
-*   More detailed output formatting options.
-*   Support for additional A2A features as the protocol evolves.
+This allows you to quickly find and use agents without manually copying and pasting IDs.

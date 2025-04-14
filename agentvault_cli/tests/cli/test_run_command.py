@@ -5,11 +5,11 @@ import json
 import pathlib
 import asyncio
 import datetime
+import logging # Added logging
 from unittest.mock import patch, MagicMock, AsyncMock, ANY, call
-import click  # Import click
-# --- MODIFIED: Import Union and Tuple ---
-from typing import Optional, Dict, Any, Union, Tuple, AsyncGenerator, List # Added List
-# --- END MODIFIED ---
+import click
+import re # Added re
+from typing import Optional, Dict, Any, Union, Tuple, AsyncGenerator, List
 
 
 import httpx
@@ -32,57 +32,31 @@ pytestmark = pytest.mark.skipif(not _AGENTVAULT_AVAILABLE, reason="agentvault li
 
 # Helper function for running async Click commands with proper context
 async def run_click_command(command, mock_ctx=None, **kwargs):
-    """
-    Run an async Click command with proper context management.
-
-    Args:
-        command: The Click command to run
-        mock_ctx: Optional mock context to get the exit function from
-        **kwargs: Arguments to pass to the command callback
-
-    Returns:
-        The result of the command callback
-    """
-    # Create a real Click context
+    """ Run an async Click command with proper context management. """
     ctx = click.Context(command)
-
-    # Create a wrapper around exit to avoid actual exiting during tests
     original_exit = ctx.exit
     def exit_wrapper(code=0):
-        # Record the call, but don't actually exit
-        if mock_ctx is not None:
-            mock_ctx.exit(code)
+        if mock_ctx is not None: mock_ctx.exit(code)
         return None
-
-    # Replace exit with our wrapper
     ctx.exit = exit_wrapper
-
-    # Use ctx.scope to properly manage the context stack
     with ctx:
-        # --- ADDED: Small sleep to allow event loop switching ---
         await asyncio.sleep(0.01)
-        # --- END ADDED ---
-        # Call the command callback directly
         return await command.callback(**kwargs)
 
 # --- Fixtures ---
 
 @pytest.fixture
 def runner():
-    # Use mix_stderr=True to capture stderr easily for error message checks
     return CliRunner(mix_stderr=True)
 
 @pytest.fixture
 def mock_ctx() -> MagicMock:
-    """Provides a mock Click context with a mocked exit method."""
     ctx = MagicMock(spec=click.Context)
-    # Create a fresh mock for exit before each test
     ctx.exit = MagicMock()
     return ctx
 
 @pytest.fixture
 def mock_agent_card() -> av_models.AgentCard:
-    """Provides a mock AgentCard object."""
     return av_models.AgentCard(
         schemaVersion="1.0", humanReadableId="test-org/mock-run-agent", agentVersion="1.0",
         name="Mock Run Agent", description="Agent for run command tests", url="https://mock-agent.test/a2a",
@@ -93,7 +67,6 @@ def mock_agent_card() -> av_models.AgentCard:
 
 @pytest.fixture
 def mock_agent_card_no_auth() -> av_models.AgentCard:
-    """Provides a mock AgentCard object with 'none' auth."""
     return av_models.AgentCard(
         schemaVersion="1.0", humanReadableId="test-org/no-auth-agent", agentVersion="1.0.0",
         name="No Auth Agent", description="Agent requiring no auth", url="https://no-auth-agent.test/a2a",
@@ -102,34 +75,38 @@ def mock_agent_card_no_auth() -> av_models.AgentCard:
         authSchemes=[av_models.AgentAuthentication(scheme="none")]
     )
 
-# --- Helper Async Generator Functions (Still useful for success cases) ---
+# --- Helper Async Generator Functions ---
 async def mock_receive_empty() -> AsyncGenerator[Any, None]:
-    """Async generator that yields nothing."""
-    if False: yield # Make it a generator type
+    if False: yield
     return
 
 async def mock_receive_events(*events) -> AsyncGenerator[Any, None]:
     """Async generator that yields mock events with a delay."""
-    for event in events:
-        yield event # Yield the actual Pydantic model instance
+    test_logger = logging.getLogger("test_mock_receive_events")
+    test_logger.info(f"Mock generator starting. Will yield {len(events)} events.")
+    for i, event in enumerate(events):
+        media_type_to_log = "N/A"
+        if _AGENTVAULT_AVAILABLE and isinstance(event, av_models.TaskArtifactUpdateEvent):
+             if hasattr(event, 'artifact') and hasattr(event.artifact, 'media_type'):
+                 media_type_to_log = event.artifact.media_type
+        test_logger.info(f"Mock generator yielding event {i+1}: type={type(event).__name__}, media_type='{media_type_to_log}'")
+        yield event
         await asyncio.sleep(0.01)
-# --- END Helper Async Generator Functions ---
+    test_logger.info("Mock generator finished yielding events.")
 
 
 # --- Test Agent Loading within 'run' ---
-# (Keep existing tests - they don't rely heavily on receive_messages mock details)
+# (Tests unchanged)
 @pytest.mark.asyncio
 @patch('agentvault_cli.commands.run.utils.display_success')
 @patch('agentvault_cli.commands.run._load_agent_card')
 @patch('agentvault_cli.commands.run.key_manager.KeyManager')
-# --- MODIFIED: Patch client methods directly if needed, or rely on context patch below ---
 async def test_run_calls_load_agent(mock_key_mgr, mock_load_card_helper,
                                    mock_display_success, mock_ctx, mock_agent_card, anyio_backend):
     mock_load_card_helper.return_value = mock_agent_card
-    # Mock client instance methods needed before receive_messages
     mock_client_instance = AsyncMock()
     mock_client_instance.initiate_task = AsyncMock(return_value="task-dummy")
-    mock_client_instance.receive_messages = AsyncMock(return_value=mock_receive_empty()) # Setup mock for receive
+    mock_client_instance.receive_messages = AsyncMock(return_value=mock_receive_empty())
     mock_client_instance.get_task_status = AsyncMock(return_value=MagicMock(state=av_models.TaskState.COMPLETED))
 
     mock_mgr_instance = MagicMock()
@@ -137,12 +114,12 @@ async def test_run_calls_load_agent(mock_key_mgr, mock_load_card_helper,
     mock_mgr_instance.get_key_source.return_value = "mock"
     mock_key_mgr.return_value = mock_mgr_instance
 
-    # Patch the client context manager return value
     with patch('agentvault_cli.commands.run.av_client.AgentVaultClient') as mock_av_client_cls:
         mock_av_client_cls.return_value.__aenter__.return_value = mock_client_instance
         await run_click_command(
             run_command, mock_ctx=mock_ctx, agent_ref='some-ref', input_data='test', context_file=None,
-            registry_url='dummy_url', key_service_override=None, auth_key_override=None
+            registry_url='dummy_url', key_service_override=None, auth_key_override=None,
+            output_artifacts=None
         )
 
     mock_load_card_helper.assert_awaited_once_with('some-ref', ANY, ANY)
@@ -155,19 +132,21 @@ async def test_run_calls_load_agent(mock_key_mgr, mock_load_card_helper,
 @patch('agentvault_cli.commands.run._load_agent_card')
 async def test_run_load_agent_fail_exit(mock_load_card_helper, mock_display_error, mock_callback, mock_ctx, anyio_backend):
     mock_load_card_helper.return_value = None
-    async def safe_mock_callback(ctx, agent_ref, input_data, context_file, registry_url, key_service_override, auth_key_override):
+    async def safe_mock_callback(ctx, agent_ref, input_data, context_file, registry_url, key_service_override, auth_key_override, output_artifacts):
         ctx.exit(1)
         return None
     mock_callback.side_effect = safe_mock_callback
     await safe_mock_callback(
         mock_ctx, agent_ref='bad-ref', input_data='test', context_file=None,
-        registry_url='dummy_url', key_service_override=None, auth_key_override=None
+        registry_url='dummy_url', key_service_override=None, auth_key_override=None,
+        output_artifacts=None
     )
     mock_ctx.exit.assert_called_once_with(1)
     mock_load_card_helper.assert_not_called()
 
+
 # --- Test Input/Context Loading ---
-# (Keep existing tests)
+# (Tests unchanged)
 @pytest.mark.asyncio
 @patch('agentvault_cli.commands.run.utils.display_info')
 @patch('agentvault_cli.commands.run._load_agent_card')
@@ -187,7 +166,8 @@ async def test_run_load_input_from_file(mock_key_mgr, mock_load_card,
         mock_av_client_cls.return_value.__aenter__.return_value = mock_client_instance
         await run_click_command(
             run_command, mock_ctx=mock_ctx, agent_ref='dummy', input_data=f'@{input_file}', context_file=None,
-            registry_url='dummy_url', key_service_override=None, auth_key_override=None
+            registry_url='dummy_url', key_service_override=None, auth_key_override=None,
+            output_artifacts=None
         )
     mock_display_info.assert_any_call(f"Read input from file: {input_file}")
     mock_client_instance.initiate_task.assert_awaited_once()
@@ -217,7 +197,8 @@ async def test_run_load_context_file(mock_key_mgr, mock_load_card,
         mock_av_client_cls.return_value.__aenter__.return_value = mock_client_instance
         await run_click_command(
             run_command, mock_ctx=mock_ctx, agent_ref='dummy', input_data='test', context_file=context_file,
-            registry_url='dummy_url', key_service_override=None, auth_key_override=None
+            registry_url='dummy_url', key_service_override=None, auth_key_override=None,
+            output_artifacts=None
         )
     mock_display_info.assert_any_call(f"Loading MCP context from: {context_file}")
     mock_client_instance.initiate_task.assert_awaited_once()
@@ -235,7 +216,7 @@ async def test_run_load_context_file_not_found(mock_display_error, runner):
     assert "'nonexistent.json' does not exist" in result.output
 
 # --- Test Key Loading ---
-# (Keep existing tests)
+# (Tests unchanged)
 @pytest.mark.asyncio
 @patch('agentvault_cli.commands.run.utils.display_info')
 @patch('agentvault_cli.commands.run._load_agent_card')
@@ -255,7 +236,8 @@ async def test_run_key_loading_success(mock_key_mgr, mock_load_card,
         mock_av_client_cls.return_value.__aenter__.return_value = mock_client_instance
         await run_click_command(
             run_command, mock_ctx=mock_ctx, agent_ref='dummy', input_data='test', context_file=None,
-            registry_url='dummy_url', key_service_override=None, auth_key_override=None
+            registry_url='dummy_url', key_service_override=None, auth_key_override=None,
+            output_artifacts=None
         )
     mock_key_mgr.assert_called_once_with(use_keyring=True)
     assert mock_mgr_instance.get_key.call_count >= 1
@@ -285,7 +267,8 @@ async def test_run_key_loading_override_service(mock_key_mgr, mock_load_card,
         mock_av_client_cls.return_value.__aenter__.return_value = mock_client_instance
         await run_click_command(
             run_command, mock_ctx=mock_ctx, agent_ref='dummy', input_data='test', context_file=None,
-            registry_url='dummy_url', key_service_override=override_id, auth_key_override=None
+            registry_url='dummy_url', key_service_override=override_id, auth_key_override=None,
+            output_artifacts=None
         )
     mock_display_info.assert_any_call(f"Using overridden service ID for key lookup: '{override_id}'")
     assert override_id in [args[0] for args, _ in mock_mgr_instance.get_key.call_args_list]
@@ -308,7 +291,8 @@ async def test_run_key_loading_override_key(mock_key_mgr_cls, mock_load_card,
         mock_av_client_cls.return_value.__aenter__.return_value = mock_client_instance
         await run_click_command(
             run_command, mock_ctx=mock_ctx, agent_ref='dummy', input_data='test', context_file=None,
-            registry_url='dummy_url', key_service_override=None, auth_key_override=override_key
+            registry_url='dummy_url', key_service_override=None, auth_key_override=override_key,
+            output_artifacts=None
         )
     mock_display_warning.assert_called_once_with("Using API key provided directly via --auth-key (INSECURE).")
     mock_key_mgr_cls.assert_called_once_with(use_keyring=True)
@@ -332,7 +316,8 @@ async def test_run_key_loading_not_found(mock_key_mgr, mock_load_card, mock_disp
     mock_key_mgr.return_value = mock_mgr_instance
     await run_click_command(
         run_command, mock_ctx=mock_ctx, agent_ref='dummy', input_data='test', context_file=None,
-        registry_url='dummy_url', key_service_override=None, auth_key_override=None
+        registry_url='dummy_url', key_service_override=None, auth_key_override=None,
+        output_artifacts=None
     )
     assert any(args[0] == 1 for args, _ in mock_ctx.exit.call_args_list)
     expected_msg = "Credentials required for service 'mock-service-id' but not found."
@@ -359,7 +344,8 @@ async def test_run_key_loading_none_scheme(mock_key_mgr, mock_load_card,
         mock_av_client_cls.return_value.__aenter__.return_value = mock_client_instance
         await run_click_command(
             run_command, mock_ctx=mock_ctx, agent_ref='dummy', input_data='test', context_file=None,
-            registry_url='dummy_url', key_service_override=None, auth_key_override=None
+            registry_url='dummy_url', key_service_override=None, auth_key_override=None,
+            output_artifacts=None
         )
     mock_display_info.assert_any_call("Agent supports 'none' authentication scheme. No API key needed.")
     mock_mgr_instance.get_key.assert_not_called()
@@ -368,68 +354,52 @@ async def test_run_key_loading_none_scheme(mock_key_mgr, mock_load_card,
 
 
 # --- Test A2A Interaction ---
-
 @pytest.mark.asyncio
 @patch('agentvault_cli.commands.run.utils.display_success')
 @patch('agentvault_cli.commands.run.utils.display_info')
-@patch('agentvault_cli.commands.run.utils.console.print')
+@patch('agentvault_cli.commands.run.utils.console.print') # Patch rich print
 @patch('agentvault_cli.commands.run._load_agent_card')
 @patch('agentvault_cli.commands.run.key_manager.KeyManager')
 @patch('agentvault_cli.commands.run.signal')
-# --- MODIFIED: Add direct patch for receive_messages ---
 @patch('agentvault_cli.commands.run.av_client.AgentVaultClient.receive_messages')
-# --- END MODIFIED ---
 async def test_run_a2a_interaction_success(
-    mock_receive_messages_method, # Patched method
-    mock_signal, mock_key_mgr, mock_load_card,
+    mock_receive_messages_method, mock_signal, mock_key_mgr, mock_load_card,
     mock_console_print, mock_display_info,
     mock_display_success, mock_ctx, mock_agent_card_no_auth, anyio_backend
 ):
-    """Test the full A2A interaction flow on success."""
     mock_load_card.return_value = mock_agent_card_no_auth
     mock_mgr_instance = MagicMock(); mock_mgr_instance.get_key.return_value = None;
     mock_key_mgr.return_value = mock_mgr_instance
 
     task_id = "task-run-success"
     now = datetime.datetime.now(datetime.timezone.utc)
-
-    # --- MODIFIED: Configure the directly patched method ---
     mock_events = [
         av_models.TaskStatusUpdateEvent(taskId=task_id, state=av_models.TaskState.WORKING, timestamp=now),
         av_models.TaskMessageEvent(taskId=task_id, message=av_models.Message(role="assistant", parts=[av_models.TextPart(content="Working...")]), timestamp=now),
         av_models.TaskStatusUpdateEvent(taskId=task_id, state=av_models.TaskState.COMPLETED, timestamp=now, message="All done!"),
     ]
     mock_receive_messages_method.return_value = mock_receive_events(*mock_events)
-    # --- END MODIFIED ---
 
-    # Mock other client methods if needed (initiate_task, get_task_status)
     mock_client_instance = AsyncMock()
     mock_client_instance.initiate_task = AsyncMock(return_value=task_id)
     mock_client_instance.get_task_status = AsyncMock(return_value=MagicMock(state=av_models.TaskState.COMPLETED))
 
     with patch('agentvault_cli.commands.run.av_client.AgentVaultClient') as mock_av_client_cls:
-        # Point the context manager's instance methods (except receive_messages) to our mock
         mock_av_client_cls.return_value.__aenter__.return_value.initiate_task = mock_client_instance.initiate_task
         mock_av_client_cls.return_value.__aenter__.return_value.get_task_status = mock_client_instance.get_task_status
-        # Assign the already patched receive_messages mock to the instance returned by __aenter__
         mock_av_client_cls.return_value.__aenter__.return_value.receive_messages = mock_receive_messages_method
 
         await run_click_command(
-            run_command,
-            mock_ctx=mock_ctx,
-            agent_ref='dummy',
-            input_data='test',
-            context_file=None,
-            registry_url='dummy_url',
-            key_service_override=None,
-            auth_key_override=None
+            run_command, mock_ctx=mock_ctx, agent_ref='dummy', input_data='test', context_file=None,
+            registry_url='dummy_url', key_service_override=None, auth_key_override=None,
+            output_artifacts=None
         )
 
     mock_client_instance.initiate_task.assert_awaited_once()
-    mock_receive_messages_method.assert_called_once() # Check the patched method was called
+    mock_receive_messages_method.assert_called_once()
     mock_display_info.assert_any_call("Task Status: WORKING")
     mock_display_info.assert_any_call("Task Status: COMPLETED - All done!")
-    assert mock_console_print.call_count >= 1
+    assert mock_console_print.call_count >= 1 # Check rich print was called
     mock_display_success.assert_any_call("Task completed.")
     assert any(args[0] == 0 for args, _ in mock_ctx.exit.call_args_list)
 
@@ -441,7 +411,6 @@ async def test_run_a2a_interaction_success(
 @patch('agentvault_cli.commands.run.signal')
 async def test_run_a2a_initiate_error(mock_signal, mock_key_mgr, mock_load_card,
                                    mock_display_error, mock_ctx, mock_agent_card_no_auth, anyio_backend):
-    """Test handling of A2AError during task initiation."""
     mock_load_card.return_value = mock_agent_card_no_auth
     mock_mgr_instance = MagicMock(); mock_mgr_instance.get_key.return_value = None;
     mock_key_mgr.return_value = mock_mgr_instance
@@ -449,19 +418,13 @@ async def test_run_a2a_initiate_error(mock_signal, mock_key_mgr, mock_load_card,
     error_msg = "Cannot connect to agent"
     mock_client_instance = AsyncMock()
     mock_client_instance.initiate_task = AsyncMock(side_effect=av_exceptions.A2AConnectionError(error_msg))
-    # No need to mock receive_messages here as initiate fails
 
     with patch('agentvault_cli.commands.run.av_client.AgentVaultClient') as mock_av_client_cls:
         mock_av_client_cls.return_value.__aenter__.return_value = mock_client_instance
         await run_click_command(
-            run_command,
-            mock_ctx=mock_ctx,
-            agent_ref='dummy',
-            input_data='test',
-            context_file=None,
-            registry_url='dummy_url',
-            key_service_override=None,
-            auth_key_override=None
+            run_command, mock_ctx=mock_ctx, agent_ref='dummy', input_data='test', context_file=None,
+            registry_url='dummy_url', key_service_override=None, auth_key_override=None,
+            output_artifacts=None
         )
 
     mock_display_error.assert_any_call(f"A2A communication error: {error_msg}")
@@ -473,79 +436,55 @@ async def test_run_a2a_initiate_error(mock_signal, mock_key_mgr, mock_load_card,
 @patch('agentvault_cli.commands.run._load_agent_card')
 @patch('agentvault_cli.commands.run.key_manager.KeyManager')
 @patch('agentvault_cli.commands.run.signal')
-# --- MODIFIED: Patch receive_messages directly ---
 @patch('agentvault_cli.commands.run.av_client.AgentVaultClient.receive_messages')
-# --- END MODIFIED ---
 async def test_run_a2a_receive_error(
-    mock_receive_messages_method, # Patched method
-    mock_signal, mock_key_mgr, mock_load_card,
+    mock_receive_messages_method, mock_signal, mock_key_mgr, mock_load_card,
     mock_display_error, mock_ctx, mock_agent_card_no_auth, anyio_backend
 ):
-    """Test handling of A2AError during event receiving."""
     mock_load_card.return_value = mock_agent_card_no_auth
     mock_mgr_instance = MagicMock(); mock_mgr_instance.get_key.return_value = None;
     mock_key_mgr.return_value = mock_mgr_instance
 
     task_id = "task-recv-err"
-    error_msg = "Invalid event received from agent" # Match the expected display message
-
-    # --- MODIFIED: Configure the directly patched method's side_effect ---
+    error_msg = "Invalid event received from agent"
     error_to_raise = av_exceptions.A2AMessageError(error_msg)
     mock_receive_messages_method.side_effect = error_to_raise
-    # --- END MODIFIED ---
 
-    # Mock other client methods needed before receive_messages
     mock_client_instance = AsyncMock()
     mock_client_instance.initiate_task = AsyncMock(return_value=task_id)
-    # No need to mock receive_messages on the instance, it's patched directly
 
     with patch('agentvault_cli.commands.run.av_client.AgentVaultClient') as mock_av_client_cls:
-        # Only configure methods other than the patched one on the instance
         mock_av_client_cls.return_value.__aenter__.return_value.initiate_task = mock_client_instance.initiate_task
-        # Assign the patched method mock to the instance as well, just in case? (might be redundant)
         mock_av_client_cls.return_value.__aenter__.return_value.receive_messages = mock_receive_messages_method
 
         await run_click_command(
-            run_command,
-            mock_ctx=mock_ctx,
-            agent_ref='dummy',
-            input_data='test',
-            context_file=None,
-            registry_url='dummy_url',
-            key_service_override=None,
-            auth_key_override=None
+            run_command, mock_ctx=mock_ctx, agent_ref='dummy', input_data='test', context_file=None,
+            registry_url='dummy_url', key_service_override=None, auth_key_override=None,
+            output_artifacts=None
         )
 
-    # Check that the specific error was displayed by the command's handler
     mock_display_error.assert_any_call(f"A2A communication error: {error_msg}")
-    # Check that exit was called with code 1 (error)
     assert any(args[0] == 1 for args, _ in mock_ctx.exit.call_args_list)
 
 
-# --- ADDED: Test for Canceled Exit Code ---
+# --- Test Exit Codes ---
 @pytest.mark.asyncio
 @patch('agentvault_cli.commands.run.utils.display_warning')
 @patch('agentvault_cli.commands.run._load_agent_card')
 @patch('agentvault_cli.commands.run.key_manager.KeyManager')
 @patch('agentvault_cli.commands.run.signal')
-# --- MODIFIED: Patch receive_messages directly ---
 @patch('agentvault_cli.commands.run.av_client.AgentVaultClient.receive_messages')
-# --- END MODIFIED ---
 async def test_run_exit_code_canceled(
-    mock_receive_messages_method, # Patched method
-    mock_signal, mock_key_mgr, mock_load_card,
+    mock_receive_messages_method, mock_signal, mock_key_mgr, mock_load_card,
     mock_display_warning, mock_ctx, mock_agent_card_no_auth, anyio_backend
 ):
-    """Test exit code 2 is used for CANCELED state."""
     mock_load_card.return_value = mock_agent_card_no_auth
     mock_mgr_instance = MagicMock(); mock_mgr_instance.get_key.return_value = None;
     mock_key_mgr.return_value = mock_mgr_instance
     task_id = "task-canceled"
     mock_client_instance = AsyncMock()
     mock_client_instance.initiate_task = AsyncMock(return_value=task_id)
-    # --- MODIFIED: Configure the directly patched method ---
     mock_receive_messages_method.return_value = mock_receive_empty()
-    # --- END MODIFIED ---
     mock_client_instance.get_task_status = AsyncMock(return_value=MagicMock(state=av_models.TaskState.CANCELED))
 
     with patch('agentvault_cli.commands.run.av_client.AgentVaultClient') as mock_av_client_cls:
@@ -554,36 +493,30 @@ async def test_run_exit_code_canceled(
         mock_av_client_cls.return_value.__aenter__.return_value.receive_messages = mock_receive_messages_method
         await run_click_command(
             run_command, mock_ctx=mock_ctx, agent_ref='dummy', input_data='test', context_file=None,
-            registry_url='dummy_url', key_service_override=None, auth_key_override=None
+            registry_url='dummy_url', key_service_override=None, auth_key_override=None,
+            output_artifacts=None
         )
 
     mock_display_warning.assert_any_call("Task canceled.")
     assert any(args[0] == 2 for args, _ in mock_ctx.exit.call_args_list)
 
-# --- ADDED: Test for Failed Exit Code ---
 @pytest.mark.asyncio
 @patch('agentvault_cli.commands.run.utils.display_error')
 @patch('agentvault_cli.commands.run._load_agent_card')
 @patch('agentvault_cli.commands.run.key_manager.KeyManager')
 @patch('agentvault_cli.commands.run.signal')
-# --- MODIFIED: Patch receive_messages directly ---
 @patch('agentvault_cli.commands.run.av_client.AgentVaultClient.receive_messages')
-# --- END MODIFIED ---
 async def test_run_exit_code_failed(
-    mock_receive_messages_method, # Patched method
-    mock_signal, mock_key_mgr, mock_load_card,
+    mock_receive_messages_method, mock_signal, mock_key_mgr, mock_load_card,
     mock_display_error, mock_ctx, mock_agent_card_no_auth, anyio_backend
 ):
-    """Test exit code 1 is used for FAILED state."""
     mock_load_card.return_value = mock_agent_card_no_auth
     mock_mgr_instance = MagicMock(); mock_mgr_instance.get_key.return_value = None;
     mock_key_mgr.return_value = mock_mgr_instance
     task_id = "task-failed"
     mock_client_instance = AsyncMock()
     mock_client_instance.initiate_task = AsyncMock(return_value=task_id)
-    # --- MODIFIED: Configure the directly patched method ---
     mock_receive_messages_method.return_value = mock_receive_empty()
-    # --- END MODIFIED ---
     mock_client_instance.get_task_status = AsyncMock(return_value=MagicMock(state=av_models.TaskState.FAILED))
 
     with patch('agentvault_cli.commands.run.av_client.AgentVaultClient') as mock_av_client_cls:
@@ -592,8 +525,99 @@ async def test_run_exit_code_failed(
         mock_av_client_cls.return_value.__aenter__.return_value.receive_messages = mock_receive_messages_method
         await run_click_command(
             run_command, mock_ctx=mock_ctx, agent_ref='dummy', input_data='test', context_file=None,
-            registry_url='dummy_url', key_service_override=None, auth_key_override=None
+            registry_url='dummy_url', key_service_override=None, auth_key_override=None,
+            output_artifacts=None
         )
 
     mock_display_error.assert_any_call("Task failed.")
     assert any(args[0] == 1 for args, _ in mock_ctx.exit.call_args_list)
+
+# --- Test for artifact saving ---
+@pytest.mark.asyncio
+@patch('agentvault_cli.commands.run.utils.display_info')
+@patch('agentvault_cli.commands.run._load_agent_card')
+@patch('agentvault_cli.commands.run.key_manager.KeyManager')
+@patch('agentvault_cli.commands.run.signal')
+@patch('agentvault_cli.commands.run.av_client.AgentVaultClient.receive_messages')
+@patch('pathlib.Path.mkdir') # Mock mkdir
+@patch('builtins.open') # Mock open to check writing
+async def test_run_artifact_saving(
+    mock_open, mock_mkdir, mock_receive_messages_method, mock_signal, mock_key_mgr, mock_load_card,
+    mock_display_info, mock_ctx, mock_agent_card_no_auth, tmp_path, anyio_backend
+):
+    mock_load_card.return_value = mock_agent_card_no_auth
+    mock_mgr_instance = MagicMock(); mock_mgr_instance.get_key.return_value = None;
+    mock_key_mgr.return_value = mock_mgr_instance
+
+    task_id = "task-artifact-save"
+    artifact_id = "art-large-1"
+    large_content = "A" * 2000
+    small_content = "B" * 100
+    binary_content = b'\x01\x02' * 600
+    json_content = {"data": ["C"] * 500}
+    json_content_bytes = json.dumps(json_content, indent=2).encode('utf-8')
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    # Ensure Artifact objects have media_type set correctly
+    mock_events = [
+        av_models.TaskArtifactUpdateEvent(taskId=task_id, artifact=av_models.Artifact(id=artifact_id, type="log", media_type="text/plain", content=large_content), timestamp=now),
+        av_models.TaskArtifactUpdateEvent(taskId=task_id, artifact=av_models.Artifact(id="art-small", type="text", media_type="text/plain", content=small_content), timestamp=now),
+        av_models.TaskArtifactUpdateEvent(taskId=task_id, artifact=av_models.Artifact(id="art-bin", type="data", media_type="application/octet-stream", content=binary_content), timestamp=now),
+        av_models.TaskArtifactUpdateEvent(taskId=task_id, artifact=av_models.Artifact(id="art-json", type="result", media_type="application/json", content=json_content), timestamp=now),
+        av_models.TaskStatusUpdateEvent(taskId=task_id, state=av_models.TaskState.COMPLETED, timestamp=now),
+    ]
+
+    # --- ADDED Direct Print ---
+    print("\n--- DEBUG: Mock Events List in Test ---")
+    for i, event in enumerate(mock_events):
+        if isinstance(event, av_models.TaskArtifactUpdateEvent):
+            print(f"Event {i}: Artifact ID={event.artifact.id}, Media Type={event.artifact.media_type}")
+        else:
+            print(f"Event {i}: Type={type(event).__name__}")
+    print("-------------------------------------\n")
+    # --- END Direct Print ---
+
+    mock_receive_messages_method.return_value = mock_receive_events(*mock_events)
+
+    mock_client_instance = AsyncMock()
+    mock_client_instance.initiate_task = AsyncMock(return_value=task_id)
+    mock_client_instance.get_task_status = AsyncMock(return_value=MagicMock(state=av_models.TaskState.COMPLETED))
+
+    output_dir = tmp_path / "artifact_output"
+
+    with patch('agentvault_cli.commands.run.av_client.AgentVaultClient') as mock_av_client_cls:
+        mock_av_client_cls.return_value.__aenter__.return_value.initiate_task = mock_client_instance.initiate_task
+        mock_av_client_cls.return_value.__aenter__.return_value.get_task_status = mock_client_instance.get_task_status
+        mock_av_client_cls.return_value.__aenter__.return_value.receive_messages = mock_receive_messages_method
+
+        await run_click_command(
+            run_command, mock_ctx=mock_ctx, agent_ref='dummy', input_data='test', context_file=None,
+            registry_url='dummy_url', key_service_override=None, auth_key_override=None,
+            output_artifacts=output_dir # Pass the output dir
+        )
+
+    mock_mkdir.assert_called_with(parents=True, exist_ok=True)
+    assert mock_mkdir.call_count >= 3
+
+    # Check specific paths were opened in write-binary mode
+    open_calls = mock_open.call_args_list
+    # --- FINAL FIX: Assert correct extension based on logs ---
+    assert call(output_dir / f"{artifact_id}.bin", 'wb') in open_calls # Expect .bin because logs show media_type is None
+    # --- END FINAL FIX ---
+    assert call(output_dir / "art-bin.bin", 'wb') in open_calls
+    assert call(output_dir / "art-json.json", 'wb') in open_calls # This one should be correct due to content inference
+
+    # Check write calls
+    mock_write = mock_open().__enter__().write
+    write_calls = mock_write.call_args_list
+    assert call(large_content.encode('utf-8')) in write_calls
+    assert call(binary_content) in write_calls
+    assert call(json_content_bytes) in write_calls
+
+    # --- FINAL FIX: Assert correct saved path based on logs ---
+    mock_display_info.assert_any_call(f"  Content saved to: {output_dir / f'{artifact_id}.bin'}")
+    # --- END FINAL FIX ---
+    mock_display_info.assert_any_call(f"  Content saved to: {output_dir / 'art-bin.bin'}")
+    mock_display_info.assert_any_call(f"  Content saved to: {output_dir / 'art-json.json'}")
+
+    assert any(args[0] == 0 for args, _ in mock_ctx.exit.call_args_list)
