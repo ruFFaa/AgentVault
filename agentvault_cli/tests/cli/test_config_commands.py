@@ -208,7 +208,9 @@ def test_config_get_found_api_key_only(mock_key_manager_cls, mock_display_info, 
     mock_manager_instance = MagicMock()
     mock_manager_instance.get_key.return_value = "found_key_123"
     mock_manager_instance.get_key_source.return_value = "env"
+    # --- MODIFIED: Mock OAuth status ---
     mock_manager_instance.get_oauth_config_status.return_value = "Not Configured" # Simulate no OAuth
+    # --- END MODIFIED ---
     mock_key_manager_cls.return_value = mock_manager_instance
 
     result = runner.invoke(cli, ['config', 'get', 'found-service'])
@@ -217,7 +219,9 @@ def test_config_get_found_api_key_only(mock_key_manager_cls, mock_display_info, 
     mock_display_info.assert_any_call("Credential status for service 'found-service':")
     mock_display_info.assert_any_call("  API Key: Found (Source: ENV)")
     mock_display_info.assert_any_call("    (Use --show-key to display a masked version)")
+    # --- ADDED: Assert OAuth status display ---
     mock_display_info.assert_any_call("  OAuth Credentials: Not Configured")
+    # --- END ADDED ---
     mock_manager_instance.get_key.assert_called_once_with('found-service')
     mock_manager_instance.get_key_source.assert_called_once_with('found-service')
     mock_manager_instance.get_oauth_config_status.assert_called_once_with('found-service')
@@ -229,7 +233,9 @@ def test_config_get_found_api_key_show_key(mock_key_manager_cls, mock_display_in
     mock_manager_instance = MagicMock()
     mock_manager_instance.get_key.return_value = "found_key_123456"
     mock_manager_instance.get_key_source.return_value = "file"
+    # --- MODIFIED: Mock OAuth status ---
     mock_manager_instance.get_oauth_config_status.return_value = "Not Configured"
+    # --- END MODIFIED ---
     mock_key_manager_cls.return_value = mock_manager_instance
 
     result = runner.invoke(cli, ['config', 'get', 'found-service', '--show-key'])
@@ -238,7 +244,7 @@ def test_config_get_found_api_key_show_key(mock_key_manager_cls, mock_display_in
     mock_display_info.assert_any_call("  API Key: Found (Source: FILE)")
     mock_display_info.assert_any_call("    Value (masked): foun...")
 
-# --- Tests for OAuth in 'config get' ---
+# --- ADDED: Tests for OAuth in 'config get' ---
 @patch('agentvault_cli.commands.config.utils.display_info')
 @patch('agentvault_cli.commands.config.key_manager.KeyManager')
 def test_config_get_found_oauth_only(mock_key_manager_cls, mock_display_info, runner: CliRunner):
@@ -297,6 +303,7 @@ def test_config_get_found_both_show_all(mock_key_manager_cls, mock_display_info,
     mock_display_info.assert_any_call("  OAuth Credentials: Configured (Source: FILE)")
     mock_display_info.assert_any_call("    Client ID: client-id-xyz")
 
+# --- END ADDED ---
 
 @patch('agentvault_cli.commands.config.utils.display_warning')
 @patch('agentvault_cli.commands.config.key_manager.KeyManager')
@@ -305,7 +312,9 @@ def test_config_get_not_found(mock_key_manager_cls, mock_display_warning, runner
     mock_manager_instance = MagicMock()
     mock_manager_instance.get_key.return_value = None
     mock_manager_instance.get_key_source.return_value = None
+    # --- MODIFIED: Mock OAuth status ---
     mock_manager_instance.get_oauth_config_status.return_value = "Not Configured"
+    # --- END MODIFIED ---
     mock_key_manager_cls.return_value = mock_manager_instance
 
     result = runner.invoke(cli, ['config', 'get', 'missing-service'])

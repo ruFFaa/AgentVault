@@ -216,22 +216,30 @@ async def run_command(
             utils.display_info(f"Using overridden service ID for key lookup: '{service_id}'")
         else:
             api_key_scheme = next((s for s in agent_card.auth_schemes if s.scheme == 'apiKey'), None)
+            oauth2_scheme = next((s for s in agent_card.auth_schemes if s.scheme == 'oauth2'), None) # Check for oauth2
             none_scheme = next((s for s in agent_card.auth_schemes if s.scheme == 'none'), None)
 
             if api_key_scheme:
                 service_id = api_key_scheme.service_identifier or agent_card.human_readable_id
                 utils.display_info(f"Using service ID from agent card ('apiKey' scheme): '{service_id}'")
                 requires_auth = True
+            # --- ADDED: OAuth2 handling ---
+            elif oauth2_scheme:
+                service_id = oauth2_scheme.service_identifier or agent_card.human_readable_id
+                utils.display_info(f"Using service ID from agent card ('oauth2' scheme): '{service_id}'")
+                # KeyManager will handle fetching token using ID/Secret for this service_id
+                requires_auth = True # Requires ID/Secret to be configured
+            # --- END ADDED ---
             elif none_scheme:
                 utils.display_info("Agent supports 'none' authentication scheme. No API key needed.")
                 requires_auth = False
                 service_id = None
             else:
-                utils.display_warning(f"Agent does not explicitly support 'apiKey' or 'none' auth schemes. Supported: {[s.scheme for s in agent_card.auth_schemes]}. Key lookup might fail.")
+                utils.display_warning(f"Agent does not explicitly support 'apiKey', 'oauth2', or 'none' auth schemes. Supported: {[s.scheme for s in agent_card.auth_schemes]}. Key/Credential lookup might fail.")
                 if agent_card.auth_schemes:
                      first_scheme = agent_card.auth_schemes[0]
                      service_id = first_scheme.service_identifier or agent_card.human_readable_id
-                     utils.display_warning(f"Attempting key lookup using service ID from first scheme ('{first_scheme.scheme}'): '{service_id}'")
+                     utils.display_warning(f"Attempting key/credential lookup using service ID from first scheme ('{first_scheme.scheme}'): '{service_id}'")
                      requires_auth = True
                 else:
                      utils.display_error("Agent card has no authentication schemes defined.")
@@ -239,25 +247,37 @@ async def run_command(
 
         if requires_auth:
             if auth_key_override:
-                api_key = auth_key_override
-                utils.display_warning("Using API key provided directly via --auth-key (INSECURE).")
-            elif service_id:
-                api_key = manager.get_key(service_id)
-                if api_key:
-                    source = manager.get_key_source(service_id)
-                    utils.display_info(f"Found API key for service '{service_id}' (Source: {source.upper() if source else 'Unknown'}).")
+                # Note: This override only works for apiKey scheme currently.
+                # OAuth requires ID/Secret which aren't provided via CLI flag.
+                if any(s.scheme == 'apiKey' for s in agent_card.auth_schemes) or not agent_card.auth_schemes:
+                    api_key = auth_key_override
+                    utils.display_warning("Using API key provided directly via --auth-key (INSECURE).")
                 else:
-                    utils.display_error(f"API key required for service '{service_id}' but not found.")
-                    utils.display_info("Use 'agentvault config set' to configure the key using --env, --file, or --keyring.")
+                    utils.display_error("--auth-key override is only supported for 'apiKey' scheme.")
+                    ctx.exit(1)
+            elif service_id:
+                # KeyManager handles both API key and OAuth cred lookup transparently
+                # Check if *any* credential (key or OAuth ID/Secret) is available
+                key_found = manager.get_key(service_id) is not None
+                oauth_found = manager.get_oauth_client_id(service_id) is not None and \
+                              manager.get_oauth_client_secret(service_id) is not None
+
+                if key_found or oauth_found:
+                    source = manager.get_key_source(service_id) or manager._oauth_sources.get(service_id) # Get source from either
+                    utils.display_info(f"Found credentials for service '{service_id}' (Source: {source.upper() if source else 'Unknown'}).")
+                    # No need to store api_key here, library handles it
+                else:
+                    utils.display_error(f"Credentials required for service '{service_id}' but not found.")
+                    utils.display_info("Use 'agentvault config set' to configure the key/credentials using --env, --file, --keyring, or --oauth-configure.")
                     ctx.exit(1)
             else:
-                utils.display_error("Authentication is required, but could not determine the service ID for key lookup.")
+                utils.display_error("Authentication is required, but could not determine the service ID for credential lookup.")
                 ctx.exit(1)
         else:
-             api_key = None
+             api_key = None # Explicitly set for clarity
 
     except Exception as e:
-        utils.display_error(f"An unexpected error occurred during key loading: {e}")
+        utils.display_error(f"An unexpected error occurred during key/credential loading: {e}")
         logger.exception("Unexpected error in key loading section")
         ctx.exit(1)
 
@@ -289,7 +309,8 @@ async def run_command(
                     agent_card=agent_card,
                     initial_message=initial_message,
                     key_manager=manager, # Pass the instantiated manager
-                    mcp_context=mcp_context_data
+                    mcp_context=mcp_context_data,
+                    webhook_url=None # CLI doesn't support setting this yet
                 )
                 utils.display_success(f"Task initiated successfully. Task ID: {task_id}")
                 utils.display_info("Waiting for events... (Press Ctrl+C to request cancellation)")
@@ -298,6 +319,10 @@ async def run_command(
                 async for event in client.receive_messages(
                     agent_card=agent_card, task_id=task_id, key_manager=manager
                 ):
+                    # --- ADDED DEBUG PRINT ---
+                    print(f"DEBUG: Processing event type: {type(event)}")
+                    # --- END ADDED ---
+
                     if terminate_requested:
                         utils.display_info(f"Attempting to terminate task {task_id}...")
                         try:
@@ -305,7 +330,7 @@ async def run_command(
                             utils.display_success(f"Termination request acknowledged for task {task_id}.")
                         except av_exceptions.A2AError as term_err:
                             utils.display_error(f"Failed to send termination request: {term_err}")
-                        final_task_state = av_models.TaskState.CANCELLED # Assume cancelled on request
+                        final_task_state = av_models.TaskState.CANCELED # Assume cancelled on request
                         break # Exit event loop
 
                     # Process different event types
@@ -314,8 +339,11 @@ async def run_command(
                         status_msg = f"Task Status: {event.state.value}"
                         if event.message:
                             status_msg += f" - {event.message}"
+                        # --- ADDED DEBUG PRINT ---
+                        print(f"DEBUG: Displaying TaskStatusUpdateEvent: {status_msg}")
+                        # --- END ADDED ---
                         utils.display_info(status_msg)
-                        if event.state in [av_models.TaskState.COMPLETED, av_models.TaskState.FAILED, av_models.TaskState.CANCELLED]:
+                        if event.state in [av_models.TaskState.COMPLETED, av_models.TaskState.FAILED, av_models.TaskState.CANCELED]:
                             utils.display_info("Task reached terminal state.")
                             break # Exit event loop
 
@@ -373,6 +401,9 @@ async def run_command(
                 # End of event loop
 
             except av_exceptions.A2AError as e:
+                # --- ADDED DEBUG PRINT ---
+                print(f"DEBUG: Caught A2AError: {e}")
+                # --- END ADDED ---
                 utils.display_error(f"A2A communication error: {e}")
                 logger.exception("A2AError during task execution")
                 ctx.exit(1)
@@ -382,7 +413,7 @@ async def run_command(
                  ctx.exit(1)
             finally:
                  # Fetch final status if task ID was obtained and loop finished/broke
-                 if task_id:
+                 if task_id and final_task_state not in [av_models.TaskState.COMPLETED, av_models.TaskState.FAILED, av_models.TaskState.CANCELED]:
                      utils.display_info("-" * 20)
                      utils.display_info("Fetching final task status...")
                      try:
@@ -405,11 +436,16 @@ async def run_command(
                  elif final_task_state == av_models.TaskState.FAILED:
                      utils.display_error("Task failed.")
                      ctx.exit(1)
-                 elif final_task_state == av_models.TaskState.CANCELLED:
-                     utils.display_warning("Task cancelled.")
+                 elif final_task_state == av_models.TaskState.CANCELED:
+                     utils.display_warning("Task canceled.")
                      ctx.exit(2) # Use different exit code for cancellation
+                 elif final_task_state == av_models.TaskState.INPUT_REQUIRED:
+                     utils.display_warning("Task stopped awaiting input (not supported by CLI).")
+                     ctx.exit(2) # Treat as non-success
                  else:
-                     utils.display_warning(f"Task finished with non-terminal state: {final_task_state}")
+                     # Includes SUBMITTED, WORKING, or None if status fetch failed
+                     state_str = final_task_state.value if final_task_state else "Unknown/Fetch Failed"
+                     utils.display_warning(f"Task finished with non-terminal state: {state_str}")
                      ctx.exit(1) # Treat unexpected non-terminal state as error
 
 

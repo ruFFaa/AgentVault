@@ -178,7 +178,9 @@ def set_key(
 @config_group.command("get")
 @click.argument("service_id", type=str)
 @click.option("--show-key", is_flag=True, help="Display the first few characters of the API key (use with caution).")
+# --- ADDED: --show-oauth-id flag ---
 @click.option("--show-oauth-id", is_flag=True, help="Display the configured OAuth Client ID.")
+# --- END ADDED ---
 @click.pass_context
 def get_key(ctx: click.Context, service_id: str, show_key: bool, show_oauth_id: bool): # Added show_oauth_id
     """
@@ -199,8 +201,9 @@ def get_key(ctx: click.Context, service_id: str, show_key: bool, show_oauth_id: 
         key_value = manager.get_key(service_id)
         key_source = manager.get_key_source(service_id)
 
-        # Check OAuth Config Status
+        # --- ADDED: Check OAuth Config Status ---
         oauth_status = manager.get_oauth_config_status(service_id)
+        # --- END ADDED ---
 
         found_anything = bool(key_value) or (oauth_status != "Not Configured")
 
@@ -219,16 +222,19 @@ def get_key(ctx: click.Context, service_id: str, show_key: bool, show_oauth_id: 
             else:
                 utils.display_info("  API Key: Not Found")
 
+            # --- ADDED: Display OAuth Status and ID if requested ---
             utils.display_info(f"  OAuth Credentials: {oauth_status}")
             if show_oauth_id and oauth_status != "Not Configured":
                 client_id = manager.get_oauth_client_id(service_id)
                 if client_id:
                     utils.display_info(f"    Client ID: {client_id}")
                 else:
-                     utils.display_info("    Client ID: Not Found (Status indicates partial config)")
+                     # This case might happen if only secret is found, or error during get
+                     utils.display_info("    Client ID: Not Found (Status indicates partial config or error)")
             elif oauth_status != "Not Configured":
                  utils.display_info("    (Use --show-oauth-id to display Client ID)")
             # Note: Never display client secret here
+            # --- END ADDED ---
 
     except Exception as e:
         utils.display_error(f"An unexpected error occurred while getting credential source: {e}")
