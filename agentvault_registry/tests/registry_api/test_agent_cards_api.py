@@ -8,6 +8,7 @@ from typing import Optional, List
 
 from fastapi.testclient import TestClient # Import sync client
 from fastapi import status
+import pydantic # Import pydantic for ValidationError
 
 # Imports are now relative to the src dir added to path by pytest.ini
 from agentvault_registry import schemas, models
@@ -20,24 +21,40 @@ API_BASE_URL = "/api/v1/agent-cards"
 def test_create_agent_card_success(
     sync_test_client: TestClient,
     mock_db_session: MagicMock,
-    mock_developer: models.Developer,
+    mock_developer: models.Developer, # Use fixture
     override_get_current_developer: None,
     valid_agent_card_data_dict: dict,
-    mock_agent_card_db_object: models.AgentCard,
     mocker
 ):
     """Test successful creation of an agent card."""
+    # Mock the validation within CRUD to succeed
+    mock_validated_card_model = MagicMock()
+    mock_validated_card_model.model_dump.return_value = valid_agent_card_data_dict
+    mock_validate_patch = mocker.patch(
+        "agentvault_registry.crud.agent_card.AgentCardModel.model_validate",
+        return_value=mock_validated_card_model
+    )
+
+    # Mock the CRUD function return value
+    now = datetime.datetime.now(datetime.timezone.utc)
+    mock_developer.is_verified = False # Set explicit state
+    mock_db_return = models.AgentCard(
+        id=uuid.uuid4(), # Generate a new UUID for the return
+        developer_id=mock_developer.id,
+        card_data=valid_agent_card_data_dict,
+        name=valid_agent_card_data_dict["name"],
+        description=valid_agent_card_data_dict.get("description"),
+        is_active=True,
+        created_at=now,
+        updated_at=now,
+        developer=mock_developer # Attach the mock developer
+    )
     mock_create = mocker.patch(
         "agentvault_registry.crud.agent_card.create_agent_card",
-        # Mock needs to be awaitable if CRUD is async
-        new_callable=AsyncMock, return_value=mock_agent_card_db_object # Use AsyncMock here
+        new_callable=AsyncMock, return_value=mock_db_return
     )
-    # mock_create.assert_awaited = AsyncMock() # No longer needed with new_callable
-
-    mocker.patch(
-        "agentvault_registry.crud.agent_card.AgentCardModel.model_validate",
-        return_value=MagicMock(**valid_agent_card_data_dict)
-    )
+    # Mock refresh if needed
+    mock_db_session.refresh = AsyncMock()
 
     create_schema = schemas.AgentCardCreate(card_data=valid_agent_card_data_dict)
 
@@ -49,12 +66,15 @@ def test_create_agent_card_success(
 
     assert response.status_code == status.HTTP_201_CREATED
     response_data = response.json()
-    assert schemas.AgentCardRead.model_validate(response_data)
-    assert response_data["name"] == valid_agent_card_data_dict["name"]
-    assert response_data["developer_id"] == mock_developer.id
-    assert response_data["card_data"] == valid_agent_card_data_dict
+    # Validate the response against the schema
+    validated_response = schemas.AgentCardRead.model_validate(response_data)
+    assert validated_response.name == valid_agent_card_data_dict["name"]
+    assert validated_response.developer_id == mock_developer.id
+    assert validated_response.developer_is_verified == mock_developer.is_verified # is_verified should be False by default
+    assert validated_response.card_data == valid_agent_card_data_dict
 
-    # Use assert_awaited_once with AsyncMock
+    # Assert mocks were called
+    # mock_validate_patch.assert_called_once_with(valid_agent_card_data_dict) # Validation happens inside CRUD now
     mock_create.assert_awaited_once()
     call_kwargs = mock_create.call_args.kwargs
     assert call_kwargs['db'] is mock_db_session
@@ -84,15 +104,11 @@ def test_create_agent_card_validation_fail(
     mocker
 ):
     """Test create endpoint when CRUD validation raises ValueError."""
+    error_message = "Invalid card data from CRUD"
+    # Mock the CRUD function itself to raise the error
     mock_create = mocker.patch(
         "agentvault_registry.crud.agent_card.create_agent_card",
-        new_callable=AsyncMock, side_effect=ValueError("Invalid card data") # Use AsyncMock
-    )
-    # mock_create.assert_awaited = AsyncMock() # No longer needed
-
-    mocker.patch(
-        "agentvault_registry.crud.agent_card.AgentCardModel.model_validate",
-        side_effect=ValueError("Invalid card data")
+        new_callable=AsyncMock, side_effect=ValueError(error_message) # Use AsyncMock
     )
 
     create_schema = schemas.AgentCardCreate(card_data=valid_agent_card_data_dict)
@@ -104,11 +120,13 @@ def test_create_agent_card_validation_fail(
     )
 
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-    assert "Invalid card data" in response.json()["detail"]
+    # Check the detail uses the message from the ValueError raised by CRUD
+    assert error_message in response.json()["detail"]
+    mock_create.assert_awaited_once() # Ensure create was called (and raised)
 
 
 # --- Test GET /agent-cards/ (List) ---
-
+# (List tests remain unchanged)
 def test_list_agent_cards_success(
     sync_test_client: TestClient,
     mock_db_session: MagicMock,
@@ -122,7 +140,6 @@ def test_list_agent_cards_success(
         "agentvault_registry.crud.agent_card.list_agent_cards",
         new_callable=AsyncMock, return_value=(mock_cards, total_items) # Use AsyncMock
     )
-    # mock_list.assert_awaited = AsyncMock() # No longer needed
 
     response = sync_test_client.get(API_BASE_URL + "/")
 
@@ -158,7 +175,6 @@ def test_list_agent_cards_with_params(
         "agentvault_registry.crud.agent_card.list_agent_cards",
         new_callable=AsyncMock, return_value=([], 0) # Use AsyncMock
     )
-    # mock_list.assert_awaited = AsyncMock() # No longer needed
 
     params = {"skip": skip, "limit": limit, "active_only": active_only}
     if search is not None:
@@ -177,26 +193,74 @@ def test_list_agent_cards_with_params(
 def test_get_agent_card_success(
     sync_test_client: TestClient,
     mock_db_session: MagicMock,
-    mock_agent_card_db_object: models.AgentCard,
+    mock_agent_card_db_object: models.AgentCard, # Use the fixture
+    mock_developer: models.Developer, # Use the fixture
     mocker
 ):
     """Test successfully retrieving a single agent card."""
     card_id = mock_agent_card_db_object.id
+    # Ensure the mock card from fixture has the mock developer attached
+    mock_developer.is_verified = False # Set a specific state for this test
+    mock_agent_card_db_object.developer = mock_developer
+
     mock_get = mocker.patch(
         "agentvault_registry.crud.agent_card.get_agent_card",
         new_callable=AsyncMock, return_value=mock_agent_card_db_object # Use AsyncMock
     )
-    # mock_get.assert_awaited = AsyncMock() # No longer needed
 
     response = sync_test_client.get(f"{API_BASE_URL}/{card_id}")
 
     assert response.status_code == status.HTTP_200_OK
     response_data = response.json()
-    assert schemas.AgentCardRead.model_validate(response_data)
-    assert response_data["id"] == str(card_id)
-    assert response_data["name"] == mock_agent_card_db_object.name
+    # Validate against the schema
+    validated_response = schemas.AgentCardRead.model_validate(response_data)
+    assert validated_response.id == card_id
+    assert validated_response.name == mock_agent_card_db_object.name
+    assert validated_response.developer_id == mock_developer.id
+    assert validated_response.developer_is_verified is False
 
     mock_get.assert_awaited_once_with(db=mock_db_session, card_id=card_id)
+
+
+def test_get_agent_card_includes_developer_verified(
+    sync_test_client: TestClient,
+    mock_db_session: MagicMock,
+    mocker
+):
+    """Test GET /agent-cards/{card_id} includes developer_is_verified."""
+    # Create specific mocks for this test
+    test_dev = models.Developer(id=5, name="Verified Dev", api_key_hash="abc", is_verified=True) # Set verified True
+    test_card_id = uuid.uuid4()
+    test_card_data = {"name": "Verified Agent Card", "description": "Desc", "schemaVersion": "1.0", "humanReadableId": "vd/vac", "agentVersion": "1", "url": "http://localhost", "provider": {"name": "vd"}, "capabilities": {"a2aVersion": "1"}, "authSchemes": [{"scheme": "none"}]}
+    mock_card_db = models.AgentCard(
+        id=test_card_id,
+        developer_id=test_dev.id,
+        card_data=test_card_data,
+        name=test_card_data["name"],
+        description=test_card_data["description"],
+        is_active=True,
+        created_at=datetime.datetime.now(datetime.timezone.utc),
+        updated_at=datetime.datetime.now(datetime.timezone.utc),
+        developer=test_dev # Assign the related developer object
+    )
+
+    mock_get = mocker.patch(
+        "agentvault_registry.crud.agent_card.get_agent_card",
+        new_callable=AsyncMock, return_value=mock_card_db
+    )
+
+    response = sync_test_client.get(f"{API_BASE_URL}/{test_card_id}")
+
+    assert response.status_code == status.HTTP_200_OK
+    response_data = response.json()
+    validated_response = schemas.AgentCardRead.model_validate(response_data)
+
+    assert validated_response.id == test_card_id
+    assert validated_response.developer_id == test_dev.id
+    assert "developer_is_verified" in response_data # Check key exists
+    assert validated_response.developer_is_verified is True # Check the value
+
+    mock_get.assert_awaited_once_with(db=mock_db_session, card_id=test_card_id)
 
 
 def test_get_agent_card_not_found(
@@ -210,7 +274,6 @@ def test_get_agent_card_not_found(
         "agentvault_registry.crud.agent_card.get_agent_card",
         new_callable=AsyncMock, return_value=None # Use AsyncMock
     )
-    # mock_get.assert_awaited = AsyncMock() # No longer needed
 
     response = sync_test_client.get(f"{API_BASE_URL}/{card_id}")
 
@@ -220,7 +283,11 @@ def test_get_agent_card_not_found(
 
 # --- Test PUT /agent-cards/{card_id} (Update) ---
 
+@patch("agentvault_registry.crud.agent_card._agentvault_lib_available", True)
 def test_update_agent_card_success(
+    # --- MODIFIED: Removed mock_lib_available ---
+    # mock_lib_available,
+    # --- END MODIFIED ---
     sync_test_client: TestClient,
     mock_db_session: MagicMock,
     mock_developer: models.Developer,
@@ -231,34 +298,34 @@ def test_update_agent_card_success(
 ):
     """Test successful update of an agent card."""
     card_id = mock_agent_card_db_object.id
-    mock_agent_card_db_object.developer_id = mock_developer.id
+    mock_agent_card_db_object.developer_id = mock_developer.id # Ensure ownership matches
+    mock_developer.is_verified = True # Set initial state for developer
+    mock_agent_card_db_object.developer = mock_developer # Attach developer
 
     updated_data_dict = valid_agent_card_data_dict.copy()
     updated_data_dict["description"] = "Updated description via API."
     update_schema = schemas.AgentCardUpdate(card_data=updated_data_dict, is_active=False)
 
+    # Create a mock for the *updated* card state returned by CRUD
     updated_mock_card = models.AgentCard(
         id=mock_agent_card_db_object.id, developer_id=mock_agent_card_db_object.developer_id,
         card_data=updated_data_dict, name=updated_data_dict["name"],
-        description=updated_data_dict["description"], is_active=False,
+        description=updated_data_dict["description"], is_active=False, # Reflect update
         created_at=mock_agent_card_db_object.created_at,
-        updated_at=datetime.datetime.now(datetime.timezone.utc), developer=mock_developer
+        updated_at=datetime.datetime.now(datetime.timezone.utc),
+        developer=mock_developer # Attach developer to returned object too
     )
 
     mock_get = mocker.patch(
         "agentvault_registry.crud.agent_card.get_agent_card",
-        new_callable=AsyncMock, return_value=mock_agent_card_db_object # Use AsyncMock
+        new_callable=AsyncMock, return_value=mock_agent_card_db_object
     )
-    # mock_get.assert_awaited = AsyncMock() # No longer needed
     mock_update = mocker.patch(
         "agentvault_registry.crud.agent_card.update_agent_card",
-        new_callable=AsyncMock, return_value=updated_mock_card # Use AsyncMock
+        new_callable=AsyncMock, return_value=updated_mock_card
     )
-    # mock_update.assert_awaited = AsyncMock() # No longer needed
-    mocker.patch(
-        "agentvault_registry.crud.agent_card.AgentCardModel.model_validate",
-        return_value=MagicMock(**updated_data_dict)
-    )
+    # Mock refresh if needed
+    mock_db_session.refresh = AsyncMock()
 
     response = sync_test_client.put(
         f"{API_BASE_URL}/{card_id}",
@@ -268,12 +335,15 @@ def test_update_agent_card_success(
 
     assert response.status_code == status.HTTP_200_OK
     response_data = response.json()
-    assert schemas.AgentCardRead.model_validate(response_data)
-    assert response_data["id"] == str(card_id)
-    assert response_data["description"] == "Updated description via API."
-    assert response_data["is_active"] is False
+    validated_response = schemas.AgentCardRead.model_validate(response_data)
+    assert validated_response.id == card_id
+    assert validated_response.description == "Updated description via API."
+    assert validated_response.is_active is False
+    assert validated_response.developer_id == mock_developer.id
+    assert validated_response.developer_is_verified is True
 
     mock_get.assert_awaited_once_with(db=mock_db_session, card_id=card_id)
+    # Validation happens inside the mocked update_agent_card, so we don't assert it here
     mock_update.assert_awaited_once()
     call_kwargs = mock_update.call_args.kwargs
     assert call_kwargs['db'] is mock_db_session
@@ -294,7 +364,6 @@ def test_update_agent_card_not_found(
         "agentvault_registry.crud.agent_card.get_agent_card",
         new_callable=AsyncMock, return_value=None # Use AsyncMock
     )
-    # mock_get.assert_awaited = AsyncMock() # No longer needed
     update_schema = schemas.AgentCardUpdate(is_active=False)
 
     response = sync_test_client.put(
@@ -310,24 +379,26 @@ def test_update_agent_card_not_found(
 def test_update_agent_card_forbidden(
     sync_test_client: TestClient,
     mock_db_session: MagicMock,
-    mock_developer: models.Developer,
-    mock_other_developer: models.Developer,
-    override_get_current_developer: None,
+    mock_developer: models.Developer, # The authenticated developer
+    mock_other_developer: models.Developer, # The owner of the card
+    override_get_current_developer: None, # Overrides to return mock_developer
     mock_agent_card_db_object: models.AgentCard,
     mocker
 ):
     """Test updating a card owned by another developer."""
     card_id = mock_agent_card_db_object.id
+    # Set the card's owner to be the *other* developer
     mock_agent_card_db_object.developer_id = mock_other_developer.id
+    mock_agent_card_db_object.developer = mock_other_developer # Attach correct owner
 
     mock_get = mocker.patch(
         "agentvault_registry.crud.agent_card.get_agent_card",
         new_callable=AsyncMock, return_value=mock_agent_card_db_object # Use AsyncMock
     )
-    # mock_get.assert_awaited = AsyncMock() # No longer needed
     mock_update = mocker.patch("agentvault_registry.crud.agent_card.update_agent_card")
     update_schema = schemas.AgentCardUpdate(is_active=False)
 
+    # The override ensures the request is authenticated as mock_developer
     response = sync_test_client.put(
         f"{API_BASE_URL}/{card_id}",
         json=update_schema.model_dump(mode='json', exclude_unset=True),
@@ -341,27 +412,30 @@ def test_update_agent_card_forbidden(
 
 
 def test_update_agent_card_validation_fail(
+    # --- MODIFIED: Removed mock_lib_available ---
+    # mock_lib_available,
+    # --- END MODIFIED ---
     sync_test_client: TestClient,
     mock_db_session: MagicMock,
+    mock_developer: models.Developer, # Need owner for ownership check
     override_get_current_developer: None,
     mock_agent_card_db_object: models.AgentCard,
     mocker
 ):
     """Test update endpoint when CRUD validation raises ValueError."""
     card_id = mock_agent_card_db_object.id
+    mock_agent_card_db_object.developer_id = mock_developer.id # Ensure ownership matches
+    mock_agent_card_db_object.developer = mock_developer # Attach developer
+
     mock_get = mocker.patch(
         "agentvault_registry.crud.agent_card.get_agent_card",
         new_callable=AsyncMock, return_value=mock_agent_card_db_object # Use AsyncMock
     )
-    # mock_get.assert_awaited = AsyncMock() # No longer needed
+    # Mock the CRUD update function to raise the error
+    error_message = "Invalid updated card data from CRUD"
     mock_update = mocker.patch(
         "agentvault_registry.crud.agent_card.update_agent_card",
-        new_callable=AsyncMock, side_effect=ValueError("Invalid updated card data") # Use AsyncMock
-    )
-    # mock_update.assert_awaited = AsyncMock() # No longer needed
-    mocker.patch(
-        "agentvault_registry.crud.agent_card.AgentCardModel.model_validate",
-        side_effect=ValueError("Invalid updated card data")
+        new_callable=AsyncMock, side_effect=ValueError(error_message) # Use AsyncMock
     )
 
     update_schema = schemas.AgentCardUpdate(card_data={"invalid": "data"})
@@ -373,32 +447,35 @@ def test_update_agent_card_validation_fail(
     )
 
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-    assert "Invalid updated card data" in response.json()["detail"]
+    # Check the detail uses the message from the ValueError raised by CRUD
+    assert error_message in response.json()["detail"]
     mock_get.assert_awaited_once_with(db=mock_db_session, card_id=card_id)
-    mock_update.assert_awaited_once()
+    mock_update.assert_awaited_once() # Ensure update was called (and raised the error)
 
 
 # --- Test DELETE /agent-cards/{card_id} (Soft Delete) ---
-
+# (Delete tests remain unchanged)
 def test_delete_agent_card_success(
     sync_test_client: TestClient,
     mock_db_session: MagicMock,
+    mock_developer: models.Developer, # Need owner for ownership check
     override_get_current_developer: None,
     mock_agent_card_db_object: models.AgentCard,
     mocker
 ):
     """Test successful soft deletion of an agent card."""
     card_id = mock_agent_card_db_object.id
+    mock_agent_card_db_object.developer_id = mock_developer.id # Ensure ownership matches
+    mock_agent_card_db_object.developer = mock_developer # Attach developer
+
     mock_get = mocker.patch(
         "agentvault_registry.crud.agent_card.get_agent_card",
         new_callable=AsyncMock, return_value=mock_agent_card_db_object # Use AsyncMock
     )
-    # mock_get.assert_awaited = AsyncMock() # No longer needed
     mock_delete = mocker.patch(
         "agentvault_registry.crud.agent_card.delete_agent_card",
         new_callable=AsyncMock, return_value=True # Use AsyncMock
     )
-    # mock_delete.assert_awaited = AsyncMock() # No longer needed
 
     response = sync_test_client.delete(
         f"{API_BASE_URL}/{card_id}",
@@ -422,7 +499,6 @@ def test_delete_agent_card_not_found(
         "agentvault_registry.crud.agent_card.get_agent_card",
         new_callable=AsyncMock, return_value=None # Use AsyncMock
     )
-    # mock_get.assert_awaited = AsyncMock() # No longer needed
     mock_delete = mocker.patch("agentvault_registry.crud.agent_card.delete_agent_card")
 
     response = sync_test_client.delete(
@@ -438,22 +514,25 @@ def test_delete_agent_card_not_found(
 def test_delete_agent_card_forbidden(
     sync_test_client: TestClient,
     mock_db_session: MagicMock,
-    mock_other_developer: models.Developer,
+    mock_developer: models.Developer, # Authenticated user
+    mock_other_developer: models.Developer, # Card owner
     override_get_current_developer: None,
     mock_agent_card_db_object: models.AgentCard,
     mocker
 ):
     """Test deleting a card owned by another developer."""
     card_id = mock_agent_card_db_object.id
+    # Set the card's owner to be the *other* developer
     mock_agent_card_db_object.developer_id = mock_other_developer.id
+    mock_agent_card_db_object.developer = mock_other_developer # Attach owner
 
     mock_get = mocker.patch(
         "agentvault_registry.crud.agent_card.get_agent_card",
         new_callable=AsyncMock, return_value=mock_agent_card_db_object # Use AsyncMock
     )
-    # mock_get.assert_awaited = AsyncMock() # No longer needed
     mock_delete = mocker.patch("agentvault_registry.crud.agent_card.delete_agent_card")
 
+    # The override ensures the request is authenticated as mock_developer
     response = sync_test_client.delete(
         f"{API_BASE_URL}/{card_id}",
         headers={"X-Api-Key": "fake-key"}
@@ -468,24 +547,27 @@ def test_delete_agent_card_forbidden(
 def test_delete_agent_card_db_error(
     sync_test_client: TestClient,
     mock_db_session: MagicMock,
+    mock_developer: models.Developer, # Need owner for ownership check
     override_get_current_developer: None,
     mock_agent_card_db_object: models.AgentCard,
     mocker
 ):
     """Test delete endpoint when CRUD delete function returns False (DB error)."""
     card_id = mock_agent_card_db_object.id
+    mock_agent_card_db_object.developer_id = mock_developer.id # Ensure ownership matches
+    mock_agent_card_db_object.developer = mock_developer # Attach developer
 
+    # Mock get_agent_card to return the object twice (once for ownership, once for final check)
     mock_get = mocker.patch(
         "agentvault_registry.crud.agent_card.get_agent_card",
-        new_callable=AsyncMock, return_value=mock_agent_card_db_object # Use AsyncMock
+        new_callable=AsyncMock, side_effect=[mock_agent_card_db_object, mock_agent_card_db_object] # Use AsyncMock
     )
-    # mock_get.assert_awaited = AsyncMock() # No longer needed
 
+    # Mock delete_agent_card to return False (simulating DB error)
     mock_delete = mocker.patch(
         "agentvault_registry.crud.agent_card.delete_agent_card",
         new_callable=AsyncMock, return_value=False # Use AsyncMock
     )
-    # mock_delete.assert_awaited = AsyncMock() # No longer needed
 
     response = sync_test_client.delete(
         f"{API_BASE_URL}/{card_id}",
@@ -494,5 +576,6 @@ def test_delete_agent_card_db_error(
 
     assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
     assert "Failed to deactivate" in response.json()["detail"]
-    assert mock_get.call_count == 2
+    # get_agent_card is called twice: once initially, once inside the error handling
+    assert mock_get.await_count == 2
     mock_delete.assert_awaited_once_with(db=mock_db_session, card_id=card_id)

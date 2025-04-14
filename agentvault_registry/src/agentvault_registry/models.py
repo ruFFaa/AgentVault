@@ -6,7 +6,10 @@ from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, ForeignKey, JSON, Index,
     UUID as SQLUUID, func
 )
-from sqlalchemy.orm import relationship, Mapped, mapped_column
+# --- MODIFIED: Import mapped_column and relationship directly if not already ---
+from sqlalchemy.orm import relationship, Mapped, mapped_column, selectinload # Added selectinload
+# --- END MODIFIED ---
+
 
 # Import the Base class from database setup
 from .database import Base
@@ -20,6 +23,9 @@ class Developer(Base):
     name: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
     # Store only the hash of the API key
     api_key_hash: Mapped[str] = mapped_column(String, nullable=False)
+    # --- ADDED: is_verified field ---
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # --- END ADDED ---
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -33,7 +39,9 @@ class Developer(Base):
     )
 
     def __repr__(self):
-        return f"<Developer(id={self.id}, name='{self.name}')>"
+        # --- MODIFIED: Add is_verified to repr ---
+        return f"<Developer(id={self.id}, name='{self.name}', verified={self.is_verified})>"
+        # --- END MODIFIED ---
 
 
 # --- AgentCard Model ---

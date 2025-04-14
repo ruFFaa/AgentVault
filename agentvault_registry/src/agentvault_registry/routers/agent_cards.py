@@ -14,6 +14,32 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# --- Helper Function to build response dict ---
+def _build_agent_card_read_dict(db_card: models.AgentCard) -> dict:
+    """Builds the dictionary for AgentCardRead response from the ORM model."""
+    if not db_card:
+        return {} # Should not happen if called correctly
+    # Ensure developer relationship is loaded (get_agent_card should handle this)
+    developer_verified = False
+    if hasattr(db_card, 'developer') and db_card.developer:
+        developer_verified = getattr(db_card.developer, 'is_verified', False)
+    else:
+        logger.warning(f"Developer relationship not loaded for AgentCard {db_card.id} when building response.")
+
+    return {
+        "id": db_card.id,
+        "developer_id": db_card.developer_id,
+        "card_data": db_card.card_data,
+        "name": db_card.name,
+        "description": db_card.description,
+        "is_active": db_card.is_active,
+        "created_at": db_card.created_at,
+        "updated_at": db_card.updated_at,
+        "developer_is_verified": developer_verified,
+    }
+# --- End Helper ---
+
+
 # --- POST /agent-cards ---
 @router.post(
     "/",
@@ -26,10 +52,9 @@ async def submit_agent_card(
     card_in: schemas.AgentCardCreate,
     db: AsyncSession = Depends(database.get_db),
     current_developer: models.Developer = Depends(security.get_current_developer),
-):
+) -> schemas.AgentCardRead: # Return type hint remains the schema
     """
     Endpoint to submit a new Agent Card.
-
     Requires developer authentication via the X-Api-Key header.
     Validates the provided `card_data` against the core AgentCard schema.
     """
@@ -38,20 +63,20 @@ async def submit_agent_card(
         db_agent_card = await agent_card.create_agent_card(
             db=db, developer_id=current_developer.id, card_create=card_in
         )
-        if db_agent_card is None:
-            # This case might occur if validation passed but DB commit failed unexpectedly
-            # CRUD function now raises ValueError for known issues.
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create agent card in database.",
-            )
-        # Use the schema to format the response from the DB object
-        return schemas.AgentCardRead.model_validate(db_agent_card)
+        # Refresh should load relationships if configured correctly,
+        # but explicitly reload developer if needed after refresh for safety.
+        if db_agent_card and (not hasattr(db_agent_card, 'developer') or not db_agent_card.developer):
+             await db.refresh(db_agent_card, attribute_names=['developer'])
+
+        # --- MODIFIED: Build dict manually before returning ---
+        response_dict = _build_agent_card_read_dict(db_agent_card)
+        # Pydantic validates the dict when FastAPI returns it based on response_model
+        return response_dict # type: ignore # FastAPI handles dict -> schema
+        # --- END MODIFIED ---
     except ValueError as e:
-        # Catch validation errors or DB integrity errors raised from CRUD
         logger.warning(f"Failed to create agent card due to validation/DB error: {e}")
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, # 422 for validation errors
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Failed to create agent card: {e}",
         )
     except Exception as e:
@@ -63,6 +88,7 @@ async def submit_agent_card(
 
 
 # --- GET /agent-cards ---
+# (List endpoint remains unchanged as it uses AgentCardSummary)
 @router.get(
     "/",
     response_model=schemas.AgentCardListResponse,
@@ -74,13 +100,11 @@ async def list_agent_cards(
     skip: int = Query(0, ge=0, description="Number of records to skip for pagination."),
     limit: int = Query(100, ge=1, le=250, description="Maximum number of records to return."),
     active_only: bool = Query(True, description="Filter for active agent cards only."),
-    # --- MODIFIED: Added max_length to search parameter ---
     search: Optional[str] = Query(
         None,
         max_length=100, # Limit search term length
         description="Search term to filter by name or description (case-insensitive, max 100 chars)."
     )
-    # --- END MODIFIED ---
 ):
     """
     Public endpoint to list and search for Agent Cards.
@@ -126,17 +150,22 @@ async def list_agent_cards(
 async def get_agent_card(
     card_id: uuid.UUID,
     db: AsyncSession = Depends(database.get_db),
-):
+) -> schemas.AgentCardRead: # Return type hint remains the schema
     """
     Public endpoint to retrieve a specific Agent Card.
     """
     logger.info(f"Fetching agent card with ID: {card_id}")
+    # CRUD function now eagerly loads developer
     db_card = await agent_card.get_agent_card(db=db, card_id=card_id)
     if db_card is None:
         logger.warning(f"Agent card with ID {card_id} not found.")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent Card not found")
-    # Use the schema to format the response
-    return schemas.AgentCardRead.model_validate(db_card)
+
+    # --- MODIFIED: Build dict manually before returning ---
+    response_dict = _build_agent_card_read_dict(db_card)
+    # Pydantic validates the dict when FastAPI returns it based on response_model
+    return response_dict # type: ignore
+    # --- END MODIFIED ---
 
 
 # --- PUT /agent-cards/{card_id} ---
@@ -151,7 +180,7 @@ async def update_agent_card(
     card_in: schemas.AgentCardUpdate,
     db: AsyncSession = Depends(database.get_db),
     current_developer: models.Developer = Depends(security.get_current_developer),
-):
+) -> schemas.AgentCardRead: # Return type hint remains the schema
     """
     Endpoint to update an Agent Card.
 
@@ -159,6 +188,7 @@ async def update_agent_card(
     Validates `card_data` if provided.
     """
     logger.info(f"Received request to update agent card {card_id} from developer ID: {current_developer.id}")
+    # Fetch card with developer loaded for ownership check and response schema
     db_card = await agent_card.get_agent_card(db=db, card_id=card_id)
     if db_card is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent Card not found")
@@ -170,15 +200,19 @@ async def update_agent_card(
 
     try:
         updated_card = await agent_card.update_agent_card(db=db, db_card=db_card, card_update=card_in)
-        if updated_card is None:
-             # Should ideally not happen if ValueError is raised correctly from CRUD
-             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update agent card in database.",
-            )
-        return schemas.AgentCardRead.model_validate(updated_card)
+
+        # Ensure developer relationship is loaded for the response schema
+        # Refresh should handle this, but check if needed
+        if updated_card and (not hasattr(updated_card, 'developer') or not updated_card.developer):
+             logger.info(f"Refreshing developer relationship for updated card {updated_card.id}")
+             await db.refresh(updated_card, attribute_names=['developer'])
+
+        # --- MODIFIED: Build dict manually before returning ---
+        response_dict = _build_agent_card_read_dict(updated_card)
+        # Pydantic validates the dict when FastAPI returns it based on response_model
+        return response_dict # type: ignore
+        # --- END MODIFIED ---
     except ValueError as e:
-        # Catch validation errors or DB errors raised from CRUD
         logger.warning(f"Failed to update agent card {card_id} due to validation/DB error: {e}")
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -193,6 +227,7 @@ async def update_agent_card(
 
 
 # --- DELETE /agent-cards/{card_id} ---
+# (Delete endpoint remains unchanged as it doesn't return the AgentCardRead schema)
 @router.delete(
     "/{card_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -211,7 +246,7 @@ async def delete_agent_card(
     Returns 204 No Content on success.
     """
     logger.info(f"Received request to deactivate agent card {card_id} from developer ID: {current_developer.id}")
-    # Fetch the card first to check ownership
+    # Fetch the card first to check ownership (developer relationship is loaded by get_agent_card)
     db_card = await agent_card.get_agent_card(db=db, card_id=card_id)
     if db_card is None:
         # Return 404 even if it existed but belonged to someone else,
@@ -231,6 +266,7 @@ async def delete_agent_card(
         # This might happen if the card was deleted between the get and delete calls,
         # or if there was a DB error during the update.
         # Check if it still exists but failed to update
+        # Re-fetch to check current state
         check_card = await agent_card.get_agent_card(db=db, card_id=card_id)
         if check_card and check_card.is_active:
              logger.error(f"Failed to deactivate agent card {card_id} due to a database error.")

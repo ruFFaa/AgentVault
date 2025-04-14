@@ -3,9 +3,14 @@ import uuid
 import math
 from typing import Optional, List, Dict, Any, Tuple
 
+# --- MODIFIED: Import select ---
 from sqlalchemy import select, func, or_
+# --- END MODIFIED ---
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+# --- MODIFIED: Import selectinload ---
+from sqlalchemy.orm import selectinload
+# --- END MODIFIED ---
 from pydantic import ValidationError as PydanticValidationError # To catch validation errors
 
 # Import local models and schemas with absolute imports
@@ -101,24 +106,38 @@ async def create_agent_card(
 
 async def get_agent_card(db: AsyncSession, card_id: uuid.UUID) -> Optional[models.AgentCard]:
     """
-    Retrieves a single Agent Card by its UUID.
+    Retrieves a single Agent Card by its UUID, eagerly loading the developer relationship.
 
     Args:
         db: The SQLAlchemy async session.
         card_id: The UUID of the agent card to retrieve.
 
     Returns:
-        The AgentCard database object if found, otherwise None.
+        The AgentCard database object with the developer loaded if found, otherwise None.
     """
-    logger.debug(f"Fetching Agent Card with ID: {card_id}")
+    logger.debug(f"Fetching Agent Card with ID: {card_id}, eagerly loading developer.")
     try:
-        # db.get is efficient for primary key lookups
-        result = await db.get(models.AgentCard, card_id)
-        if result:
-            logger.debug(f"Found Agent Card: {result.name}")
+        # --- MODIFIED: Use select with options(selectinload(...)) ---
+        stmt = (
+            select(models.AgentCard)
+            .where(models.AgentCard.id == card_id)
+            .options(selectinload(models.AgentCard.developer))
+        )
+        result = await db.execute(stmt)
+        db_card = result.scalar_one_or_none()
+        # --- END MODIFIED ---
+
+        if db_card:
+            # --- MODIFIED: Log if developer was loaded (optional debug) ---
+            if db_card.developer:
+                logger.debug(f"Found Agent Card: {db_card.name} (Developer: {db_card.developer.name})")
+            else:
+                # This case shouldn't happen with eager loading unless the FK is somehow null or invalid
+                logger.warning(f"Found Agent Card {db_card.name} but developer relationship was not loaded/found.")
+            # --- END MODIFIED ---
         else:
             logger.debug(f"Agent Card with ID {card_id} not found.")
-        return result
+        return db_card
     except Exception as e:
         logger.error(f"Error fetching Agent Card {card_id}: {e}", exc_info=True)
         return None
