@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentVault Registry</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>AgentVault Registry</h1>
+    </header>
+    <main>
+        <section id="search-section">
+            <label for="search-input">Search Agents:</label>
+            <input type="search" id="search-input" placeholder="Enter name or description...">
+            <!-- Add TEE filter later -->
+        </section>
+        <section id="agent-list-section">
+            <h2>Discover Agents</h2>
+            <div id="agent-list-container">
+                <!-- Agent cards will be loaded here by JavaScript -->
+                <p>Loading agents...</p>
+            </div>
+            <div id="pagination-controls">
+                <!-- Pagination controls will be added here -->
+            </div>
+        </section>
+        <section id="agent-detail-section" style="display: none;">
+             <h2>Agent Details</h2>
+             <button id="back-to-list">Back to List</button>
+             <pre id="agent-detail-content"></pre>
+             <div id="agent-policies">
+                 <a id="privacy-policy-link" href="#" target="_blank" rel="noopener noreferrer" style="display: none;">Privacy Policy</a>
+                 <a id="terms-link" href="#" target="_blank" rel="noopener noreferrer" style="display: none;">Terms of Service</a>
+             </div>
+        </section>
+        <!-- Developer Portal Section (Placeholder for later) -->
+        <!--
+        <hr>
+        <section id="developer-portal-section">
+            <h2>Developer Portal</h2>
+            <p>(Login and card management UI will go here)</p>
+        </section>
+        -->
+    </main>
+    <footer>
+        <p>AgentVault - Open Source Agent Discovery</p>
+    </footer>
+    <script src="/static/script.js"></script>
+</body>
+</html>

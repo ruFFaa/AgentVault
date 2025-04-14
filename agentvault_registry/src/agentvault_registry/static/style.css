@@ -1,0 +1,123 @@
+body {
+    font-family: sans-serif;
+    line-height: 1.6;
+    margin: 20px;
+    background-color: #f4f4f4;
+    color: #333;
+}
+
+header, footer {
+    background-color: #333;
+    color: #fff;
+    padding: 10px 0;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+main {
+    background-color: #fff;
+    padding: 20px;
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+h1, h2 {
+    color: #333;
+}
+
+#search-section {
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #eee;
+}
+
+#search-section label {
+    margin-right: 10px;
+}
+
+#search-input {
+    padding: 8px;
+    min-width: 300px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+#agent-list-container .agent-card {
+    border: 1px solid #ddd;
+    padding: 15px;
+    margin-bottom: 15px;
+    border-radius: 4px;
+    background-color: #f9f9f9;
+}
+
+#agent-list-container .agent-card h3 {
+    margin-top: 0;
+    margin-bottom: 5px;
+}
+#agent-list-container .agent-card p {
+    margin-bottom: 10px;
+    color: #555;
+}
+#agent-list-container .agent-card button {
+    padding: 5px 10px;
+    cursor: pointer;
+    background-color: #555;
+    color: white;
+    border: none;
+    border-radius: 3px;
+}
+#agent-list-container .agent-card button:hover {
+    background-color: #333;
+}
+
+/* Styles for verified badge (simple text for now) */
+.verified-badge {
+    font-weight: bold;
+    color: green;
+    margin-left: 10px;
+    font-size: 0.9em;
+}
+
+#pagination-controls {
+    margin-top: 20px;
+    text-align: center;
+}
+
+#pagination-controls button {
+    padding: 8px 15px;
+    margin: 0 5px;
+    cursor: pointer;
+}
+
+#agent-detail-section {
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 1px solid #eee;
+}
+
+#agent-detail-section pre {
+    background-color: #eee;
+    padding: 15px;
+    border-radius: 4px;
+    white-space: pre-wrap; /* Wrap long lines */
+    word-wrap: break-word; /* Break long words */
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+#agent-policies a {
+    display: inline-block;
+    margin-right: 15px;
+    margin-top: 10px;
+}
+
+#back-to-list {
+    margin-bottom: 15px;
+    padding: 8px 15px;
+    cursor: pointer;
+}
+
+footer p {
+    margin: 0;
+    font-size: 0.9em;
+}

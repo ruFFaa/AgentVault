@@ -1,6 +1,12 @@
 import logging
 from fastapi import FastAPI, Request, Response, status # Added Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+# --- ADDED: StaticFiles and HTMLResponse ---
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
+from pathlib import Path
+# --- END ADDED ---
+
 
 # --- Rate Limiting Imports ---
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -20,6 +26,11 @@ from agentvault_registry.routers import agent_cards, utils
 # --- Logging Setup ---
 # Basic configuration is done in config.py upon import
 logger = logging.getLogger(__name__)
+
+# --- ADDED: Define path to static files ---
+STATIC_DIR = Path(__file__).parent / "static"
+# --- END ADDED ---
+
 
 # --- Rate Limiter Setup ---
 # Define default rate limits (adjust as needed)
@@ -83,14 +94,43 @@ app.include_router(
 # app.include_router(developers.router, prefix=settings.API_V1_STR + "/developers", tags=["Developers"])
 
 
+# --- ADDED: Mount Static Files ---
+# This serves files from the 'static' directory under the path '/static'
+# check_dir=False prevents FastAPI from raising an error if the dir doesn't exist on startup
+# (though it should exist based on previous steps)
+if STATIC_DIR.is_dir():
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    logger.info(f"Mounted static files directory: {STATIC_DIR}")
+else:
+    logger.error(f"Static files directory not found at: {STATIC_DIR}. UI will not be served correctly.")
+# --- END ADDED ---
+
+
 # --- Root Endpoint ---
-@app.get("/", tags=["Status"])
-# Apply rate limit decorator (optional, middleware covers all by default)
-# @limiter.limit("5/second") # Example of route-specific limit
-async def read_root(request: Request): # Inject Request to use limiter state if needed
-    """Provides a simple status message for the API root."""
-    logger.info("Root endpoint '/' accessed.")
-    return {"message": f"Welcome to the {settings.PROJECT_NAME}"}
+@app.get("/", tags=["Status"], include_in_schema=False) # Hide from API docs
+async def read_root_redirect():
+    """Redirects root path to the UI."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/ui")
+
+
+# --- ADDED: UI Endpoint ---
+@app.get("/ui", response_class=HTMLResponse, tags=["UI"], include_in_schema=False)
+async def read_ui():
+    """Serves the main HTML file for the Web UI."""
+    index_path = STATIC_DIR / "index.html"
+    if not index_path.is_file():
+        logger.error(f"index.html not found in static directory: {STATIC_DIR}")
+        raise HTTPException(status_code=404, detail="UI index file not found.")
+    try:
+        with open(index_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        logger.exception(f"Error reading index.html: {e}")
+        raise HTTPException(status_code=500, detail="Could not load UI.")
+# --- END ADDED ---
+
 
 # --- Health Check Endpoint ---
 @app.get("/health", tags=["Status"])

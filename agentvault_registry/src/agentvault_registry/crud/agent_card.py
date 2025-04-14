@@ -1,6 +1,10 @@
 import logging
 import uuid
 import math
+# --- ADDED: datetime and os imports ---
+import datetime
+import os
+# --- END ADDED ---
 from typing import Optional, List, Dict, Any, Tuple
 
 # --- MODIFIED: Import select ---
@@ -29,6 +33,37 @@ except ImportError:
 
 
 logger = logging.getLogger(__name__)
+
+# --- ADDED: Placeholder Data Generation ---
+# TODO: Remove this placeholder data once database population is working
+_placeholder_data_cache = {}
+def _get_placeholder_items():
+    global _placeholder_data_cache
+    if not _placeholder_data_cache:
+        logger.warning("!!! GENERATING PLACEHOLDER DATA !!!")
+        now = datetime.datetime.now(datetime.timezone.utc)
+        dev1 = models.Developer(id=1, name="Dev One", is_verified=True)
+        dev2 = models.Developer(id=2, name="Dev Two", is_verified=False)
+        items = [
+            models.AgentCard(
+                id=uuid.uuid4(), developer_id=1, name="Weather Agent (Placeholder)",
+                description="Provides weather forecasts.", is_active=True,
+                created_at=now, updated_at=now, card_data={"url": "http://weather.example"}, developer=dev1
+            ),
+            models.AgentCard(
+                id=uuid.uuid4(), developer_id=2, name="Summarizer Agent (Placeholder)",
+                description="Summarizes long texts.", is_active=True,
+                created_at=now, updated_at=now, card_data={"url": "http://summarizer.example", "privacyPolicyUrl": "http://summarizer.example/privacy"}, developer=dev2
+            ),
+             models.AgentCard(
+                id=uuid.uuid4(), developer_id=1, name="Inactive Agent (Placeholder)",
+                description="This one is inactive.", is_active=False,
+                created_at=now, updated_at=now, card_data={"url": "http://inactive.example", "termsOfServiceUrl": "http://inactive.example/terms"}, developer=dev1
+            ),
+        ]
+        _placeholder_data_cache = {item.id: item for item in items}
+    return _placeholder_data_cache
+# --- END Placeholder Data Generation ---
 
 
 async def create_agent_card(
@@ -116,6 +151,19 @@ async def get_agent_card(db: AsyncSession, card_id: uuid.UUID) -> Optional[model
         The AgentCard database object with the developer loaded if found, otherwise None.
     """
     logger.debug(f"Fetching Agent Card with ID: {card_id}, eagerly loading developer.")
+
+    # --- ADDED: Placeholder check ---
+    if os.environ.get("AGENTVAULT_USE_PLACEHOLDERS", "false").lower() == "true":
+        logger.warning(f"!!! RETURNING PLACEHOLDER DATA FOR get_agent_card ID: {card_id} !!!")
+        placeholder_items = _get_placeholder_items()
+        item = placeholder_items.get(card_id)
+        if item:
+            logger.debug(f"Found placeholder Agent Card: {item.name}")
+        else:
+            logger.debug(f"Placeholder Agent Card with ID {card_id} not found.")
+        return item
+    # --- END Placeholder check ---
+
     try:
         # --- MODIFIED: Use select with options(selectinload(...)) ---
         stmt = (
@@ -162,6 +210,29 @@ async def list_agent_cards(
     """
     logger.debug(f"Listing Agent Cards: skip={skip}, limit={limit}, active_only={active_only}, search='{search}'")
 
+    # --- MODIFIED: Placeholder Data Logic ---
+    if os.environ.get("AGENTVAULT_USE_PLACEHOLDERS", "false").lower() == "true": # Use env var to toggle
+        logger.warning("!!! RETURNING PLACEHOLDER DATA FOR list_agent_cards !!!")
+        placeholder_items_dict = _get_placeholder_items()
+        placeholder_items = list(placeholder_items_dict.values()) # Get list view
+
+        # Basic filtering for placeholders
+        filtered_items = placeholder_items
+        if active_only:
+            filtered_items = [item for item in filtered_items if item.is_active]
+        if search:
+            search_lower = search.lower()
+            filtered_items = [
+                item for item in filtered_items
+                if search_lower in item.name.lower() or (item.description and search_lower in item.description.lower())
+            ]
+
+        total_items = len(filtered_items)
+        paginated_items = filtered_items[skip : skip + limit]
+        return paginated_items, total_items
+    # --- END Placeholder Data Logic ---
+
+
     # Base statement
     base_stmt = select(models.AgentCard)
 
@@ -190,7 +261,19 @@ async def list_agent_cards(
     logger.debug(f"Total matching agent cards found: {total_items}")
 
     # Apply ordering, offset, and limit for the final result set
-    final_stmt = base_stmt.order_by(models.AgentCard.updated_at.desc()).offset(skip).limit(limit)
+    # --- MODIFIED: Eager load developer for list responses too (needed for summary later?) ---
+    # Although AgentCardSummary doesn't need it *yet*, it's often useful to load
+    # common relationships even for list views if they might be used soon.
+    # Let's add it here for consistency, can be removed if performance becomes an issue.
+    final_stmt = (
+        base_stmt
+        .options(selectinload(models.AgentCard.developer)) # Added eager load
+        .order_by(models.AgentCard.updated_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    # --- END MODIFIED ---
+
 
     try:
         result = await db.execute(final_stmt)
