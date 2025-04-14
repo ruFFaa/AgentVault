@@ -143,6 +143,10 @@ async def run_command(
 ):
     """
     Run a task on a specified remote agent using the A2A protocol.
+
+    Handles API Key and OAuth2 Client Credentials authentication based on the
+    Agent Card. Monitors task progress via Server-Sent Events (SSE).
+    Task states include: SUBMITTED, WORKING, INPUT_REQUIRED, COMPLETED, FAILED, CANCELED.
     """
     global terminate_requested # Allow modification by signal handler
     terminate_requested = False # Reset flag at start of command
@@ -320,7 +324,7 @@ async def run_command(
                     agent_card=agent_card, task_id=task_id, key_manager=manager
                 ):
                     # --- ADDED DEBUG PRINT ---
-                    print(f"DEBUG: Processing event type: {type(event)}")
+                    # print(f"DEBUG: Processing event type: {type(event)}") # Removed for clarity
                     # --- END ADDED ---
 
                     if terminate_requested:
@@ -340,7 +344,7 @@ async def run_command(
                         if event.message:
                             status_msg += f" - {event.message}"
                         # --- ADDED DEBUG PRINT ---
-                        print(f"DEBUG: Displaying TaskStatusUpdateEvent: {status_msg}")
+                        # print(f"DEBUG: Displaying TaskStatusUpdateEvent: {status_msg}") # Removed for clarity
                         # --- END ADDED ---
                         utils.display_info(status_msg)
                         if event.state in [av_models.TaskState.COMPLETED, av_models.TaskState.FAILED, av_models.TaskState.CANCELED]:
@@ -402,7 +406,7 @@ async def run_command(
 
             except av_exceptions.A2AError as e:
                 # --- ADDED DEBUG PRINT ---
-                print(f"DEBUG: Caught A2AError: {e}")
+                # print(f"DEBUG: Caught A2AError: {e}") # Removed for clarity
                 # --- END ADDED ---
                 utils.display_error(f"A2A communication error: {e}")
                 logger.exception("A2AError during task execution")
