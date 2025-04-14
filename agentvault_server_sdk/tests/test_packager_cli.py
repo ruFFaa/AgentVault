@@ -46,9 +46,7 @@ def test_package_agent_dockerfile_generation(tmp_path: Path):
     assert f'pip install --no-cache-dir -r requirements.txt' in dockerfile_content
     assert f'COPY --from=builder /usr/local/lib/python{python_major_minor}/site-packages' in dockerfile_content
     assert 'USER appuser' in dockerfile_content
-    # --- MODIFIED: Use correct variable name ---
     assert f'EXPOSE {port}' in dockerfile_content
-    # --- END MODIFIED ---
     assert f'CMD ["uvicorn", "{entrypoint}", "--host", "0.0.0.0", "--port", "{port}"]' in dockerfile_content
 
     # Check .dockerignore
@@ -161,4 +159,34 @@ def test_package_agent_default_requirements_missing(tmp_path: Path, monkeypatch,
     # Assert warning is in caplog.text
     assert "Default requirements.txt not found, skipping copy" in caplog.text
 
-# TODO: Add tests for .dockerignore generation (This test adds the check to the main generation test)
+# --- Test for agent-card argument ---
+# --- MODIFIED: Use caplog fixture ---
+def test_package_agent_with_agent_card(tmp_path: Path, caplog):
+    """Test providing the --agent-card option."""
+    caplog.set_level(logging.INFO) # Capture INFO level logs for this test
+    # --- END MODIFIED ---
+    output_dir = tmp_path / "package_output_card"
+    entrypoint = "my_agent.main:app"
+    card_file = tmp_path / "my-card.json"
+    card_content = '{"schemaVersion": "1.0", "name": "Test"}' # Minimal valid content
+    card_file.write_text(card_content)
+
+    result = runner.invoke(
+        app,
+        [
+            "--output-dir", str(output_dir),
+            "--entrypoint", entrypoint,
+            "--agent-card", str(card_file),
+        ],
+        catch_exceptions=False
+    )
+
+    assert result.exit_code == 0
+    # Verify the card was copied
+    copied_card_path = output_dir / card_file.name
+    assert copied_card_path.is_file(), "Agent card file was not copied"
+    assert copied_card_path.read_text() == card_content
+    # --- MODIFIED: Assert against caplog.text ---
+    assert f"Copied {card_file}" in caplog.text
+    assert f"to {copied_card_path}" in caplog.text
+    # --- END MODIFIED ---

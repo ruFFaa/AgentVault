@@ -63,7 +63,7 @@ EXPOSE {PORT}
 CMD ["uvicorn", "{ENTRYPOINT_MODULE_PATH}", "--host", "0.0.0.0", "--port", "{PORT}"]
 """
 
-# --- ADDED: .dockerignore Content ---
+# --- .dockerignore Content ---
 DOCKERIGNORE_CONTENT = """\
 # Git
 .git
@@ -110,7 +110,6 @@ temp/
 .idea/
 *.sublime-*
 """
-# --- END ADDED ---
 
 
 @app.command()
@@ -162,10 +161,23 @@ def package_agent(
         "/app",
         "--app-dir",
         help="Directory inside the container where the application code will reside."
+    ),
+    # --- ADDED: agent-card argument ---
+    agent_card_path: Optional[Path] = typer.Option(
+        None,
+        "--agent-card",
+        "-c",
+        help="Path to the agent-card.json file (optional, will be copied if provided).",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
     )
+    # --- END ADDED ---
 ):
     """
-    Generates a Dockerfile and .dockerignore, and copies requirements
+    Generates a Dockerfile, .dockerignore, and copies requirements/agent-card
     for packaging an AgentVault agent.
     """
     typer.echo(f"Starting Dockerfile generation for entrypoint '{entrypoint_path}'...")
@@ -216,6 +228,20 @@ def package_agent(
             logger.exception(f"Failed to copy requirements file.")
             raise typer.Exit(code=1)
 
+    # --- ADDED: Copy agent card if provided ---
+    if agent_card_path:
+        dest_card_path = output_dir / agent_card_path.name # Use original filename
+        try:
+            shutil.copyfile(agent_card_path, dest_card_path)
+            typer.echo(f"Copied agent card file to: {dest_card_path}")
+            logger.info(f"Copied {agent_card_path} to {dest_card_path}")
+            # TODO: Add logic later to potentially *use* the card data during packaging?
+        except Exception as e:
+            typer.secho(f"Error copying agent card file from '{agent_card_path}' to '{dest_card_path}': {e}", fg=typer.colors.YELLOW)
+            logger.warning(f"Failed to copy agent card file: {e}", exc_info=True)
+            # Non-fatal, just warn if card copy fails
+    # --- END ADDED ---
+
 
     # --- Dockerfile Generation ---
     python_version_tag = f"{python_version}-{base_image_suffix}"
@@ -249,7 +275,7 @@ def package_agent(
         typer.secho(f"Error writing Dockerfile to '{dockerfile_path}': {e}", fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
-    # --- ADDED: .dockerignore Generation ---
+    # --- .dockerignore Generation ---
     dockerignore_path = output_dir / ".dockerignore"
     try:
         dockerignore_path.write_text(DOCKERIGNORE_CONTENT, encoding="utf-8")
@@ -257,9 +283,7 @@ def package_agent(
         logger.info(f"Generated .dockerignore at {dockerignore_path}")
     except IOError as e:
         typer.secho(f"Error writing .dockerignore to '{dockerignore_path}': {e}", fg=typer.colors.YELLOW)
-        # Continue even if .dockerignore fails, but log warning
         logger.warning(f"Failed to write .dockerignore file: {e}", exc_info=True)
-    # --- END ADDED ---
 
     # TODO: Add optional docker build step (Task 2.2.A.7)
 
