@@ -2,22 +2,20 @@ import pytest
 import uuid
 import datetime
 from unittest.mock import patch, MagicMock, ANY, AsyncMock
-# --- MODIFIED: Import List ---
-from typing import Optional, List, Dict, Any, Tuple
-# --- END MODIFIED ---
+from typing import Optional, List, Dict, Any, Tuple, AsyncGenerator # Added AsyncGenerator
 
 from fastapi.testclient import TestClient # Import sync client
 from fastapi import status
 import pydantic # Import pydantic for ValidationError
 
 # Imports are now relative to the src dir added to path by pytest.ini
-from agentvault_registry import schemas, models
+from agentvault_registry import schemas, models, security # Import security for optional dep
 
 # Use fixtures defined in conftest.py implicitly
 API_BASE_URL = "/api/v1/agent-cards"
 
 # --- Test POST /agent-cards/ ---
-
+# ... (create tests remain the same) ...
 def test_create_agent_card_success(
     sync_test_client: TestClient,
     mock_db_session: MagicMock,
@@ -151,7 +149,7 @@ def test_list_agent_cards_success(
     assert response_data["pagination"]["offset"] == 0
 
     mock_list.assert_awaited_once_with(
-        db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=None
+        db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=None, developer_id=None
     )
 
 
@@ -181,17 +179,16 @@ def test_list_agent_cards_with_params(
     if search is not None:
         query_params["search"] = search
     if tags is not None:
-        # TestClient handles list params correctly when passed as a list
         query_params['tags'] = tags
 
     response = sync_test_client.get(API_BASE_URL + "/", params=query_params) # Use query_params
 
     assert response.status_code == status.HTTP_200_OK
     mock_list.assert_awaited_once_with(
-        db=mock_db_session, skip=skip, limit=limit, active_only=active_only, search=search, tags=tags
+        db=mock_db_session, skip=skip, limit=limit, active_only=active_only, search=search, tags=tags, developer_id=None
     )
 
-# --- ADDED: Tag Filtering Tests ---
+# --- Tag Filtering Tests ---
 def test_list_agent_cards_filter_single_tag(sync_test_client: TestClient, mock_db_session: MagicMock, mocker):
     """Test filtering by a single tag."""
     mock_list = mocker.patch("agentvault_registry.crud.agent_card.list_agent_cards", new_callable=AsyncMock, return_value=([], 0))
@@ -200,7 +197,7 @@ def test_list_agent_cards_filter_single_tag(sync_test_client: TestClient, mock_d
     response = sync_test_client.get(API_BASE_URL + "/", params={"tags": tag_to_filter})
 
     assert response.status_code == status.HTTP_200_OK
-    mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=[tag_to_filter])
+    mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=[tag_to_filter], developer_id=None)
 
 def test_list_agent_cards_filter_multiple_tags(sync_test_client: TestClient, mock_db_session: MagicMock, mocker):
     """Test filtering by multiple tags."""
@@ -210,7 +207,7 @@ def test_list_agent_cards_filter_multiple_tags(sync_test_client: TestClient, moc
     response = sync_test_client.get(API_BASE_URL + "/", params={"tags": tags_to_filter}) # Pass list
 
     assert response.status_code == status.HTTP_200_OK
-    mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=tags_to_filter)
+    mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=tags_to_filter, developer_id=None)
 
 def test_list_agent_cards_filter_tag_no_match(sync_test_client: TestClient, mock_db_session: MagicMock, mocker):
     """Test filtering by a tag that returns no results."""
@@ -223,7 +220,7 @@ def test_list_agent_cards_filter_tag_no_match(sync_test_client: TestClient, mock
     resp_data = response.json()
     assert resp_data["items"] == []
     assert resp_data["pagination"]["total_items"] == 0
-    mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=[tag_to_filter])
+    mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=[tag_to_filter], developer_id=None)
 
 def test_list_agent_cards_filter_tags_and_search(sync_test_client: TestClient, mock_db_session: MagicMock, mocker):
     """Test filtering by both tags and search term."""
@@ -234,12 +231,75 @@ def test_list_agent_cards_filter_tags_and_search(sync_test_client: TestClient, m
     response = sync_test_client.get(API_BASE_URL + "/", params={"tags": tags_to_filter, "search": search_term})
 
     assert response.status_code == status.HTTP_200_OK
-    mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=search_term, tags=tags_to_filter)
-# --- END ADDED ---
+    mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=search_term, tags=tags_to_filter, developer_id=None)
+
+# --- Tests for owned_only filter ---
+def test_list_agent_cards_owned_only_success(
+    sync_test_client: TestClient, mock_db_session: MagicMock, mock_developer: models.Developer,
+    # --- MODIFIED: Use the correct optional override fixture ---
+    override_get_current_developer_optional: None,
+    # --- END MODIFIED ---
+    mocker
+):
+    """Test filtering by owned_only=true with valid authentication."""
+    mock_list = mocker.patch("agentvault_registry.crud.agent_card.list_agent_cards", new_callable=AsyncMock, return_value=([], 0))
+
+    # --- ADDED: Configure mock DB execute result for the auth check ---
+    # This simulates get_developer_by_plain_api_key finding the developer
+    async def mock_dev_scalar_gen():
+        yield mock_developer
+    mock_db_session.execute.return_value.scalars.return_value = mock_dev_scalar_gen()
+    # --- END ADDED ---
+
+    response = sync_test_client.get(API_BASE_URL + "/", params={"owned_only": True}, headers={"X-Api-Key": "fake-key"})
+
+    assert response.status_code == status.HTTP_200_OK # Expect 200 now
+    mock_list.assert_awaited_once_with(
+        db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=None, developer_id=mock_developer.id # Check developer_id is passed
+    )
+
+def test_list_agent_cards_owned_only_no_auth(
+    sync_test_client: TestClient, mock_db_session: MagicMock,
+    # --- MODIFIED: Use the correct optional override fixture ---
+    override_get_current_developer_optional_none: None,
+     # --- END MODIFIED ---
+    mocker
+):
+    """Test filtering by owned_only=true without authentication."""
+    mock_list = mocker.patch("agentvault_registry.crud.agent_card.list_agent_cards") # No need for AsyncMock here
+
+    response = sync_test_client.get(API_BASE_URL + "/", params={"owned_only": True}) # No X-Api-Key header
+
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert "Authentication required" in response.json()["detail"]
+    mock_list.assert_not_called() # CRUD should not be called
+
+def test_list_agent_cards_owned_only_false_with_auth(
+    sync_test_client: TestClient, mock_db_session: MagicMock, mock_developer: models.Developer,
+    # --- MODIFIED: Use the correct optional override fixture ---
+    override_get_current_developer_optional: None,
+    # --- END MODIFIED ---
+    mocker
+):
+    """Test owned_only=false with authentication (should ignore auth)."""
+    mock_list = mocker.patch("agentvault_registry.crud.agent_card.list_agent_cards", new_callable=AsyncMock, return_value=([], 0))
+
+    # --- ADDED: Configure mock DB execute result for the auth check (even though not used for filtering) ---
+    async def mock_dev_scalar_gen():
+        yield mock_developer
+    mock_db_session.execute.return_value.scalars.return_value = mock_dev_scalar_gen()
+    # --- END ADDED ---
+
+    response = sync_test_client.get(API_BASE_URL + "/", params={"owned_only": False}, headers={"X-Api-Key": "fake-key"})
+
+    assert response.status_code == status.HTTP_200_OK
+    mock_list.assert_awaited_once_with(
+        db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=None, developer_id=None # developer_id should be None
+    )
 
 
 # --- Test GET /agent-cards/{card_id} (Read) ---
-
+# ... (get, update, delete tests remain the same) ...
 def test_get_agent_card_success(
     sync_test_client: TestClient,
     mock_db_session: MagicMock,

@@ -117,3 +117,27 @@ async def get_current_developer(
 
     logger.debug(f"Successfully authenticated developer ID: {developer.id}")
     return developer
+
+# --- ADDED: Optional Developer Dependency ---
+async def get_current_developer_optional(
+    api_key: Optional[str] = Depends(api_key_header),
+    db: AsyncSession = Depends(get_db)
+) -> Optional[models.Developer]:
+    """
+    FastAPI dependency that attempts to get the current developer based on
+    the X-Api-Key header, but returns None if the header is missing or invalid,
+    instead of raising an exception.
+    """
+    if not api_key:
+        logger.debug("Optional authentication: X-Api-Key header missing.")
+        return None
+
+    developer = await get_developer_by_plain_api_key(db=db, plain_key=api_key)
+
+    if developer is None:
+        logger.debug(f"Optional authentication: Invalid API Key provided (Key starts with: {api_key[:6]}...).")
+        return None
+
+    logger.debug(f"Optional authentication successful for developer ID: {developer.id}")
+    return developer
+# --- END ADDED ---

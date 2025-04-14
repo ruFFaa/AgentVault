@@ -5,11 +5,8 @@ import datetime
 import os
 from typing import Optional, List, Dict, Any, Tuple
 
-# --- MODIFIED: Import select, JSON operators ---
 from sqlalchemy import select, func, or_
-# Assuming PostgreSQL/JSONB for contains operator. Import specific types if needed.
 from sqlalchemy.dialects.postgresql import JSONB # Or just JSON if standard
-# --- END MODIFIED ---
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -181,7 +178,8 @@ async def get_agent_card(db: AsyncSession, card_id: uuid.UUID) -> Optional[model
 
 async def list_agent_cards(
     db: AsyncSession, skip: int = 0, limit: int = 100, active_only: bool = True,
-    search: Optional[str] = None, tags: Optional[List[str]] = None # Added tags parameter
+    search: Optional[str] = None, tags: Optional[List[str]] = None,
+    developer_id: Optional[int] = None # Added developer_id parameter
 ) -> Tuple[List[models.AgentCard], int]:
     """
     Retrieves a list of Agent Cards with pagination and optional filtering.
@@ -193,12 +191,13 @@ async def list_agent_cards(
         active_only: If True, only return cards where is_active is True.
         search: Optional search string to filter by name or description.
         tags: Optional list of tags to filter by (requires all tags).
+        developer_id: Optional developer ID to filter by owner.
 
     Returns:
         A tuple containing a list of AgentCard database objects and the total count
         of matching items before pagination.
     """
-    logger.debug(f"Listing Agent Cards: skip={skip}, limit={limit}, active_only={active_only}, search='{search}', tags={tags}")
+    logger.debug(f"Listing Agent Cards: skip={skip}, limit={limit}, active_only={active_only}, search='{search}', tags={tags}, developer_id={developer_id}")
 
     if os.environ.get("AGENTVAULT_USE_PLACEHOLDERS", "false").lower() == "true":
         logger.warning("!!! RETURNING PLACEHOLDER DATA FOR list_agent_cards !!!")
@@ -215,13 +214,15 @@ async def list_agent_cards(
                 item for item in filtered_items
                 if search_lower in item.name.lower() or (item.description and search_lower in item.description.lower())
             ]
-        # --- ADDED: Placeholder tag filtering ---
         if tags:
             tags_set = set(tags)
             filtered_items = [
                 item for item in filtered_items
                 if isinstance(item.card_data.get("tags"), list) and tags_set.issubset(set(item.card_data["tags"]))
             ]
+        # --- ADDED: Placeholder developer filtering ---
+        if developer_id is not None:
+            filtered_items = [item for item in filtered_items if item.developer_id == developer_id]
         # --- END ADDED ---
 
         total_items = len(filtered_items)
@@ -243,26 +244,17 @@ async def list_agent_cards(
                 models.AgentCard.description.ilike(search_term)
             )
         )
-    # --- ADDED: Tag filtering logic ---
     if tags:
-        # Ensure tags is a list and not empty
         if isinstance(tags, list) and tags:
-            # Use JSONB containment operator `@>` assuming card_data is JSONB
-            # This checks if the 'tags' array within card_data contains all elements in the 'tags' list parameter
-            # Note: Requires card_data['tags'] to be a JSON array in the DB.
-            # Cast the Python list `tags` to a JSONB array for the comparison.
-            # The specific cast might depend on the exact JSON type handling in your SQLAlchemy setup.
-            # Using `contains` assumes the DB column is JSONB and the input is compatible.
-            # If using standard JSON, a different approach like json_path_exists might be needed per tag.
             try:
-                # Attempt using the contains operator (preferred for JSONB arrays)
-                # We cast the card_data->'tags' path to JSONB explicitly if needed by the dialect
                 base_stmt = base_stmt.where(models.AgentCard.card_data['tags'].astext.cast(JSONB).contains(tags))
                 logger.debug(f"Applied tag filter using JSONB contains: {tags}")
             except Exception as json_err:
-                # Fallback or log error if contains operator fails (e.g., not JSONB, wrong format)
                 logger.warning(f"Could not apply JSONB @> operator for tag filtering (maybe not JSONB or data format issue?): {json_err}. Skipping tag filter.")
-                # Optionally, implement a slower json_each based filter here if needed as fallback
+    # --- ADDED: Developer ID filtering ---
+    if developer_id is not None:
+        base_stmt = base_stmt.where(models.AgentCard.developer_id == developer_id)
+        logger.debug(f"Applied developer ID filter: {developer_id}")
     # --- END ADDED ---
 
     # Get total count matching filters *before* applying limit/offset

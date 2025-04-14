@@ -81,16 +81,22 @@ async def get_developer_by_plain_api_key(db: AsyncSession, plain_key: str) -> Op
     if not plain_key:
         return None
 
+    all_developers: list[models.Developer] = [] # Define type hint
     try:
-        result = await db.execute(select(models.Developer))
-        all_developers = result.scalars().all()
+        stmt = select(models.Developer)
+        result = await db.execute(stmt)
+        # --- MODIFIED: Use async list comprehension ---
+        all_developers = [dev async for dev in result.scalars()]
+        # --- END MODIFIED ---
     except Exception as e:
         logger.error(f"Failed to query developers for API key check: {e}", exc_info=True)
         return None
 
     logger.debug(f"Checking plain key against {len(all_developers)} developer hashes.")
     for developer in all_developers:
-        if security.verify_api_key(plain_key, developer.api_key_hash):
+        # --- ADDED: Ensure hash comparison happens ---
+        if developer.api_key_hash and security.verify_api_key(plain_key, developer.api_key_hash):
+        # --- END ADDED ---
             logger.info(f"API key verified for developer ID: {developer.id}, Name: {developer.name}")
             return developer
 

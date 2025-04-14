@@ -1,28 +1,20 @@
 import logging
 import uuid
 import math
-# --- ADDED: datetime and os imports ---
 import datetime
 import os
-# --- END ADDED ---
-# --- MODIFIED: Import List ---
 from typing import Optional, List, Dict, Any, Tuple
-# --- END MODIFIED ---
 
-# --- MODIFIED: Import select ---
 from sqlalchemy import select, func, or_
-# --- END MODIFIED ---
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-# --- MODIFIED: Import selectinload ---
 from sqlalchemy.orm import selectinload
+
+# --- MODIFIED: Import APIRouter earlier ---
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
 # --- END MODIFIED ---
 from pydantic import ValidationError as PydanticValidationError # To catch validation errors
-
-# --- ADDED: Import APIRouter ---
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
-# --- END ADDED ---
-
 
 # Import local dependencies with absolute imports
 from agentvault_registry import schemas, models, database, security
@@ -42,9 +34,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# --- MODIFIED: Instantiate router BEFORE first use ---
 router = APIRouter()
-# --- END MODIFIED ---
 
 # --- Helper Function to build response dict ---
 def _build_agent_card_read_dict(db_card: models.AgentCard) -> dict:
@@ -123,7 +113,7 @@ async def submit_agent_card(
     "/",
     response_model=schemas.AgentCardListResponse,
     summary="List Agent Cards",
-    description="Retrieves a paginated list of active Agent Cards, optionally filtered by search query or tags.",
+    description="Retrieves a paginated list of active Agent Cards, optionally filtered by search query, tags, or ownership.",
 )
 async def list_agent_cards(
     db: AsyncSession = Depends(database.get_db),
@@ -135,20 +125,35 @@ async def list_agent_cards(
         max_length=100, # Limit search term length
         description="Search term to filter by name or description (case-insensitive, max 100 chars)."
     ),
-    # Added tags query parameter
     tags: Optional[List[str]] = Query(
         None,
         description="List of tags to filter by (agents must have ALL specified tags)."
-    )
+    ),
+    # --- ADDED: owned_only parameter and optional developer dependency ---
+    owned_only: bool = Query(False, description="If true, only return cards owned by the authenticated developer (requires authentication)."),
+    current_developer: Optional[models.Developer] = Depends(security.get_current_developer_optional)
+    # --- END ADDED ---
 ):
     """
     Public endpoint to list and search for Agent Cards.
+    Can optionally filter by owned cards if authenticated.
     """
-    # Pass tags parameter
-    logger.info(f"Listing agent cards with skip={skip}, limit={limit}, active_only={active_only}, search='{search}', tags={tags}")
+    developer_id_filter: Optional[int] = None
+    if owned_only:
+        if current_developer is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required to list owned agent cards."
+            )
+        developer_id_filter = current_developer.id
+        logger.info(f"Listing agent cards for owner ID: {developer_id_filter}, skip={skip}, limit={limit}, active_only={active_only}, search='{search}', tags={tags}")
+    else:
+        logger.info(f"Listing public agent cards with skip={skip}, limit={limit}, active_only={active_only}, search='{search}', tags={tags}")
+
     try:
         items, total_items = await agent_card.list_agent_cards(
-            db=db, skip=skip, limit=limit, active_only=active_only, search=search, tags=tags # Pass tags here
+            db=db, skip=skip, limit=limit, active_only=active_only, search=search, tags=tags,
+            developer_id=developer_id_filter # Pass filter value
         )
 
         # Calculate pagination details
