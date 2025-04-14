@@ -93,3 +93,18 @@ class DeveloperRead(BaseModel):
 class DeveloperCreateResponse(DeveloperRead):
     """Schema for response after creating a developer, including the plain API key."""
     api_key: str = Field(..., description="The generated plain-text API key. Store this securely!")
+
+# --- ADDED: Validation Schemas ---
+class AgentCardValidationRequest(BaseModel):
+    """Schema for requesting validation of Agent Card data."""
+    card_data: Dict[str, Any] = Field(
+        ...,
+        description="The Agent Card JSON object to validate."
+    )
+
+class AgentCardValidationResponse(BaseModel):
+    """Schema for the response of an Agent Card validation request."""
+    is_valid: bool = Field(..., description="Indicates whether the provided card data is valid according to the schema.")
+    detail: Optional[str] = Field(None, description="Provides details about validation errors if is_valid is False.")
+    validated_card_data: Optional[Dict[str, Any]] = Field(None, description="The validated and potentially normalized card data if is_valid is True (optional).")
+# --- END ADDED ---

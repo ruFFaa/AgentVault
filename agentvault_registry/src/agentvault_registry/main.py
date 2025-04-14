@@ -12,7 +12,10 @@ from slowapi.middleware import SlowAPIMiddleware
 # Import settings - this also triggers loading from .env
 from agentvault_registry.config import settings
 # Import the router
-from agentvault_registry.routers import agent_cards
+# --- MODIFIED: Import utils router ---
+from agentvault_registry.routers import agent_cards, utils
+# --- END MODIFIED ---
+
 
 # --- Logging Setup ---
 # Basic configuration is done in config.py upon import
@@ -67,6 +70,14 @@ app.include_router(
     prefix=settings.API_V1_STR + "/agent-cards", # Set the base path for these endpoints
     tags=["Agent Cards"] # Tag for OpenAPI documentation grouping
 )
+# --- ADDED: Include utils router ---
+app.include_router(
+    utils.router,
+    prefix=settings.API_V1_STR + "/utils",
+    tags=["Utilities"]
+)
+# --- END ADDED ---
+
 # Placeholder: Import and include other routers later
 # from .routers import developers # Example
 # app.include_router(developers.router, prefix=settings.API_V1_STR + "/developers", tags=["Developers"])
