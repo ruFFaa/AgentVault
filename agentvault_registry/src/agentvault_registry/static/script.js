@@ -2,28 +2,31 @@ console.log("AgentVault Registry UI Script Loaded.");
 
 const API_BASE_PATH = "/api/v1";
 let currentPage = 1;
-let currentLimit = 100;
+let currentLimit = 100; // Keep default limit reasonable
 let currentSearch = '';
+let searchTimeout; // For debouncing
 
 document.addEventListener('DOMContentLoaded', () => {
     console.log("DOM fully loaded and parsed.");
-    fetchAgentCards(); // Load initial list
+    fetchAgentCards(); // Load initial list (will use currentSearch='')
 
     const backButton = document.getElementById('back-to-list');
     if (backButton) {
         backButton.addEventListener('click', showListView);
     }
 
+    // Search Input Listener
     const searchInput = document.getElementById('search-input');
-    let searchTimeout;
     if (searchInput) {
         searchInput.addEventListener('input', (e) => {
             clearTimeout(searchTimeout);
-            currentSearch = e.target.value;
+            const searchTerm = e.target.value;
             searchTimeout = setTimeout(() => {
+                console.log(`Debounced search triggered for: '${searchTerm}'`);
+                currentSearch = searchTerm;
                 currentPage = 1;
                 fetchAgentCards(0, currentLimit, currentSearch);
-            }, 300);
+            }, 300); // 300ms delay
         });
     }
 });
@@ -48,7 +51,7 @@ function showDetailView() {
     if (searchSection) searchSection.style.display = 'none';
 }
 
-async function fetchAgentCards(offset = 0, limit = 100, search = '') {
+async function fetchAgentCards(offset = 0, limit = currentLimit, search = currentSearch) {
     console.log(`Fetching agents: offset=${offset}, limit=${limit}, search='${search}'`);
     const listContainer = document.getElementById('agent-list-container');
     if (listContainer) {
@@ -134,13 +137,12 @@ function renderAgentList(items, pagination) {
             <small>ID: ${escapeHTML(agent.id)}</small><br>
         `;
 
-        // Add verified badge (anticipating the field)
-        // Note: This field ('developer_is_verified') is NOT in the AgentCardSummary schema yet.
-        // We will need to adjust the API or schema later if we want this in the list view.
-        // For now, this check will likely always be false based on current API response.
+        // --- MODIFIED: Add verified badge (if data present) ---
+        // Note: AgentCardSummary currently doesn't include this field.
         if (agent.developer_is_verified === true) {
              cardHTML += `<span class="verified-badge">(Verified Developer)</span><br>`;
         }
+        // --- END MODIFIED ---
 
         // Add button
         cardHTML += `<button onclick="fetchAgentDetails('${escapeHTML(agent.id)}')">View Details</button>`;
@@ -215,7 +217,6 @@ function renderPagination(pagination) {
 }
 
 
-// --- MODIFIED: Implemented fetchAgentDetails ---
 async function fetchAgentDetails(cardId) {
     console.log(`Fetching details for card ID: ${cardId}`);
     const detailContentEl = document.getElementById('agent-detail-content');
@@ -267,9 +268,7 @@ async function fetchAgentDetails(cardId) {
         }
     }
 }
-// --- END MODIFIED ---
 
-// --- MODIFIED: Implemented renderAgentDetails ---
 function renderAgentDetails(card) {
     console.log("Rendering agent details");
     const detailContentEl = document.getElementById('agent-detail-content');
@@ -281,13 +280,14 @@ function renderAgentDetails(card) {
         return;
     }
 
-    // Basic Info
+    // --- MODIFIED: Add verified badge logic ---
     let headerInfo = `Developer ID: ${escapeHTML(card.developer_id)} `;
     if (card.developer_is_verified === true) {
         headerInfo += `<span class="verified-badge">(Verified Developer)</span>`;
     } else {
         headerInfo += `(Not Verified)`;
     }
+    // --- END MODIFIED ---
     headerInfo += `<br>Active: ${card.is_active ? 'Yes' : 'No'}`;
     headerInfo += `<br>Last Updated: ${escapeHTML(new Date(card.updated_at).toLocaleString())}`;
 
@@ -319,4 +319,3 @@ function renderAgentDetails(card) {
         termsLink.style.display = 'none';
     }
 }
-// --- END MODIFIED ---

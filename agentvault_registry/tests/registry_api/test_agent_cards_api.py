@@ -74,7 +74,6 @@ def test_create_agent_card_success(
     assert validated_response.card_data == valid_agent_card_data_dict
 
     # Assert mocks were called
-    # mock_validate_patch.assert_called_once_with(valid_agent_card_data_dict) # Validation happens inside CRUD now
     mock_create.assert_awaited_once()
     call_kwargs = mock_create.call_args.kwargs
     assert call_kwargs['db'] is mock_db_session
@@ -126,7 +125,6 @@ def test_create_agent_card_validation_fail(
 
 
 # --- Test GET /agent-cards/ (List) ---
-# (List tests remain unchanged)
 def test_list_agent_cards_success(
     sync_test_client: TestClient,
     mock_db_session: MagicMock,
@@ -152,23 +150,27 @@ def test_list_agent_cards_success(
     assert response_data["pagination"]["limit"] == 100
     assert response_data["pagination"]["offset"] == 0
 
-    mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=None)
+    # --- MODIFIED: Added tags=None ---
+    mock_list.assert_awaited_once_with(
+        db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=None
+    )
+    # --- END MODIFIED ---
 
 
 @pytest.mark.parametrize(
-    "skip, limit, active_only, search",
+    "skip, limit, active_only, search, tags", # Added tags parameter
     [
-        (10, 50, True, None),
-        (0, 25, False, None),
-        (0, 100, True, "test"),
-        (20, 10, False, "search term"),
+        (10, 50, True, None, None),
+        (0, 25, False, None, ["weather"]), # Test with tags
+        (0, 100, True, "test", None),
+        (20, 10, False, "search term", ["tool", "internal"]), # Test with multiple tags
     ]
 )
 def test_list_agent_cards_with_params(
     sync_test_client: TestClient,
     mock_db_session: MagicMock,
     mocker,
-    skip: int, limit: int, active_only: bool, search: Optional[str]
+    skip: int, limit: int, active_only: bool, search: Optional[str], tags: Optional[List[str]] # Added tags parameter
 ):
     """Test listing with various query parameters."""
     mock_list = mocker.patch(
@@ -179,13 +181,21 @@ def test_list_agent_cards_with_params(
     params = {"skip": skip, "limit": limit, "active_only": active_only}
     if search is not None:
         params["search"] = search
+    # --- ADDED: Handle tags parameter for query ---
+    query_params = params.copy() # Avoid modifying dict during iteration
+    if tags is not None:
+        # FastAPI handles list query params by repeating the key
+        query_params['tags'] = tags # Pass list directly to TestClient params
+    # --- END ADDED ---
 
-    response = sync_test_client.get(API_BASE_URL + "/", params=params)
+    response = sync_test_client.get(API_BASE_URL + "/", params=query_params) # Use query_params
 
     assert response.status_code == status.HTTP_200_OK
+    # --- MODIFIED: Added tags=tags ---
     mock_list.assert_awaited_once_with(
-        db=mock_db_session, skip=skip, limit=limit, active_only=active_only, search=search
+        db=mock_db_session, skip=skip, limit=limit, active_only=active_only, search=search, tags=tags
     )
+    # --- END MODIFIED ---
 
 
 # --- Test GET /agent-cards/{card_id} (Read) ---
@@ -285,9 +295,6 @@ def test_get_agent_card_not_found(
 
 @patch("agentvault_registry.crud.agent_card._agentvault_lib_available", True)
 def test_update_agent_card_success(
-    # --- MODIFIED: Removed mock_lib_available ---
-    # mock_lib_available,
-    # --- END MODIFIED ---
     sync_test_client: TestClient,
     mock_db_session: MagicMock,
     mock_developer: models.Developer,
@@ -343,7 +350,6 @@ def test_update_agent_card_success(
     assert validated_response.developer_is_verified is True
 
     mock_get.assert_awaited_once_with(db=mock_db_session, card_id=card_id)
-    # Validation happens inside the mocked update_agent_card, so we don't assert it here
     mock_update.assert_awaited_once()
     call_kwargs = mock_update.call_args.kwargs
     assert call_kwargs['db'] is mock_db_session
@@ -411,10 +417,8 @@ def test_update_agent_card_forbidden(
     mock_update.assert_not_called()
 
 
+@patch("agentvault_registry.crud.agent_card._agentvault_lib_available", True)
 def test_update_agent_card_validation_fail(
-    # --- MODIFIED: Removed mock_lib_available ---
-    # mock_lib_available,
-    # --- END MODIFIED ---
     sync_test_client: TestClient,
     mock_db_session: MagicMock,
     mock_developer: models.Developer, # Need owner for ownership check
@@ -454,7 +458,6 @@ def test_update_agent_card_validation_fail(
 
 
 # --- Test DELETE /agent-cards/{card_id} (Soft Delete) ---
-# (Delete tests remain unchanged)
 def test_delete_agent_card_success(
     sync_test_client: TestClient,
     mock_db_session: MagicMock,

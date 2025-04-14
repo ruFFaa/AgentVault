@@ -1,18 +1,50 @@
 import logging
 import uuid
 import math
-from typing import List, Optional
+# --- ADDED: datetime and os imports ---
+import datetime
+import os
+# --- END ADDED ---
+# --- MODIFIED: Import List ---
+from typing import Optional, List, Dict, Any, Tuple
+# --- END MODIFIED ---
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
+# --- MODIFIED: Import select ---
+from sqlalchemy import select, func, or_
+# --- END MODIFIED ---
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+# --- MODIFIED: Import selectinload ---
+from sqlalchemy.orm import selectinload
+# --- END MODIFIED ---
+from pydantic import ValidationError as PydanticValidationError # To catch validation errors
+
+# --- ADDED: Import APIRouter ---
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
+# --- END ADDED ---
+
 
 # Import local dependencies with absolute imports
 from agentvault_registry import schemas, models, database, security
 from agentvault_registry.crud import agent_card
 
+# Import the AgentCard model from the core library for validation
+try:
+    from agentvault import AgentCard as AgentCardModel
+    from agentvault import AgentCardValidationError # Although we catch Pydantic's directly
+    _agentvault_lib_available = True
+except ImportError:
+    AgentCardModel = None # type: ignore
+    AgentCardValidationError = Exception # Placeholder
+    _agentvault_lib_available = False
+    logging.warning("Could not import 'agentvault' library. Agent Card validation during CRUD operations will be skipped.")
+
+
 logger = logging.getLogger(__name__)
 
+# --- MODIFIED: Instantiate router BEFORE first use ---
 router = APIRouter()
+# --- END MODIFIED ---
 
 # --- Helper Function to build response dict ---
 def _build_agent_card_read_dict(db_card: models.AgentCard) -> dict:
@@ -68,11 +100,10 @@ async def submit_agent_card(
         if db_agent_card and (not hasattr(db_agent_card, 'developer') or not db_agent_card.developer):
              await db.refresh(db_agent_card, attribute_names=['developer'])
 
-        # --- MODIFIED: Build dict manually before returning ---
+        # Build dict manually before returning
         response_dict = _build_agent_card_read_dict(db_agent_card)
         # Pydantic validates the dict when FastAPI returns it based on response_model
         return response_dict # type: ignore # FastAPI handles dict -> schema
-        # --- END MODIFIED ---
     except ValueError as e:
         logger.warning(f"Failed to create agent card due to validation/DB error: {e}")
         raise HTTPException(
@@ -88,12 +119,11 @@ async def submit_agent_card(
 
 
 # --- GET /agent-cards ---
-# (List endpoint remains unchanged as it uses AgentCardSummary)
 @router.get(
     "/",
     response_model=schemas.AgentCardListResponse,
     summary="List Agent Cards",
-    description="Retrieves a paginated list of active Agent Cards, optionally filtered by search query.",
+    description="Retrieves a paginated list of active Agent Cards, optionally filtered by search query or tags.",
 )
 async def list_agent_cards(
     db: AsyncSession = Depends(database.get_db),
@@ -104,15 +134,21 @@ async def list_agent_cards(
         None,
         max_length=100, # Limit search term length
         description="Search term to filter by name or description (case-insensitive, max 100 chars)."
+    ),
+    # Added tags query parameter
+    tags: Optional[List[str]] = Query(
+        None,
+        description="List of tags to filter by (agents must have ALL specified tags)."
     )
 ):
     """
     Public endpoint to list and search for Agent Cards.
     """
-    logger.info(f"Listing agent cards with skip={skip}, limit={limit}, active_only={active_only}, search='{search}'")
+    # Pass tags parameter
+    logger.info(f"Listing agent cards with skip={skip}, limit={limit}, active_only={active_only}, search='{search}', tags={tags}")
     try:
         items, total_items = await agent_card.list_agent_cards(
-            db=db, skip=skip, limit=limit, active_only=active_only, search=search
+            db=db, skip=skip, limit=limit, active_only=active_only, search=search, tags=tags # Pass tags here
         )
 
         # Calculate pagination details
@@ -161,11 +197,10 @@ async def get_agent_card(
         logger.warning(f"Agent card with ID {card_id} not found.")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent Card not found")
 
-    # --- MODIFIED: Build dict manually before returning ---
+    # Build dict manually before returning
     response_dict = _build_agent_card_read_dict(db_card)
     # Pydantic validates the dict when FastAPI returns it based on response_model
     return response_dict # type: ignore
-    # --- END MODIFIED ---
 
 
 # --- PUT /agent-cards/{card_id} ---
@@ -207,11 +242,10 @@ async def update_agent_card(
              logger.info(f"Refreshing developer relationship for updated card {updated_card.id}")
              await db.refresh(updated_card, attribute_names=['developer'])
 
-        # --- MODIFIED: Build dict manually before returning ---
+        # Build dict manually before returning
         response_dict = _build_agent_card_read_dict(updated_card)
         # Pydantic validates the dict when FastAPI returns it based on response_model
         return response_dict # type: ignore
-        # --- END MODIFIED ---
     except ValueError as e:
         logger.warning(f"Failed to update agent card {card_id} due to validation/DB error: {e}")
         raise HTTPException(
@@ -227,7 +261,6 @@ async def update_agent_card(
 
 
 # --- DELETE /agent-cards/{card_id} ---
-# (Delete endpoint remains unchanged as it doesn't return the AgentCardRead schema)
 @router.delete(
     "/{card_id}",
     status_code=status.HTTP_204_NO_CONTENT,

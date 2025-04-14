@@ -70,13 +70,15 @@ h1, h2 {
     background-color: #333;
 }
 
-/* Styles for verified badge (simple text for now) */
+/* --- ADDED: Styles for verified badge --- */
 .verified-badge {
     font-weight: bold;
-    color: green;
-    margin-left: 10px;
+    color: #28a745; /* Bootstrap success green */
+    margin-left: 5px;
     font-size: 0.9em;
+    display: inline-block; /* Allows margin */
 }
+/* --- END ADDED --- */
 
 #pagination-controls {
     margin-top: 20px;
