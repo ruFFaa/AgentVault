@@ -5,8 +5,12 @@ const API_KEY_STORAGE_ITEM = 'developerApiKey';
 
 // DOM Elements
 let loginSection, dashboardSection, apiKeyInput, loginButton, loginError, logoutButton, myCardsList, submitStatus;
+// --- ADDED: Elements for submit form ---
+let agentCardJsonTextarea, validateCardButton, submitCardButton, validationErrorsPre;
+// --- END ADDED ---
 
-// --- ADDED: Helper function to escape HTML ---
+
+// Helper function to escape HTML
 function escapeHTML(str) {
     if (str === null || str === undefined) return '';
     return String(str).replace(/[&<>"']/g, function (match) {
@@ -19,7 +23,6 @@ function escapeHTML(str) {
         }[match];
     });
 }
-// --- END ADDED ---
 
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -31,7 +34,14 @@ document.addEventListener('DOMContentLoaded', () => {
     loginError = document.getElementById('login-error');
     logoutButton = document.getElementById('logout-button');
     myCardsList = document.getElementById('my-cards-list');
-    submitStatus = document.getElementById('submit-status'); // Get submit status element
+    submitStatus = document.getElementById('submit-status');
+    // --- ADDED: Assign submit form elements ---
+    agentCardJsonTextarea = document.getElementById('agent-card-json');
+    validateCardButton = document.getElementById('validate-card-button');
+    submitCardButton = document.getElementById('submit-card-button');
+    validationErrorsPre = document.getElementById('validation-errors');
+    // --- END ADDED ---
+
 
     if (loginButton) {
         loginButton.addEventListener('click', handleLogin);
@@ -39,6 +49,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (logoutButton) {
         logoutButton.addEventListener('click', handleLogout);
     }
+    // --- ADDED: Event listener for validate button ---
+    if (validateCardButton) {
+        validateCardButton.addEventListener('click', handleValidateCard);
+    }
+    // --- END ADDED ---
+    // TODO: Add listener for submitCardButton later
 
     checkLoginStatus();
 });
@@ -90,18 +106,12 @@ function handleLogin() {
          return;
     }
 
-    // --- ADDED: Store key in sessionStorage and add warning ---
+    // Store key in sessionStorage and add warning
     try {
         sessionStorage.setItem(API_KEY_STORAGE_ITEM, apiKey);
         console.log("API Key stored in session storage.");
         // Add a security warning
         console.warn("SECURITY WARNING: API Key stored in sessionStorage. This is vulnerable to XSS attacks if the site has vulnerabilities. Ensure the site is secure.");
-        // Optionally display a less technical warning to the user if needed:
-        // if (loginError) {
-        //     loginError.textContent = 'Warning: Key stored for session only. Close browser to clear.';
-        //     loginError.style.color = 'orange'; // Indicate warning
-        //     loginError.style.display = 'block';
-        // }
     } catch (e) {
         console.error("Failed to store API key in sessionStorage:", e);
         if (loginError) {
@@ -110,7 +120,6 @@ function handleLogin() {
         }
         return; // Don't proceed if storage failed
     }
-    // --- END ADDED ---
 
     loginError.style.display = 'none'; // Hide error on successful login/storage
     showDashboard();
@@ -122,10 +131,14 @@ function handleLogout() {
     console.log("API Key removed from session storage.");
     if (myCardsList) myCardsList.innerHTML = ''; // Clear card list
     if (submitStatus) submitStatus.textContent = ''; // Clear submit status
+    // --- ADDED: Clear validation errors on logout ---
+    if (validationErrorsPre) validationErrorsPre.textContent = '';
+    if (agentCardJsonTextarea) agentCardJsonTextarea.value = ''; // Clear textarea
+    // --- END ADDED ---
     showLogin();
 }
 
-// --- MODIFIED: Updated loadOwnedCards ---
+
 async function loadOwnedCards() {
     console.log("loadOwnedCards() called.");
     if (!myCardsList) return; // Exit if list element doesn't exist
@@ -152,9 +165,7 @@ async function loadOwnedCards() {
         myCardsList.innerHTML = `<p style="color: red;">Error loading your agent cards: ${escapeHTML(error.message || String(error))}</p>`;
     }
 }
-// --- END MODIFIED ---
 
-// --- ADDED: renderOwnedCards function ---
 function renderOwnedCards(cards) {
     console.log(`Rendering ${cards.length} owned cards.`);
     if (!myCardsList) return; // Should exist, but safety check
@@ -221,19 +232,16 @@ function handleDeactivateCard(cardId) {
     alert(`Deactivate functionality for card ${cardId} not implemented yet.`);
     // TODO: Implement API call to DELETE /agent-cards/{card_id} and refresh list
 }
-// --- END ADDED ---
 
 
 // Helper for making authenticated requests
 async function makeAuthenticatedRequest(url, options = {}) {
-    // --- MODIFIED: Retrieve key and handle missing key ---
     const apiKey = getApiKey();
     if (!apiKey) {
         console.error("No API Key found for authenticated request. Logging out.");
         handleLogout(); // Force logout if key disappears
         throw new Error("Not authenticated"); // Stop the request
     }
-    // --- END MODIFIED ---
 
     // Ensure headers object exists
     options.headers = options.headers || {};
@@ -264,7 +272,80 @@ async function makeAuthenticatedRequest(url, options = {}) {
     return response;
 }
 
+// --- ADDED: Validation Handler ---
+async function handleValidateCard() {
+    console.log("Validate button clicked.");
+    if (!agentCardJsonTextarea || !submitStatus || !validationErrorsPre) {
+        console.error("Required elements for validation not found.");
+        return;
+    }
 
-// TODO: Add event listeners for validate, submit buttons
-// TODO: Implement validateCardData function
+    const jsonText = agentCardJsonTextarea.value;
+    submitStatus.textContent = ''; // Clear previous status
+    submitStatus.style.color = 'inherit'; // Reset color
+    validationErrorsPre.textContent = ''; // Clear previous errors
+    validationErrorsPre.style.color = 'red'; // Set error color
+
+    if (!jsonText.trim()) {
+        validationErrorsPre.textContent = 'Error: JSON input cannot be empty.';
+        return;
+    }
+
+    let parsedJson;
+    try {
+        parsedJson = JSON.parse(jsonText);
+    } catch (e) {
+        console.error("JSON parsing error:", e);
+        validationErrorsPre.textContent = `Error: Invalid JSON format.\n${e.message}`;
+        return;
+    }
+
+    const requestBody = { card_data: parsedJson };
+    const validationUrl = `${API_BASE_PATH}/utils/validate-card`;
+
+    console.debug(`Sending validation request to: ${validationUrl}`);
+    submitStatus.textContent = 'Validating...';
+
+    try {
+        const response = await fetch(validationUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+            // Handle non-2xx HTTP errors from the validation endpoint itself
+            let errorDetail = `HTTP error! status: ${response.status}`;
+            try {
+                const errorData = await response.json();
+                errorDetail = errorData.detail || errorDetail;
+            } catch (e) { /* ignore if body isn't json */ }
+            throw new Error(errorDetail);
+        }
+
+        const result = await response.json();
+        console.debug("Validation response:", result);
+
+        if (result.is_valid) {
+            submitStatus.textContent = 'Card data is valid!';
+            submitStatus.style.color = 'green';
+            validationErrorsPre.textContent = ''; // Clear errors on success
+        } else {
+            submitStatus.textContent = 'Validation Failed.';
+            submitStatus.style.color = 'red';
+            validationErrorsPre.textContent = `Validation Errors:\n${result.detail || 'Unknown validation error.'}`;
+        }
+
+    } catch (error) {
+        console.error("Error during validation request:", error);
+        submitStatus.textContent = `Error during validation: ${escapeHTML(error.message || String(error))}`;
+        submitStatus.style.color = 'red';
+    }
+}
+// --- END ADDED ---
+
+
+// TODO: Add event listeners for submitCardButton later
 // TODO: Implement submitNewCard function
