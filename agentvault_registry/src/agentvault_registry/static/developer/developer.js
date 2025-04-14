@@ -28,6 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function getApiKey() {
+    // Retrieve the key from sessionStorage
     return sessionStorage.getItem(API_KEY_STORAGE_ITEM);
 }
 
@@ -73,13 +74,29 @@ function handleLogin() {
          return;
     }
 
+    // --- ADDED: Store key in sessionStorage and add warning ---
+    try {
+        sessionStorage.setItem(API_KEY_STORAGE_ITEM, apiKey);
+        console.log("API Key stored in session storage.");
+        // Add a security warning
+        console.warn("SECURITY WARNING: API Key stored in sessionStorage. This is vulnerable to XSS attacks if the site has vulnerabilities. Ensure the site is secure.");
+        // Optionally display a less technical warning to the user if needed:
+        // if (loginError) {
+        //     loginError.textContent = 'Warning: Key stored for session only. Close browser to clear.';
+        //     loginError.style.color = 'orange'; // Indicate warning
+        //     loginError.style.display = 'block';
+        // }
+    } catch (e) {
+        console.error("Failed to store API key in sessionStorage:", e);
+        if (loginError) {
+            loginError.textContent = 'Error storing API key. Please ensure sessionStorage is available and not full.';
+            loginError.style.display = 'block';
+        }
+        return; // Don't proceed if storage failed
+    }
+    // --- END ADDED ---
 
-    // TODO: Optionally verify key against a simple backend endpoint before storing?
-    // For now, just store it.
-
-    sessionStorage.setItem(API_KEY_STORAGE_ITEM, apiKey);
-    console.log("API Key stored in session storage.");
-    loginError.style.display = 'none';
+    loginError.style.display = 'none'; // Hide error on successful login/storage
     showDashboard();
     loadOwnedCards(); // Load cards after login
 }
@@ -99,27 +116,39 @@ async function loadOwnedCards() {
         myCardsList.innerHTML = '<p>Fetching your agent cards...</p>';
         // TODO: Implement API call using makeAuthenticatedRequest
         // Example structure:
-        // try {
-        //     const response = await makeAuthenticatedRequest(`${API_BASE_PATH}/agent-cards/?developer_owned=true`, { method: 'GET' }); // Need API endpoint for this
-        //     if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
-        //     const data = await response.json();
-        //     renderOwnedCards(data.items); // Need render function
-        // } catch (error) {
-        //     console.error("Error loading owned cards:", error);
-        //     myCardsList.innerHTML = '<p style="color: red;">Error loading your agent cards.</p>';
-        // }
-        myCardsList.innerHTML = '<p>Card loading not implemented yet.</p>'; // Placeholder content
+        try {
+            // Use owned_only=true parameter
+            const response = await makeAuthenticatedRequest(`${API_BASE_PATH}/agent-cards/?owned_only=true`, { method: 'GET' });
+            if (!response.ok) {
+                 // Try to get error detail from response
+                 let errorDetail = `HTTP error! status: ${response.status}`;
+                 try {
+                     const errorData = await response.json();
+                     errorDetail = errorData.detail || errorDetail;
+                 } catch (e) { /* ignore if body isn't json */ }
+                 throw new Error(errorDetail);
+            }
+            const data = await response.json();
+            // renderOwnedCards(data.items); // Need render function
+            myCardsList.innerHTML = `<p>Card loading successful (but rendering not implemented yet). Found ${data.items.length} cards.</p>`; // Placeholder content
+        } catch (error) {
+            console.error("Error loading owned cards:", error);
+            myCardsList.innerHTML = `<p style="color: red;">Error loading your agent cards: ${error.message || error}</p>`;
+        }
+        // myCardsList.innerHTML = '<p>Card loading not implemented yet.</p>'; // Placeholder content
     }
 }
 
 // Helper for making authenticated requests
 async function makeAuthenticatedRequest(url, options = {}) {
+    // --- MODIFIED: Retrieve key and handle missing key ---
     const apiKey = getApiKey();
     if (!apiKey) {
-        console.error("No API Key found for authenticated request.");
+        console.error("No API Key found for authenticated request. Logging out.");
         handleLogout(); // Force logout if key disappears
-        throw new Error("Not authenticated");
+        throw new Error("Not authenticated"); // Stop the request
     }
+    // --- END MODIFIED ---
 
     // Ensure headers object exists
     options.headers = options.headers || {};
@@ -138,7 +167,13 @@ async function makeAuthenticatedRequest(url, options = {}) {
         console.error("Authentication failed (401/403). Logging out.");
         handleLogout();
         // Throw an error to stop further processing in the calling function
-        throw new Error(`Authentication failed: ${response.status}`);
+        // Try to get detail from response body
+        let errorDetail = `Authentication failed: ${response.status}`;
+         try {
+             const errorData = await response.json();
+             errorDetail = errorData.detail || errorDetail;
+         } catch (e) { /* ignore if body isn't json */ }
+        throw new Error(errorDetail);
     }
 
     return response;
