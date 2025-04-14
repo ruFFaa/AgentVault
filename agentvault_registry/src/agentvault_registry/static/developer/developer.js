@@ -184,6 +184,7 @@ function renderOwnedCards(cards) {
     cards.forEach(card => {
         const cardDiv = document.createElement('div');
         cardDiv.className = 'agent-card'; // Reuse existing style if desired
+        cardDiv.id = `owned-card-${card.id}`; // Add unique ID to card div
 
         const nameEl = document.createElement('h4');
         nameEl.textContent = card.name || 'Unnamed Card';
@@ -208,7 +209,7 @@ function renderOwnedCards(cards) {
         const deactivateButton = document.createElement('button');
         deactivateButton.textContent = 'Deactivate';
         deactivateButton.dataset.cardId = card.id;
-        deactivateButton.onclick = () => handleDeactivateCard(card.id); // Placeholder handler
+        deactivateButton.onclick = () => handleDeactivateCard(card.id); // Use function reference
         deactivateButton.style.backgroundColor = '#ffc107'; // Warning color
         deactivateButton.style.color = '#333';
 
@@ -231,11 +232,55 @@ function handleEditCard(cardId) {
     // TODO: Implement logic to populate the submit form with this card's data
 }
 
-function handleDeactivateCard(cardId) {
-    console.log(`Placeholder: Deactivate button clicked for card ID: ${cardId}`);
-    alert(`Deactivate functionality for card ${cardId} not implemented yet.`);
-    // TODO: Implement API call to DELETE /agent-cards/{card_id} and refresh list
+// --- MODIFIED: Implement handleDeactivateCard ---
+async function handleDeactivateCard(cardId) {
+    console.log(`Deactivate button clicked for card ID: ${cardId}`);
+    if (!submitStatus) return;
+
+    // Clear previous status
+    submitStatus.textContent = '';
+    submitStatus.style.color = 'inherit';
+
+    // Confirmation dialog
+    if (!confirm(`Are you sure you want to deactivate Agent Card ${cardId}? This action cannot be undone directly through the UI.`)) {
+        console.log("Deactivation cancelled by user.");
+        return;
+    }
+
+    const deactivateUrl = `${API_BASE_PATH}/agent-cards/${cardId}`;
+    console.debug(`Sending DELETE request to: ${deactivateUrl}`);
+    submitStatus.textContent = `Deactivating card ${cardId}...`;
+
+    try {
+        const response = await makeAuthenticatedRequest(deactivateUrl, {
+            method: 'DELETE',
+        });
+
+        // DELETE returns 204 No Content on success
+        if (response.status === 204) {
+            submitStatus.textContent = `Agent Card ${cardId} deactivated successfully.`;
+            submitStatus.style.color = 'green';
+            // Optionally clear message after a delay
+            setTimeout(() => { if (submitStatus.textContent.includes(cardId)) submitStatus.textContent = ''; }, 3000);
+            loadOwnedCards(); // Refresh the list
+        } else {
+            // Handle unexpected success statuses or specific errors if needed
+            let errorDetail = `Unexpected status: ${response.status}`;
+            try {
+                const errorData = await response.json();
+                errorDetail = errorData.detail || errorDetail;
+            } catch (e) { /* ignore if body isn't json */ }
+             throw new Error(errorDetail); // Treat unexpected status as error
+        }
+
+    } catch (error) {
+        // Catches errors from makeAuthenticatedRequest (like 401/403/404) or network errors
+        console.error("Error during deactivation request:", error);
+        submitStatus.textContent = `Error deactivating card ${cardId}: ${escapeHTML(error.message || String(error))}`;
+        submitStatus.style.color = 'red';
+    }
 }
+// --- END MODIFIED ---
 
 
 // Helper for making authenticated requests
@@ -349,7 +394,7 @@ async function handleValidateCard() {
     }
 }
 
-// --- ADDED: Submit Handler ---
+// Submit Handler
 async function handleSubmitNewCard() {
     console.log("Submit New Card button clicked.");
     if (!agentCardJsonTextarea || !submitStatus || !validationErrorsPre) {
@@ -412,7 +457,7 @@ async function handleSubmitNewCard() {
                 const errorData = await response.json();
                 errorDetail = errorData.detail || errorDetail;
             } catch (e) { /* ignore if body isn't json */ }
-            throw new Error(errorDetail);
+            throw new Error(errorDetail); // Treat unexpected status as error
         }
 
     } catch (error) {
@@ -422,8 +467,6 @@ async function handleSubmitNewCard() {
         submitStatus.style.color = 'red';
     }
 }
-// --- END ADDED ---
 
 
 // TODO: Implement handleEditCard logic
-// TODO: Implement handleDeactivateCard logic
