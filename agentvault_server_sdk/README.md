@@ -1,60 +1,72 @@
-# AgentVault Server SDK (`agentvault-server-sdk`)
+# AgentVault Server SDK
 
-This directory contains the source code for the `agentvault-server-sdk`, a Python library designed to simplify the development of A2A-compliant agents for the AgentVault ecosystem.
+This package provides base classes, utilities, and tools to help developers build [Agent-to-Agent (A2A) protocol](link-to-a2a-spec-later) compliant agents within the AgentVault ecosystem.
 
-**(Placeholder - More details will be added as the SDK is developed)**
+## Overview
 
-**Purpose:**
+The core component is the `BaseA2AAgent` abstract class, which defines the interface agent implementations must adhere to. The SDK also provides FastAPI integration helpers (`create_a2a_router`) to easily expose an agent implementation as a standard A2A JSON-RPC endpoint.
 
-*   Provide base classes and utilities for handling A2A protocol requests (JSON-RPC/SSE).
-*   Integrate seamlessly with web frameworks like FastAPI.
-*   Offer helpers for managing task state and generating A2A events.
-*   Simplify agent packaging for deployment (e.g., Dockerfile generation).
+## Packager Utility (`agentvault-sdk package`)
 
-**Installation:**
+To simplify deployment, the SDK includes a command-line utility to generate standardized Docker packaging artifacts for your agent project.
+
+**Purpose:** Creates a `Dockerfile`, a `.dockerignore` file, and copies necessary configuration files (like `requirements.txt` and `agent-card.json`) into an output directory, ready for building a container image.
+
+**Usage:**
 
 ```bash
-# This package is typically used as a dependency when building an agent.
-# Install locally for development (from the agentvault_server_sdk directory):
-# pip install -e ".[dev]"
+agentvault-sdk package [OPTIONS]
 ```
 
-**Basic Usage (Conceptual):**
+**Options:**
 
-```python
-# (Example - Actual implementation TBD)
-from fastapi import FastAPI
-from agentvault_server_sdk import BaseA2AAgent, create_a2a_router
-from agentvault.models import Message, Task, TaskState # Import from core library
+*   `--output-dir DIRECTORY` / `-o DIRECTORY`: **(Required)** Directory to write Dockerfile and other artifacts.
+*   `--entrypoint TEXT`: **(Required)** Python import path to the FastAPI app instance (e.g., `my_agent.main:app`).
+*   `--python TEXT`: Python version for the base image tag (e.g., 3.10, 3.11). [default: 3.11]
+*   `--suffix TEXT`: Suffix for the python base image (e.g., slim-bookworm, alpine). [default: slim-bookworm]
+*   `--port INTEGER`: Port the application will listen on inside the container. [default: 8000]
+*   `--requirements PATH` / `-r PATH`: Path to the requirements.txt file. If not provided, it looks for `./requirements.txt` in the current directory and copies it if found. A warning is issued if the SDK dependency seems missing.
+*   `--agent-card PATH` / `-c PATH`: Path to the agent-card.json file. If provided, it will be copied into the output directory.
+*   `--app-dir TEXT`: Directory inside the container where the application code will reside. [default: /app]
+*   `--help`: Show this message and exit.
 
-class MySimpleAgent(BaseA2AAgent):
-    async def handle_task_send(self, task_id: str | None, message: Message) -> str:
-        # Process initial message or subsequent message
-        new_task_id = task_id or "task-" + secrets.token_hex(4)
-        print(f"Received message for task {new_task_id}: {message.parts[0].content}")
-        # ... start background processing ...
-        # Update task state (using SDK helpers TBD)
-        return new_task_id # Return task ID
+**Example:**
 
-    async def handle_task_get(self, task_id: str) -> Task:
-        # Retrieve and return task state (using SDK helpers TBD)
-        pass
+```bash
+# Assuming your agent code is in ./src and FastAPI app is in src/my_agent/main.py
+# and you have ./requirements.txt and ./agent-card.json
 
-    async def handle_task_cancel(self, task_id: str) -> bool:
-        # Handle cancellation request
-        pass
-
-    async def handle_subscribe_request(self, task_id: str) -> AsyncGenerator[A2AEvent, None]:
-        # Yield events (Status, Message, Artifact) as they happen
-        # (using SDK helpers TBD)
-        pass
-
-# --- FastAPI Integration ---
-my_agent = MySimpleAgent()
-a2a_router = create_a2a_router(agent=my_agent) # Pass agent instance
-
-app = FastAPI()
-app.include_router(a2a_router, prefix="/a2a") # Mount the A2A endpoint
-
-# Run with: uvicorn main:app --reload
+agentvault-sdk package \
+    --output-dir ./agent_build \
+    --entrypoint my_agent.main:app \
+    --agent-card ./agent-card.json \
+    --python 3.11
 ```
+
+**Generated Files:**
+
+Running the command creates the specified output directory (e.g., `./agent_build`) containing:
+
+*   `Dockerfile`: A multi-stage Dockerfile optimized for Python applications.
+*   `.dockerignore`: A standard file listing patterns to exclude from the build context.
+*   `requirements.txt` (if source found/provided): A copy of your requirements file.
+*   `agent-card.json` (if `--agent-card` provided): A copy of your agent card file.
+
+**Building and Running the Image:**
+
+After generating the files, navigate to your project root (where your agent source code and the output directory are) and run:
+
+```bash
+# Build the image (replace 'my-agent-image:latest' with your desired tag)
+docker build -t my-agent-image:latest -f ./agent_build/Dockerfile .
+
+# Run the container
+docker run -d -p 8000:8000 --name my-running-agent my-agent-image:latest
+```
+*(Adjust the `-p` flag if you used a different port)*
+
+## Future Directions
+
+*   Integration with specific deployment platforms.
+*   More sophisticated dependency analysis.
+*   Advanced configuration options for Dockerfile generation.
