@@ -29,22 +29,19 @@ class AgentSkill(BaseModel):
 
 class AgentAuthentication(BaseModel):
     """Describes an authentication scheme supported by the agent's A2A endpoint."""
-    scheme: Literal['apiKey', 'bearer', 'oauth2', 'none'] = Field(..., description="The type of authentication scheme required.")
+    # --- MODIFIED: Updated scheme literal and description ---
+    scheme: Literal['apiKey', 'bearer', 'oauth2', 'none'] = Field(..., description="The type of authentication scheme required ('apiKey', 'oauth2' Client Credentials, 'bearer', or 'none').")
     description: Optional[str] = Field(None, description="Human-readable description of how to obtain and use credentials for this scheme.")
     token_url: Optional[HttpUrl] = Field(None, alias="tokenUrl", description="URL of the OAuth 2.0 token endpoint (required for 'oauth2' scheme).")
-    scopes: Optional[List[str]] = Field(None, description="List of OAuth 2.0 scope identifiers required by the agent.")
+    scopes: Optional[List[str]] = Field(None, description="List of OAuth 2.0 scope identifiers required by the agent (for 'oauth2' scheme).")
+    # --- END MODIFIED ---
     service_identifier: Optional[str] = Field(None, description="Optional identifier used by the client's KeyManager to retrieve the correct local key (e.g., 'openai', 'agent-specific-id'). If omitted, might default to agent's humanReadableId or require explicit client configuration.")
 
     @model_validator(mode='after')
     def check_oauth2_fields(self) -> 'AgentAuthentication':
         """Ensure tokenUrl is provided if scheme is oauth2."""
-        # --- FIX: Only raise if scheme is oauth2 AND token_url is None ---
         if self.scheme == 'oauth2' and self.token_url is None:
-             # This check might seem redundant if HttpUrl is required, but handles cases
-             # where validation might be bypassed or default is None.
-             # It primarily ensures consistency if the field definition changes later.
              raise ValueError("'tokenUrl' is required when scheme is 'oauth2'")
-        # --- END FIX ---
         return self
 
 
@@ -62,7 +59,9 @@ class AgentCapabilities(BaseModel):
     mcp_version: Optional[str] = Field(None, alias="mcpVersion", description="Version of the Model Context Protocol supported (if any).")
     supported_message_parts: Optional[List[str]] = Field(None, alias="supportedMessageParts", description="List of message part types supported (e.g., 'text', 'file', 'data'). If omitted, client may assume basic types.")
     tee_details: Optional[TeeDetails] = Field(None, alias="teeDetails", description="Details about the Trusted Execution Environment the agent runs in, if applicable.")
-    supports_push_notifications: Optional[bool] = Field(None, alias="supportsPushNotifications", description="Indicates if the agent supports sending push notifications to a webhook.")
+    # --- MODIFIED: Updated description ---
+    supports_push_notifications: Optional[bool] = Field(None, alias="supportsPushNotifications", description="Indicates if the agent supports sending push notifications to a webhook specified by the client during task initiation.")
+    # --- END MODIFIED ---
 
 
 class AgentCard(BaseModel):

@@ -100,29 +100,32 @@ class AgentVaultClient:
     async def initiate_task(
         self, agent_card: AgentCard, initial_message: Message, key_manager: KeyManager,
         mcp_context: Optional[Dict[str, Any]] = None,
-        webhook_url: Optional[str] = None # <-- Parameter added in previous task
+        webhook_url: Optional[str] = None # <-- Parameter added
     ) -> str:
         """
         Initiates a new task with the remote agent by sending the first message.
+
+        Uses JSON-RPC over POST for the 'tasks/send' method.
 
         Args:
             agent_card: The AgentCard of the target agent.
             initial_message: The first message to send to initiate the task.
             key_manager: An initialized KeyManager instance for retrieving credentials.
             mcp_context: Optional dictionary containing MCP context data.
-            webhook_url: Optional URL for the agent to send push notifications to.
+            webhook_url: Optional URL for the agent to send push notifications to
+                         (if supported by the agent).
 
         Returns:
             The unique ID assigned to the newly created task by the agent.
 
         Raises:
-            A2AAuthenticationError: If authentication fails (missing key, invalid creds).
+            A2AAuthenticationError: If authentication fails (missing key/creds, invalid creds, token fetch error).
             A2AConnectionError: If connection to the agent endpoint fails.
-            A2ARemoteAgentError: If the agent returns a specific error response (JSON-RPC error).
-            A2AMessageError: If the agent's response is malformed (non-JSON, invalid JSON-RPC).
+            A2ARemoteAgentError: If the agent returns a specific JSON-RPC error response.
+            A2AMessageError: If the agent's response is malformed (non-JSON, invalid JSON-RPC structure, invalid result).
             A2ATimeoutError: If the request times out.
             A2AError: For other unexpected A2A protocol errors.
-            KeyManagementError: If there's an issue retrieving keys locally.
+            KeyManagementError: If there's an issue retrieving keys/credentials locally.
         """
         logger.info(f"Initiating task with agent: {agent_card.human_readable_id}")
         if webhook_url:
@@ -182,6 +185,8 @@ class AgentVaultClient:
     ) -> bool:
         """
         Sends a subsequent message to an existing task.
+
+        Uses JSON-RPC over POST for the 'tasks/send' method.
         """
         logger.info(f"Sending message to task {task_id} on agent: {agent_card.human_readable_id}")
         if not task_id or not isinstance(task_id, str): raise ValueError("Invalid task_id provided for send_message.")
@@ -229,6 +234,9 @@ class AgentVaultClient:
     ) -> AsyncGenerator[A2AEvent, None]:
         """
         Subscribes to Server-Sent Events (SSE) for a given task to receive messages and updates.
+
+        Uses JSON-RPC over POST for the initial 'tasks/sendSubscribe' request,
+        then processes the resulting SSE stream.
         """
         logger.info(f"Subscribing to events for task {task_id} on agent: {agent_card.human_readable_id}")
         if not task_id or not isinstance(task_id, str):
@@ -300,6 +308,8 @@ class AgentVaultClient:
     ) -> Task:
         """
         Retrieves the current status and details of a specific task.
+
+        Uses JSON-RPC over POST for the 'tasks/get' method.
         """
         logger.info(f"Getting status for task {task_id} on agent: {agent_card.human_readable_id}")
         if not task_id or not isinstance(task_id, str): raise ValueError("Invalid task_id provided for get_task_status.")
@@ -335,6 +345,8 @@ class AgentVaultClient:
     ) -> bool:
         """
         Requests the termination (cancellation) of an ongoing task.
+
+        Uses JSON-RPC over POST for the 'tasks/cancel' method.
         """
         logger.info(f"Requesting termination for task {task_id} on agent: {agent_card.human_readable_id}")
         if not task_id or not isinstance(task_id, str): raise ValueError("Invalid task_id provided for terminate_task.")
@@ -373,7 +385,15 @@ class AgentVaultClient:
 
     # --- Private Helper Methods ---
     async def _get_auth_headers(self, agent_card: AgentCard, key_manager: KeyManager) -> Dict[str, str]:
-        """Determines required auth scheme and retrieves key/token if needed."""
+        """
+        Determines required auth scheme and retrieves key/token if needed.
+
+        Supports 'apiKey', 'oauth2' (Client Credentials Grant), and 'none'.
+
+        Raises:
+            A2AAuthenticationError: If no compatible scheme is found, credentials
+                                    are missing, or token fetching fails.
+        """
         agent_schemes = agent_card.auth_schemes
         supported_schemes_str = [s.scheme for s in agent_schemes]
         logger.debug(f"Agent supports auth schemes: {supported_schemes_str}")
@@ -441,18 +461,14 @@ class AgentVaultClient:
                     token_response_data = response.json()
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to decode JSON response from token endpoint {token_url_str}: {e}. Response: {response.text[:200]}...")
-                    # --- MODIFIED: Raise specific A2AAuthenticationError ---
                     raise A2AAuthenticationError(f"Invalid JSON response from token endpoint {token_url_str}: {e}") from e
-                    # --- END MODIFIED ---
 
                 access_token = token_response_data.get("access_token")
                 token_type = token_response_data.get("token_type", "bearer") # Default to bearer if missing
 
                 if not access_token or not isinstance(access_token, str):
                     logger.error(f"Token response from {token_url_str} missing 'access_token'. Response: {token_response_data}")
-                    # --- MODIFIED: Raise specific A2AAuthenticationError ---
                     raise A2AAuthenticationError(f"Invalid token response from {token_url_str}: missing 'access_token'.")
-                    # --- END MODIFIED ---
                 if token_type.lower() != "bearer":
                     logger.warning(f"Token response from {token_url_str} has non-Bearer token_type: '{token_type}'. Proceeding anyway.")
 
@@ -469,7 +485,6 @@ class AgentVaultClient:
 
                 return {"Authorization": f"Bearer {access_token}"}
 
-            # --- MODIFIED: Raise specific A2AAuthenticationError for each httpx error ---
             except httpx.TimeoutException as e:
                 logger.error(f"Timeout requesting OAuth token from {token_url_str}: {e}")
                 raise A2AAuthenticationError(f"Timeout connecting to token endpoint {token_url_str}.") from e
@@ -487,7 +502,6 @@ class AgentVaultClient:
             except httpx.RequestError as e: # Catch other request errors (e.g., network issues)
                 logger.error(f"Network error requesting OAuth token from {token_url_str}: {e}")
                 raise A2AAuthenticationError(f"Network error communicating with token endpoint {token_url_str}: {e}") from e
-            # --- END MODIFIED ---
             except Exception as e: # Catch any other unexpected error
                 logger.exception(f"Unexpected error during OAuth token request to {token_url_str}: {e}")
                 raise A2AAuthenticationError(f"Unexpected error during OAuth token request: {e}") from e
@@ -544,7 +558,6 @@ class AgentVaultClient:
                 response = await self._http_client.request(**request_kwargs)
                 response.raise_for_status() # Raise HTTPStatusError for 4xx/5xx
 
-                # --- MODIFIED: Enhanced JSON-RPC response handling ---
                 try:
                     response_data = response.json()
                     if not isinstance(response_data, dict):
@@ -575,7 +588,6 @@ class AgentVaultClient:
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to decode JSON response from {log_context}. Status: {response.status_code}. Response text: {response.text[:200]}...")
                     raise A2AMessageError(f"Failed to decode JSON response from {url_str}. Status: {response.status_code}. Body: {response.text[:200]}...") from e
-                # --- END MODIFIED ---
 
             except httpx.TimeoutException as e: logger.error(f"Request timeout for {log_context}: {e}"); raise A2ATimeoutError(f"Request timed out for {url_str}: {e}") from e
             except httpx.ConnectError as e: logger.error(f"Connection error for {log_context}: {e}"); raise A2AConnectionError(f"Connection failed for {url_str}: {e}") from e

@@ -14,7 +14,6 @@ import datetime
 # --- Core Enumerations ---
 
 class TaskState(str, Enum):
-    # --- MODIFIED: Renamed states, added INPUT_REQUIRED, updated docstring ---
     """
     Represents the possible states of an A2A task.
 
@@ -26,13 +25,13 @@ class TaskState(str, Enum):
         FAILED: Task terminated due to an error during execution.
         CANCELED: Task was canceled by user request before completion.
     """
-    SUBMITTED = "SUBMITTED"     # Renamed from PENDING
-    WORKING = "WORKING"         # Renamed from RUNNING
-    INPUT_REQUIRED = "INPUT_REQUIRED" # Added new state
+    SUBMITTED = "SUBMITTED"
+    WORKING = "WORKING"
+    INPUT_REQUIRED = "INPUT_REQUIRED"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
-    CANCELED = "CANCELED"       # Renamed from CANCELLED
-    # --- END MODIFIED ---
+    CANCELED = "CANCELED"
+
 
 # --- Message Parts ---
 
