@@ -85,8 +85,8 @@ async def get_developer_by_plain_api_key(db: AsyncSession, plain_key: str) -> Op
     try:
         stmt = select(models.Developer)
         result = await db.execute(stmt)
-        # --- MODIFIED: Use async list comprehension ---
-        all_developers = [dev async for dev in result.scalars()]
+        # --- MODIFIED: Use .scalars().all() ---
+        all_developers = list(result.scalars().all())
         # --- END MODIFIED ---
     except Exception as e:
         logger.error(f"Failed to query developers for API key check: {e}", exc_info=True)
