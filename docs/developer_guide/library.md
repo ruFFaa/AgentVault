@@ -20,187 +20,265 @@ See the main [Installation Guide](../installation.md) for more details, includin
 
 ## Key Components
 
-### `KeyManager`
+### `KeyManager` (`key_manager.py`)
 
-Handles secure loading, storage, and retrieval of credentials needed for agent authentication.
+Handles secure loading, storage, and retrieval of credentials (API keys, OAuth 2.0 Client ID/Secret) needed for agent authentication.
 
-*   **Purpose:** Abstracts credential sources (environment variables, files, OS keyring) so your client code doesn't need to handle each case explicitly.
+*   **Purpose:** Abstracts credential sources so your client code doesn't need to handle each case explicitly. Provides a consistent interface (`get_key`, `get_oauth_client_id`, etc.) regardless of where the credential is stored.
 *   **Initialization:**
     ```python
     from agentvault import KeyManager
     import pathlib
 
-    # Load from environment variables (default) and OS keyring (if enabled)
+    # Recommended: Load from environment variables AND OS keyring (if available)
+    # Keyring is checked only if the key isn't found in env vars first.
     km_env_keyring = KeyManager(use_keyring=True)
 
     # Load ONLY from a specific .env file (disable env vars and keyring)
-    # key_file = pathlib.Path("path/to/your/keys.env")
-    # km_file_only = KeyManager(key_file_path=key_file, use_env_vars=False, use_keyring=False)
+    # key_file_path = pathlib.Path("path/to/your/keys.env")
+    # km_file_only = KeyManager(key_file_path=key_file_path, use_env_vars=False, use_keyring=False)
 
-    # Load from file AND environment (file takes priority)
-    # km_file_env = KeyManager(key_file_path=key_file, use_env_vars=True)
+    # Load from file AND environment (file takes priority over env)
+    # key_file_path = pathlib.Path("path/to/your/keys.json")
+    # km_file_env = KeyManager(key_file_path=key_file_path, use_env_vars=True, use_keyring=False)
     ```
-*   **Priority Order:** File (`key_file_path`) > Environment Variables (`use_env_vars=True`) > OS Keyring (`use_keyring=True`, only checked on demand via `get_` methods if not found in file/env cache).
-*   **Service Identifier (`service_id`):** This is the key used to look up credentials. It's a *local* name you choose (e.g., "openai", "my-agent-key", "google-oauth-agent") that maps to the credentials needed for a specific agent or service. It often corresponds to the `service_identifier` field in an Agent Card's `authSchemes`.
+*   **Priority Order:** When retrieving credentials, `KeyManager` checks sources in this order:
+    1.  **File Cache:** If `key_file_path` was provided during init and the file contained the credential.
+    2.  **Environment Variable Cache:** If `use_env_vars=True` (default) and the corresponding environment variable was set during init.
+    3.  **OS Keyring:** If `use_keyring=True` and the credential was not found in the file or environment caches. This check happens *on demand* when a `get_...` method is called.
+*   **Service Identifier (`service_id`):** This is the crucial string used to look up credentials. It's a *local* name you choose (e.g., "openai", "my-agent-key", "google-oauth-agent") that maps to the credentials needed for a specific agent or service.
+    *   It often corresponds to the `authSchemes[].service_identifier` field in an Agent Card.
+    *   If the Agent Card omits `service_identifier`, the client might default to using the agent's `humanReadableId` or require the user/developer to specify which local `service_id` to use (e.g., via `agentvault_cli run --key-service <your_local_id>`).
+*   **Storage Conventions:**
+    *   **Environment Variables:**
+        *   API Key: `AGENTVAULT_KEY_<SERVICE_ID_UPPER>`
+        *   OAuth Client ID: `AGENTVAULT_OAUTH_<SERVICE_ID_UPPER>_CLIENT_ID`
+        *   OAuth Client Secret: `AGENTVAULT_OAUTH_<SERVICE_ID_UPPER>_CLIENT_SECRET`
+    *   **`.env` File:**
+        *   API Key: `<service_id_lower>=your_api_key`
+        *   OAuth Client ID: `AGENTVAULT_OAUTH_<service_id_lower>_CLIENT_ID=your_client_id`
+        *   OAuth Client Secret: `AGENTVAULT_OAUTH_<service_id_lower>_CLIENT_SECRET=your_client_secret`
+    *   **`.json` File:**
+        ```json
+        {
+          "service_id_lower": "your_api_key",
+          "another_service": {
+            "apiKey": "another_api_key",
+            "oauth": {
+              "clientId": "oauth_client_id",
+              "clientSecret": "oauth_client_secret"
+            }
+          }
+        }
+        ```
+    *   **OS Keyring:** Uses specific service/username conventions (see `key_manager.py` source for details, e.g., service=`agentvault:oauth:<norm_id>`, username=`clientId`). Use `agentvault_cli config set <service_id> --keyring` or `--oauth-configure` to store securely.
 *   **Retrieving Credentials:**
     ```python
+    km = KeyManager(use_keyring=True) # Example instance
+
     # Get API Key (returns None if not found)
-    api_key = km_env_keyring.get_key("openai")
+    api_key = km.get_key("openai")
     if api_key:
-        print("Found OpenAI API Key")
+        source = km.get_key_source("openai") # 'env', 'file', 'keyring', or None
+        print(f"Found OpenAI API Key (Source: {source})")
 
     # Get OAuth Credentials (return None if not found or incomplete)
-    client_id = km_env_keyring.get_oauth_client_id("google-oauth-agent")
-    client_secret = km_env_keyring.get_oauth_client_secret("google-oauth-agent")
+    client_id = km.get_oauth_client_id("google-oauth-agent")
+    client_secret = km.get_oauth_client_secret("google-oauth-agent")
     if client_id and client_secret:
-        print(f"Found Google OAuth Client ID: {client_id}")
-
-    # Check source
-    source = km_env_keyring.get_key_source("openai") # e.g., 'keyring', 'env', 'file', None
-    oauth_status = km_env_keyring.get_oauth_config_status("google-oauth-agent") # e.g., "Configured (Source: KEYRING)"
-    print(f"OpenAI key source: {source}")
-    print(f"Google OAuth status: {oauth_status}")
+        status = km.get_oauth_config_status("google-oauth-agent")
+        print(f"Found Google OAuth Credentials ({status})")
+        print(f"  Client ID: {client_id}")
     ```
 *   **Storing Credentials (Primarily for CLI/Setup):**
     ```python
     from agentvault import KeyManagementError
 
+    km = KeyManager(use_keyring=True)
     try:
-        # Store API Key securely (requires keyring backend)
-        km_env_keyring.set_key_in_keyring("my-new-service", "sk-abc...")
+        # Store API Key securely in OS keyring
+        km.set_key_in_keyring("my-new-service", "sk-abc...")
+        print("API Key stored successfully.")
 
-        # Store OAuth creds securely (requires keyring backend)
-        km_env_keyring.set_oauth_creds_in_keyring("my-oauth-service", "client_id_123", "client_secret_xyz")
+        # Store OAuth creds securely in OS keyring
+        km.set_oauth_creds_in_keyring("my-oauth-service", "client_id_123", "client_secret_xyz")
+        print("OAuth credentials stored successfully.")
+
     except KeyManagementError as e:
+        # Handle cases where keyring is unavailable or write fails
         print(f"Failed to store credentials in keyring: {e}")
     except ValueError as e:
         print(f"Invalid input for storing credentials: {e}")
     ```
-*   **Storage Conventions:** See the `KeyManager` docstring or the [Security Guide](../security.md#credential-management-keymanager) for details on environment variable names and file formats.
 
-### `AgentVaultClient`
+### `AgentVaultClient` (`client.py`)
 
 The primary class for making asynchronous A2A calls to remote agents.
 
-*   **Purpose:** Handles HTTP requests, authentication, JSON-RPC formatting, SSE streaming, and response parsing according to the [A2A Profile v0.2](../a2a_profile_v0.2.md).
-*   **Usage:** Best used as an async context manager. Requires an `AgentCard` instance (loaded via `agent_card_utils`) and a `KeyManager` instance for authentication.
+*   **Purpose:** Handles HTTP requests (using `httpx`), authentication logic (including OAuth token fetching/caching), JSON-RPC formatting, SSE streaming, and response parsing according to the [A2A Profile v0.2](../a2a_profile_v0.2.md).
+*   **Usage:** Best used as an async context manager (`async with`) to ensure the underlying HTTP client is properly closed. Requires an `AgentCard` instance (loaded via `agent_card_utils`) and a `KeyManager` instance for authentication.
     ```python
     import asyncio
-    import logging # Import logging
+    import logging
+    import pathlib # Import pathlib
     from agentvault import (
         AgentVaultClient, KeyManager, Message, TextPart,
         agent_card_utils, exceptions as av_exceptions, models as av_models
     )
 
+    # Configure logging for visibility
+    logging.basicConfig(level=logging.INFO)
+
     async def run_agent_task(agent_ref: str, input_text: str):
-        key_manager = KeyManager(use_keyring=True) # Use keyring and env vars
+        # Initialize KeyManager - typically done once per application
+        # Loads from env vars and keyring (if available) by default
+        key_manager = KeyManager(use_keyring=True)
         agent_card = None
         task_id = None
 
         try:
-            # Load agent card (adjust based on agent_ref type)
+            # --- 1. Load Agent Card ---
+            # Determine if agent_ref is URL, file path, or ID
+            # (Simplified logic here; production code might need more robust checks)
+            print(f"Loading agent card: {agent_ref}")
             if agent_ref.startswith("http"):
                 agent_card = await agent_card_utils.fetch_agent_card_from_url(agent_ref)
-            else: # Assume ID or file path (add more robust handling if needed)
-                # This part might need adjustment based on whether it's an ID or file
-                # For simplicity, assuming fetch_agent_card_from_url handles IDs via registry later
-                # Or use load_agent_card_from_file(pathlib.Path(agent_ref))
-                raise NotImplementedError("Loading by ID/File needs specific implementation here")
+            else:
+                agent_path = pathlib.Path(agent_ref)
+                if agent_path.is_file():
+                    agent_card = agent_card_utils.load_agent_card_from_file(agent_path)
+                else:
+                    # Assume it's an ID - requires registry lookup (not shown here)
+                    # You would typically use a separate registry client or function
+                    raise NotImplementedError("Loading by Agent ID requires registry interaction.")
 
             if not agent_card:
                  print(f"Error: Could not load agent card for {agent_ref}")
                  return
 
-            initial_message = Message(role="user", parts=[TextPart(content=input_text)])
+            print(f"Loaded Agent: {agent_card.name}")
 
+            # --- 2. Prepare Initial Message ---
+            initial_message = Message(role="user", parts=[TextPart(content=input_text)])
+            # Optional: Prepare MCP context if needed
+            mcp_data = {"user_preference": "verbose"}
+
+            # --- 3. Interact using AgentVaultClient ---
+            # Use async with for proper client lifecycle management
             async with AgentVaultClient() as client:
-                # 1. Initiate Task
-                print(f"Initiating task with {agent_card.name}...")
+                # Initiate the task
+                print(f"Initiating task...")
                 task_id = await client.initiate_task(
                     agent_card=agent_card,
                     initial_message=initial_message,
-                    key_manager=key_manager
-                    # mcp_context={"user_pref": "concise"}, # Optional MCP
-                    # webhook_url="https://...", # Optional webhook
+                    key_manager=key_manager,
+                    mcp_context=mcp_data, # Optional context
+                    # webhook_url="https://...", # Optional webhook (if agent supports)
                 )
                 print(f"Task initiated: {task_id}")
 
-                # 2. Stream Events
+                # Stream and process events
                 print("Streaming events...")
-                final_response = ""
+                final_response_text = ""
                 async for event in client.receive_messages(
                     agent_card=agent_card, task_id=task_id, key_manager=key_manager
                 ):
                     if isinstance(event, av_models.TaskStatusUpdateEvent):
-                        print(f"  Status: {event.state} (Msg: {event.message or ''})")
-                        if event.state in [av_models.TaskState.COMPLETED, av_models.TaskState.FAILED, av_models.TaskState.CANCELED]:
+                        print(f"  Status Update: {event.state} "
+                              f"(Msg: {event.message or 'N/A'})")
+                        # Check for terminal states to stop listening
+                        if event.state in [av_models.TaskState.COMPLETED,
+                                           av_models.TaskState.FAILED,
+                                           av_models.TaskState.CANCELED]:
                             print("  Terminal state reached.")
                             break
                     elif isinstance(event, av_models.TaskMessageEvent):
-                        print(f"  Message ({event.message.role}):")
+                        print(f"  Message Received (Role: {event.message.role}):")
                         for part in event.message.parts:
                             if isinstance(part, TextPart):
                                 print(f"    Text: {part.content}")
+                                # Aggregate assistant responses
                                 if event.message.role == "assistant":
-                                    final_response += part.content + "\n"
-                            # Add handling for FilePart, DataPart if needed
+                                    final_response_text += part.content + "\n"
                             else:
-                                print(f"    Part ({part.type}): {part}")
+                                print(f"    Part (Type: {part.type}): {part}") # Handle other parts
                     elif isinstance(event, av_models.TaskArtifactUpdateEvent):
-                         print(f"  Artifact ({event.artifact.type}, ID: {event.artifact.id}):")
-                         print(f"    Content: {str(event.artifact.content)[:100]}...") # Example
+                         print(f"  Artifact Update (ID: {event.artifact.id}, Type: {event.artifact.type}):")
+                         print(f"    Content: {str(event.artifact.content)[:100]}...") # Example display
                          print(f"    URL: {event.artifact.url}")
                          print(f"    Media Type: {event.artifact.media_type}")
                     else:
-                        print(f"  Unknown Event: {event}")
+                        print(f"  Received unknown event type: {type(event)}")
 
-                # 3. (Optional) Get Final Status if needed
-                # final_task_status = await client.get_task_status(agent_card, task_id, key_manager)
-                # print(f"Final task status check: {final_task_status.state}")
+                # --- 4. Optional: Check final status ---
+                # final_task_details = await client.get_task_status(agent_card, task_id, key_manager)
+                # print(f"\nFinal task status check: {final_task_details.state}")
 
-                print("\n--- Final Agent Response ---")
-                print(final_response.strip())
-                print("--------------------------")
+                print("\n--- Final Aggregated Agent Response ---")
+                print(final_response_text.strip())
+                print("---------------------------------------")
 
+        # --- 5. Handle Potential Errors ---
         except av_exceptions.AgentCardError as e:
-            print(f"Error loading agent card: {e}")
+            print(f"Error loading or validating agent card: {e}")
         except av_exceptions.A2AAuthenticationError as e:
             print(f"Authentication error: {e}")
-            print("Hint: Ensure credentials for the required service_id are configured using 'agentvault config set'.")
+            print("Hint: Ensure credentials for the required service_id are configured.")
         except av_exceptions.A2AConnectionError as e:
-            print(f"Connection error: {e}")
+            print(f"Connection error communicating with agent or token endpoint: {e}")
         except av_exceptions.A2ARemoteAgentError as e:
-            print(f"Agent returned an error: {e.status_code} - {e}")
-            print(f"  Response Body: {e.response_body}")
-        except av_exceptions.A2AError as e:
-            print(f"A2A protocol error: {e}")
+            # Agent returned an error (e.g., JSON-RPC error or non-2xx HTTP status)
+            print(f"Agent returned an error:")
+            print(f"  Status Code (if HTTP error): {e.status_code}")
+            print(f"  Message: {e}")
+            print(f"  Response Body/Data: {e.response_body}")
+        except av_exceptions.A2AMessageError as e:
+             print(f"A2A protocol message error (e.g., invalid format): {e}")
+        except av_exceptions.A2ATimeoutError as e:
+             print(f"A2A request timed out: {e}")
+        except av_exceptions.KeyManagementError as e:
+             print(f"Error managing local keys/credentials: {e}")
+        except NotImplementedError as e:
+             print(f"Functionality not implemented: {e}")
         except Exception as e:
-            print(f"An unexpected error occurred: {e}")
-            logging.exception("Unexpected error details:")
+            # Catch any other unexpected errors
+            print(f"An unexpected error occurred: {type(e).__name__}: {e}")
+            logging.exception("Unexpected error details:") # Log traceback for debugging
 
     # Example usage (replace with a real agent reference)
-    # asyncio.run(run_agent_task("http://localhost:8000/agent-card.json", "Tell me a joke."))
+    # asyncio.run(run_agent_task("http://localhost:8001/agent-card.json", "Tell me a joke about AI."))
     ```
 
 ### Models (`agentvault.models`)
 
-Pydantic models defining the data structures for Agent Cards and the A2A protocol. Refer to the source code docstrings or the [A2A Profile v0.2](../a2a_profile_v0.2.md) for details on specific models like `AgentCard`, `Message`, `Task`, `TaskState`, `A2AEvent`, etc.
+Pydantic models defining the data structures for Agent Cards and the A2A protocol. Key models include:
+
+*   `AgentCard`: Represents the metadata describing an agent.
+*   `Message`: Represents a message exchanged between client and agent, containing `Part` objects.
+*   `Part` (Union): Can be `TextPart`, `FilePart`, or `DataPart`.
+*   `Task`: Represents the state of an ongoing task, including messages and artifacts.
+*   `TaskState`: Enum defining the lifecycle states of a task.
+*   `A2AEvent` (Union): Represents events streamed via SSE (`TaskStatusUpdateEvent`, `TaskMessageEvent`, `TaskArtifactUpdateEvent`).
+
+Refer to the source code docstrings or the [A2A Profile v0.2](../a2a_profile_v0.2.md) for detailed field descriptions and validation rules.
 
 ### Exceptions (`agentvault.exceptions`)
 
-Custom exceptions provide granular error handling. Key exceptions to catch include:
+Custom exceptions provide granular error handling for different failure scenarios during A2A communication or setup. Catching these specific exceptions allows for more robust client applications. Key exceptions include:
 
-*   `AgentCardError`: Problems loading or validating the Agent Card.
-*   `A2AAuthenticationError`: Missing or invalid credentials, OAuth flow failures.
-*   `A2AConnectionError`: Network issues connecting to the agent or token endpoint.
-*   `A2ATimeoutError`: Request timed out.
-*   `A2ARemoteAgentError`: The agent returned a non-2xx HTTP status or a JSON-RPC error object. Access `e.status_code` and `e.response_body`.
-*   `A2AMessageError`: Invalid JSON-RPC format, unexpected response structure.
+*   `AgentVaultError`: Base class for all library errors.
+*   `AgentCardError`: Base for card loading/validation issues (`AgentCardValidationError`, `AgentCardFetchError`).
+*   `A2AError`: Base for A2A protocol communication errors.
+    *   `A2AAuthenticationError`: Missing/invalid credentials, OAuth failures.
+    *   `A2AConnectionError`: Network issues (connection refused, DNS errors).
+    *   `A2ATimeoutError`: Request timed out.
+    *   `A2ARemoteAgentError`: Agent returned an error (non-2xx HTTP or JSON-RPC error). Contains `status_code` and `response_body`.
+    *   `A2AMessageError`: Invalid JSON-RPC format, unexpected response structure.
 *   `KeyManagementError`: Issues saving/loading keys with `KeyManager`.
 
 ### Utilities (`agentvault.agent_card_utils`, `agentvault.mcp_utils`)
 
-*   **`agent_card_utils`**: Functions like `load_agent_card_from_file` and `fetch_agent_card_from_url` simplify obtaining and validating `AgentCard` objects.
-*   **`mcp_utils`**:
-    *   `format_mcp_context`: (Primarily for server-side or advanced clients) Validates and formats a dictionary intended as MCP context.
+*   **`agent_card_utils`**: Provides helper functions (`load_agent_card_from_file`, `fetch_agent_card_from_url`, `parse_agent_card_from_dict`) to simplify obtaining and validating `AgentCard` objects.
+*   **`mcp_utils`**: Contains helpers for handling Model Context Protocol data.
+    *   `format_mcp_context`: (Primarily for advanced clients or server-side) Validates and formats a dictionary intended as MCP context.
     *   `get_mcp_context`: (Client-side) Safely extracts the `mcp_context` dictionary from a received `Message`'s metadata.
