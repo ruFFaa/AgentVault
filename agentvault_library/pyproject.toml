@@ -1,7 +1,9 @@
 # Using standard PEP 621 [project] table primarily
 [project]
     name = "agentvault"
-    version = "0.1.0"
+    # --- VERSION UPDATED ---
+    version = "0.2.0"
+    # --- VERSION UPDATED ---
     description = "Core Python client library for A2A protocol, MCP, and secure local key management."
     authors = [{ name = "Raphael Zbigniew Jeziorny", email = "AgentVault@proton.me" }]
     license = { text = "Apache-2.0" } # Standard license expression
@@ -35,13 +37,11 @@
     [project.optional-dependencies]
     os_keyring = ["keyring>=24,<25"]
     dev = [
-        "pytest>=7.0,<9.0", # Reduced upper bound to match lock file
+        "pytest>=7.0,<9.0",
         "pytest-asyncio>=0.23,<0.24",
         "pytest-mock>=3.12,<4.0",
-        "respx>=0.20,<0.21", # Reduced upper bound to match lock file
-        # --- ADDED: Testing utils dependency ---
+        "respx>=0.20,<0.21",
         "agentvault-testing-utils" # Version/path handled by Poetry below
-        # --- END ADDED ---
     ]
 
 # Build System (unchanged)
@@ -51,7 +51,10 @@ build-backend = "poetry.core.masonry.api"
 
 # Poetry Specific Configuration (Minimal - Only what's needed beyond [project])
 [tool.poetry]
-# name, version, description, authors, license, readme are now primarily in [project]
+# --- VERSION UPDATED ---
+version = "0.2.0" # Keep consistent with [project] for poetry commands
+# --- VERSION UPDATED ---
+# name, description, authors, license, readme are now primarily in [project]
 packages = [{include = "agentvault", from = "src"}]
 
 # Dependencies defined here are used by Poetry's resolver but [project] is canonical
@@ -72,6 +75,4 @@ pytest = ">=7.0,<9.0"
 pytest-asyncio = ">=0.23,<0.24"
 pytest-mock = ">=3.12,<4.0"
 respx = ">=0.20,<0.21"
-# --- ADDED: Testing utils path dependency ---
 agentvault-testing-utils = {path = "../agentvault_testing_utils", develop = true}
-# --- END ADDED ---

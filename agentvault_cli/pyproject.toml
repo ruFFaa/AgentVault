@@ -26,12 +26,10 @@
 
     dependencies = [
         "click>=8.0,<9.0",
-        "httpx>=0.27,<0.29", # Updated upper bound to match lock file
-        "rich>=13.0,<15.0", # Updated upper bound to match lock file
-        # Path dependency to agentvault library is handled by installation method
-        # (e.g., poetry install in monorepo, or pip install -e .)
-        # and doesn't have a standard representation here that works universally yet.
-        # Poetry's section below handles it for poetry commands.
+        "httpx>=0.27,<0.29",
+        "rich>=13.0,<15.0",
+        # Specify library dependency for distribution
+        "agentvault>=0.2.0,<0.3.0"
     ]
 
     # Define console scripts using standard syntax
@@ -40,8 +38,8 @@
 
     [project.optional-dependencies]
     dev = [
-        "pytest>=8.0,<9.0", # Match lock file
-        "pytest-mock>=3.12,<4.0", # Match lock file
+        "pytest>=8.0,<9.0",
+        "pytest-mock>=3.12,<4.0",
     ]
 
 # Build System (unchanged)
@@ -50,25 +48,23 @@ requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 # --- Poetry Specific Configuration (Minimal) ---
-# Keep only what's needed for Poetry's build/dev workflows
 [tool.poetry]
-# name, version, description, authors, license, readme are now primarily in [project]
-# Keep packages definition for Poetry to find the code
+version = "0.1.0" # Keep consistent with [project] for poetry commands
 packages = [{include = "agentvault_cli", from = "src"}]
 
 # Dependencies defined here are used by Poetry's resolver but [project] is canonical
-# Keep this section for Poetry's benefit, especially the path dependency.
 [tool.poetry.dependencies]
 python = ">=3.10,<3.12"
 click = ">=8.0,<9.0"
-httpx = ">=0.27,<0.29" # Match lock file
-rich = ">=13.0,<15.0" # Match lock file
-# Poetry needs this explicit path dependency for development installs
+httpx = ">=0.27,<0.29"
+rich = ">=13.0,<15.0"
+# --- MODIFIED: Removed version constraint here ---
+# Only keep path/develop for local editable installs via Poetry
 agentvault = {path = "../agentvault_library", develop = true}
+# --- END MODIFIED ---
+
 
 # Dev dependencies defined here are used by Poetry but [project.optional-dependencies] is canonical
 [tool.poetry.group.dev.dependencies]
-pytest = ">=8.0,<9.0" # Match lock file
-pytest-mock = ">=3.12,<4.0" # Match lock file
-
-# Scripts section in [tool.poetry] is removed as it's now defined in [project.scripts]
+pytest = ">=8.0,<9.0"
+pytest-mock = ">=3.12,<4.0"

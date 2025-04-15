@@ -10,10 +10,10 @@ packages = [{include = "agentvault_server_sdk", from = "src"}]
 [tool.poetry.dependencies]
 python = ">=3.10,<3.12"
 fastapi = ">=0.111,<0.112"
+# --- MODIFIED: Removed version constraint here ---
 agentvault = {path = "../agentvault_library", develop = true}
-# --- ADDED: Typer dependency ---
-typer = ">=0.9.0" # Using >=0.9 for richer features like rich integration if needed later
-# --- END ADDED ---
+# --- END MODIFIED ---
+typer = ">=0.9.0"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -21,31 +21,35 @@ pytest = ">=7.0,<9.0"
 pytest-asyncio = ">=0.23,<0.24"
 freezegun = ">=1.1.0"
 
-# --- ADDED: Script entry point ---
 [tool.poetry.scripts]
 agentvault-sdk = "agentvault_server_sdk.packager.cli:app"
-# --- END ADDED ---
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
-# --- ADDED: Project table for scripts ---
 # Using standard PEP 621 [project] table primarily
 [project]
-    name = "agentvault-server-sdk" # Duplicated from tool.poetry for standard compliance
-    version = "0.1.0" # Duplicated
-    description = "Server SDK for building AgentVault A2A compliant agents." # Duplicated
-    authors = [{ name = "Raphael Zbigniew Jeziorny", email = "AgentVault@proton.me" }] # Duplicated
-    license = { text = "Apache-2.0" } # Duplicated
-    readme = "README.md" # Duplicated
-    requires-python = ">=3.10,<3.12" # Duplicated
-    dependencies = [ # Duplicated from tool.poetry.dependencies
+    name = "agentvault-server-sdk"
+    version = "0.1.0"
+    description = "Server SDK for building AgentVault A2A compliant agents."
+    authors = [{ name = "Raphael Zbigniew Jeziorny", email = "AgentVault@proton.me" }]
+    license = { text = "Apache-2.0" }
+    readme = "README.md"
+    requires-python = ">=3.10,<3.12"
+    dependencies = [
         "fastapi>=0.111,<0.112",
         "typer>=0.9.0",
-        # Reference to agentvault library handled by poetry path dependency / install process
+        # Specify library dependency for distribution
+        "agentvault>=0.2.0,<0.3.0"
     ]
     # Define console scripts using standard syntax
     [project.scripts]
     agentvault-sdk = "agentvault_server_sdk.packager.cli:app"
-# --- END ADDED ---
+
+    [project.optional-dependencies]
+    dev = [
+        "pytest>=7.0,<9.0",
+        "pytest-asyncio>=0.23,<0.24",
+        "freezegun>=1.1.0",
+    ]

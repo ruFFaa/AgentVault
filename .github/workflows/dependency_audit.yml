@@ -12,11 +12,27 @@ on:
 jobs:
   pip-audit:
     runs-on: ubuntu-latest
+    # --- MODIFIED: Add matrix strategy ---
+    strategy:
+      fail-fast: false # Allow other audits to run even if one fails
+      matrix:
+        component:
+          - agentvault_library
+          - agentvault_cli
+          - agentvault_registry
+          - agentvault_server_sdk
+          # Add agentvault_testing_utils if it has its own lock file and dependencies to audit
+          # - agentvault_testing_utils
+    # --- END MODIFIED ---
+    # --- MODIFIED: Add name for better UI display ---
+    name: Audit ${{ matrix.component }}
+    # --- END MODIFIED ---
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
+        id: setup-python # Added id for caching key
         uses: actions/setup-python@v5
         with:
           python-version: '3.11' # Match project's Python version
@@ -25,33 +41,47 @@ jobs:
         uses: snok/install-poetry@v1
         with:
           virtualenvs-create: true # Recommended by poetry
-          virtualenvs-in-project: true # Easier to cache/manage in CI
+          # --- MODIFIED: Create venv within component dir for isolation ---
+          virtualenvs-in-project: true
+          # --- END MODIFIED ---
 
       - name: Install pip-audit
-        run: pip install pip-audit
+        # Run pip audit install globally for the runner, not in venv
+        run: pipx install pip-audit # Use pipx for tool isolation
 
-      - name: Load cached venv
+      # --- MODIFIED: Caching and Installation per component ---
+      - name: Load cached venv for ${{ matrix.component }}
         id: cached-poetry-dependencies
         uses: actions/cache@v4
         with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
+          # Cache path relative to the component directory
+          path: ${{ matrix.component }}/.venv
+          # Include component name in the key
+          key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ matrix.component }}-${{ hashFiles(format('{0}/poetry.lock', matrix.component)) }}
+          restore-keys: |
+            venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ matrix.component }}-
 
-      - name: Install project dependencies (including dev) if cache doesn't exist
+      - name: Install dependencies for ${{ matrix.component }} if cache doesn't exist
         if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-        run: poetry install --no-interaction --no-root # Install deps from lock file
+        # Run poetry install within the component directory
+        run: poetry install --no-interaction --no-root
+        working-directory: ${{ matrix.component }}
+      # --- END MODIFIED ---
 
-      # Generate a consolidated lock file at the root for pip-audit
-      # This is crucial for monorepos with path dependencies
-      - name: Generate consolidated lock file
-        run: poetry lock --no-update
-        working-directory: ${{ github.workspace }} # Ensure it runs at the root
+      # --- REMOVED: Consolidated lock file generation (not needed for per-component audit) ---
+      # - name: Generate consolidated lock file ...
+      # --- END REMOVED ---
 
-      - name: Run pip-audit
+      - name: Run pip-audit for ${{ matrix.component }}
         run: |
-          echo "Running pip-audit on the consolidated poetry.lock file..."
+          echo "Running pip-audit on ${{ matrix.component }}/poetry.lock file..."
+          # Activate venv for the component to ensure pip-audit checks installed versions if needed,
+          # although auditing the lock file directly is usually sufficient.
+          # source .venv/bin/activate # Optional: activate venv if needed
           pip-audit --requirement poetry.lock --progress-spinner=off --strict
           # Use --strict to fail on any vulnerability
           # Remove --strict initially if you want to just see warnings
           # Add --fix to attempt automatic upgrades (use with caution)
-        working-directory: ${{ github.workspace }} # Ensure it runs at the root
+        # --- MODIFIED: Run within the component directory ---
+        working-directory: ${{ matrix.component }}
+        # --- END MODIFIED ---
