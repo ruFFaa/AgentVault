@@ -28,7 +28,10 @@ The source code for these examples can be found in the `/examples/` directory of
     *   **Features:** Uses a custom `TaskContext` subclass, `InMemoryTaskStore`, and `asyncio.Event` to handle multi-turn interactions and background processing.
     *   **Good for:** Developers building conversational agents or agents that require maintaining context over several requests.
 
-*   **(Coming Soon) Library Usage Example:** A Python script demonstrating direct usage of the `agentvault` client library to discover and interact with an agent, bypassing the CLI.
+*   **[Direct Library Usage](examples/library_usage_example.md):** ([View Code](https://github.com/SecureAgentTools/AgentVault/tree/main/examples/library_usage_example))
+    *   **Focus:** Shows how to use the `agentvault` client library directly in a Python script to interact with an agent.
+    *   **Features:** Demonstrates loading agent cards, using `KeyManager`, calling `AgentVaultClient` methods (`initiate_task`, `receive_messages`), and handling events and errors.
+    *   **Good for:** Developers integrating AgentVault client functionality into custom applications or scripts.
 
 ## Running the Examples
 

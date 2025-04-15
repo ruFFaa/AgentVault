@@ -33,7 +33,7 @@ theme:
 plugins:
   - search # Enable search plugin
 
-# --- MODIFIED: Added Stateful Example to Nav ---
+# --- MODIFIED: Added Library Usage Example to Nav ---
 nav:
   - Home: index.md
   - Introduction:
@@ -45,7 +45,8 @@ nav:
       - Basic A2A Server: examples/basic_a2a_server.md
       - LangChain Tool: examples/langchain_integration.md
       - OAuth Agent: examples/oauth_agent_example.md
-      - Stateful Agent: examples/stateful_agent_example.md # Added new example
+      - Stateful Agent: examples/stateful_agent_example.md
+      - Direct Library Usage: examples/library_usage_example.md # Added new example
   - User Guide:
     - CLI Usage: user_guide/cli.md
   - Developer Guide:

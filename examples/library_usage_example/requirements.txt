@@ -1,0 +1,6 @@
+# AgentVault Core Library (Install from local path for development)
+# Adjust the path based on your monorepo structure relative to this example dir
+-e ../../agentvault_library
+
+# Optional: Install keyring support if testing agents that need it
+# -e ../../agentvault_library[os_keyring]
