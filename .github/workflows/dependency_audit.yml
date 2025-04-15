@@ -1,0 +1,57 @@
+name: Security Dependency Audit
+
+# Trigger on pushes and pull requests to the main branch
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  # Optional: Allow manual trigger from Actions tab
+  workflow_dispatch:
+
+jobs:
+  pip-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11' # Match project's Python version
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true # Recommended by poetry
+          virtualenvs-in-project: true # Easier to cache/manage in CI
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Install project dependencies (including dev) if cache doesn't exist
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root # Install deps from lock file
+
+      # Generate a consolidated lock file at the root for pip-audit
+      # This is crucial for monorepos with path dependencies
+      - name: Generate consolidated lock file
+        run: poetry lock --no-update
+        working-directory: ${{ github.workspace }} # Ensure it runs at the root
+
+      - name: Run pip-audit
+        run: |
+          echo "Running pip-audit on the consolidated poetry.lock file..."
+          pip-audit --requirement poetry.lock --progress-spinner=off --strict
+          # Use --strict to fail on any vulnerability
+          # Remove --strict initially if you want to just see warnings
+          # Add --fix to attempt automatic upgrades (use with caution)
+        working-directory: ${{ github.workspace }} # Ensure it runs at the root
