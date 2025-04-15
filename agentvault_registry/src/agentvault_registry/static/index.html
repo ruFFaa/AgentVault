@@ -5,53 +5,62 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AgentVault Registry</title>
     <link rel="stylesheet" href="/static/style.css">
+    <!-- Consider adding a favicon -->
+    <!-- <link rel="icon" href="/static/favicon.ico"> -->
 </head>
 <body>
     <header>
         <h1>AgentVault Registry</h1>
-        <!-- ADDED: Navigation Link -->
         <nav>
-            <a href="/ui/developer" style="color: #eee; text-decoration: none;">Developer Portal</a>
+            <a href="/ui/developer">Developer Portal</a>
+            <a href="/docs" target="_blank" rel="noopener">API Docs</a> <!-- Link to API docs -->
         </nav>
-        <!-- END ADDED -->
     </header>
+
     <main>
+        <!-- Search Section -->
         <section id="search-section">
             <label for="search-input">Search Agents:</label>
-            <input type="search" id="search-input" placeholder="Enter name or description...">
-            <!-- Add TEE filter later -->
+            <input type="search" id="search-input" placeholder="Filter by name or description..." aria-label="Search Agents">
+            <!-- TEE Filter can be added here later if needed -->
+            <!-- <label for="tee-filter">TEE:</label>
+            <select id="tee-filter">
+                <option value="">Any</option>
+                <option value="true">Required</option>
+                <option value="false">Not Required</option>
+            </select> -->
         </section>
+
+        <!-- Agent List View -->
         <section id="agent-list-section">
             <h2>Discover Agents</h2>
             <div id="agent-list-container">
-                <!-- Agent cards will be loaded here by JavaScript -->
                 <p>Loading agents...</p>
             </div>
             <div id="pagination-controls">
                 <!-- Pagination controls will be added here -->
             </div>
         </section>
+
+        <!-- Agent Detail View (Initially Hidden) -->
         <section id="agent-detail-section" style="display: none;">
+             <button id="back-to-list">&larr; Back to List</button>
              <h2>Agent Details</h2>
-             <button id="back-to-list">Back to List</button>
-             <pre id="agent-detail-content"></pre>
+             <div id="agent-detail-content">
+                 <!-- Agent card JSON will be loaded here -->
+                 <pre>Loading details...</pre>
+             </div>
              <div id="agent-policies">
                  <a id="privacy-policy-link" href="#" target="_blank" rel="noopener noreferrer" style="display: none;">Privacy Policy</a>
                  <a id="terms-link" href="#" target="_blank" rel="noopener noreferrer" style="display: none;">Terms of Service</a>
              </div>
         </section>
-        <!-- Developer Portal Section (Placeholder for later) -->
-        <!--
-        <hr>
-        <section id="developer-portal-section">
-            <h2>Developer Portal</h2>
-            <p>(Login and card management UI will go here)</p>
-        </section>
-        -->
     </main>
+
     <footer>
-        <p>AgentVault - Open Source Agent Discovery</p>
+        <p>AgentVault - Open Source Agent Discovery & Interoperability</p>
     </footer>
+
     <script src="/static/script.js"></script>
 </body>
 </html>

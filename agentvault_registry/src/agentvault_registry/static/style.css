@@ -1,125 +1,299 @@
+/* General Reset & Base Styles */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
 body {
-    font-family: sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
     line-height: 1.6;
-    margin: 20px;
-    background-color: #f4f4f4;
-    color: #333;
+    background-color: #f8f9fa; /* Lighter background */
+    color: #343a40; /* Darker text for contrast */
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    padding-top: 60px; /* Account for fixed header */
 }
 
-header, footer {
-    background-color: #333;
-    color: #fff;
-    padding: 10px 0;
+/* Header */
+header {
+    background-color: #343a40; /* Dark header */
+    color: #ffffff;
+    padding: 0.8rem 1.5rem;
     text-align: center;
-    margin-bottom: 20px;
+    position: fixed; /* Keep header fixed */
+    top: 0;
+    left: 0;
+    width: 100%;
+    z-index: 1000;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    display: flex; /* Use flexbox for alignment */
+    justify-content: space-between; /* Space out title and nav */
+    align-items: center;
 }
 
+header h1 {
+    color: #ffffff;
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 500;
+}
+
+header nav a {
+    color: #adb5bd; /* Lighter link color */
+    text-decoration: none;
+    margin-left: 15px;
+    font-size: 0.9rem;
+    transition: color 0.2s ease-in-out;
+}
+
+header nav a:hover {
+    color: #ffffff;
+}
+
+/* Main Content Area */
 main {
-    background-color: #fff;
-    padding: 20px;
-    border-radius: 5px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    max-width: 1000px; /* Limit content width */
+    margin: 2rem auto; /* Center content with top/bottom margin */
+    padding: 2rem;
+    background-color: #ffffff;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+    flex-grow: 1; /* Allow main to grow and push footer down */
+    width: 95%; /* Responsive width */
 }
 
-h1, h2 {
-    color: #333;
+h2 {
+    color: #495057;
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #dee2e6;
+    font-weight: 500;
 }
 
+/* Search Section */
 #search-section {
-    margin-bottom: 20px;
-    padding-bottom: 15px;
-    border-bottom: 1px solid #eee;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: none; /* Remove border if not needed */
+    display: flex;
+    align-items: center;
+    gap: 10px; /* Space between label and input */
 }
 
 #search-section label {
-    margin-right: 10px;
+    font-weight: 500;
+    color: #495057;
 }
 
 #search-input {
-    padding: 8px;
-    min-width: 300px;
-    border: 1px solid #ccc;
+    flex-grow: 1; /* Allow input to take available space */
+    padding: 0.6rem 0.8rem;
+    border: 1px solid #ced4da;
     border-radius: 4px;
+    font-size: 1rem;
+    transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
 }
 
-#agent-list-container .agent-card {
-    border: 1px solid #ddd;
-    padding: 15px;
-    margin-bottom: 15px;
-    border-radius: 4px;
-    background-color: #f9f9f9;
+#search-input:focus {
+    border-color: #80bdff;
+    outline: 0;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
 }
 
-#agent-list-container .agent-card h3 {
+/* Agent List */
+#agent-list-container {
+    margin-top: 1rem;
+}
+
+.agent-card {
+    background-color: #ffffff;
+    border: 1px solid #e9ecef;
+    padding: 1.2rem;
+    margin-bottom: 1rem;
+    border-radius: 6px;
+    transition: box-shadow 0.2s ease-in-out;
+}
+
+.agent-card:hover {
+     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.agent-card h3 {
     margin-top: 0;
-    margin-bottom: 5px;
-}
-#agent-list-container .agent-card p {
-    margin-bottom: 10px;
-    color: #555;
-}
-#agent-list-container .agent-card button {
-    padding: 5px 10px;
-    cursor: pointer;
-    background-color: #555;
-    color: white;
-    border: none;
-    border-radius: 3px;
-}
-#agent-list-container .agent-card button:hover {
-    background-color: #333;
+    margin-bottom: 0.5rem;
+    color: #007bff; /* Primary color for name */
+    font-weight: 600;
+    font-size: 1.15rem;
 }
 
-/* --- ADDED: Styles for verified badge --- */
+.agent-card p {
+    margin-bottom: 0.8rem;
+    color: #6c757d; /* Softer color for description */
+    font-size: 0.95rem;
+}
+
+.agent-card small {
+    display: block; /* Make ID block for spacing */
+    margin-bottom: 0.8rem;
+    color: #adb5bd;
+    font-size: 0.8rem;
+}
+
 .verified-badge {
-    font-weight: bold;
-    color: #28a745; /* Bootstrap success green */
+    font-weight: 500;
+    color: #28a745; /* Green for verified */
+    background-color: #e9f7ef;
+    padding: 0.2em 0.5em;
+    border-radius: 4px;
+    font-size: 0.75rem;
     margin-left: 5px;
-    font-size: 0.9em;
-    display: inline-block; /* Allows margin */
-}
-/* --- END ADDED --- */
-
-#pagination-controls {
-    margin-top: 20px;
-    text-align: center;
+    display: inline-block;
 }
 
-#pagination-controls button {
-    padding: 8px 15px;
-    margin: 0 5px;
+/* Buttons */
+button {
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+    border-radius: 4px;
     cursor: pointer;
+    border: 1px solid transparent;
+    transition: background-color 0.2s ease-in-out, border-color 0.2s ease-in-out, color 0.2s ease-in-out;
 }
 
-#agent-detail-section {
-    margin-top: 20px;
-    padding-top: 15px;
+.agent-card button, #back-to-list {
+    background-color: #6c757d; /* Secondary button color */
+    color: white;
+    border-color: #6c757d;
+}
+
+.agent-card button:hover, #back-to-list:hover {
+    background-color: #5a6268;
+    border-color: #545b62;
+}
+
+/* Pagination */
+#pagination-controls {
+    margin-top: 2rem;
+    text-align: center;
+    padding-top: 1rem;
     border-top: 1px solid #eee;
 }
 
-#agent-detail-section pre {
-    background-color: #eee;
-    padding: 15px;
+#pagination-controls button {
+    background-color: #007bff;
+    color: white;
+    border-color: #007bff;
+    margin: 0 5px;
+}
+
+#pagination-controls button:disabled {
+    background-color: #e9ecef;
+    color: #6c757d;
+    border-color: #dee2e6;
+    cursor: not-allowed;
+}
+
+#pagination-controls button:not(:disabled):hover {
+    background-color: #0056b3;
+    border-color: #004085;
+}
+
+#pagination-controls span {
+    margin: 0 10px;
+    color: #6c757d;
+    font-size: 0.9rem;
+}
+
+/* Agent Detail View */
+#agent-detail-section {
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid #eee;
+}
+
+#agent-detail-section h2 {
+    margin-bottom: 1rem;
+}
+
+#agent-detail-content {
+    margin-top: 1rem;
+}
+
+#agent-detail-content pre {
+    background-color: #e9ecef; /* Light background for code */
+    color: #212529;
+    padding: 1rem;
     border-radius: 4px;
-    white-space: pre-wrap; /* Wrap long lines */
-    word-wrap: break-word; /* Break long words */
-    max-height: 500px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    max-height: 600px; /* Increase max height */
     overflow-y: auto;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+    font-size: 0.875rem;
+    border: 1px solid #dee2e6;
+}
+
+#agent-policies {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid #eee;
 }
 
 #agent-policies a {
     display: inline-block;
     margin-right: 15px;
-    margin-top: 10px;
+    color: #007bff;
+    text-decoration: none;
+    font-size: 0.9rem;
+}
+
+#agent-policies a:hover {
+    text-decoration: underline;
 }
 
 #back-to-list {
-    margin-bottom: 15px;
-    padding: 8px 15px;
-    cursor: pointer;
+    margin-bottom: 1.5rem;
 }
 
-footer p {
-    margin: 0;
-    font-size: 0.9em;
+/* Footer */
+footer {
+    background-color: #e9ecef; /* Lighter footer */
+    color: #6c757d;
+    padding: 1rem 0;
+    text-align: center;
+    margin-top: 2rem; /* Ensure space above footer */
+    font-size: 0.85rem;
+    border-top: 1px solid #dee2e6;
+}
+
+/* Basic Responsiveness */
+@media (max-width: 768px) {
+    body {
+        padding-top: 50px; /* Adjust for potentially smaller header */
+    }
+    main {
+        margin: 1rem auto;
+        padding: 1rem;
+        width: 98%;
+    }
+    header {
+        padding: 0.5rem 1rem;
+        flex-direction: column; /* Stack title and nav on small screens */
+        text-align: center;
+    }
+    header h1 {
+        margin-bottom: 0.5rem;
+    }
+    header nav a {
+        margin: 0 8px;
+    }
+    #search-section {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    #search-section label {
+        margin-bottom: 5px;
+    }
 }
