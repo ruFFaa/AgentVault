@@ -33,13 +33,14 @@ theme:
 plugins:
   - search # Enable search plugin
 
-# --- MODIFIED: Added Vision to Nav (Option A) ---
+# --- MODIFIED: Added Vision and Use Cases (placeholder) to Nav ---
 nav:
   - Home: index.md
   - Vision: vision.md # Added Vision page prominently
   - Introduction:
     - Concepts: concepts.md
     - Architecture: architecture.md
+    - Use Cases: use_cases.md # Added Use Cases page link
   - Installation: installation.md
   - Examples:
       - Overview: examples.md
