@@ -1,9 +1,10 @@
 # MkDocs Configuration for AgentVault
 
 site_name: AgentVault Documentation
-# TODO: Update site_url and repo_url when deploying/publishing
-site_url: https://github.com/raphaeljeziorny/AgentVault/ # Placeholder
-repo_url: https://github.com/raphaeljeziorny/AgentVault/ # Placeholder
+# --- CORRECTED: Use the actual GitHub Pages URL ---
+site_url: https://SecureAgentTools.github.io/AgentVault/
+# --- CORRECTED: Use the correct repository URL ---
+repo_url: https://github.com/SecureAgentTools/AgentVault/
 repo_name: AgentVault
 edit_uri: "" # Disable edit button for now
 
@@ -47,11 +48,9 @@ nav:
     - Server SDK: developer_guide/server_sdk.md
     - Registry API: developer_guide/registry.md
     - Testing Utilities: developer_guide/testing.md
-  # --- ADDED: Protocols Section ---
   - Protocols:
     - A2A Profile v0.2: a2a_profile_v0.2.md
     # - TEE Profile: tee_profile.md # Placeholder
-  # --- END ADDED ---
   # Placeholders for future structure:
   # - Automation: automation_scripts.md
   # - Contributing: CONTRIBUTING.md # Link to existing?
