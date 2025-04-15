@@ -6,21 +6,25 @@ import asyncio
 import logging # Added import
 from abc import ABC
 from unittest.mock import patch, MagicMock, ANY, AsyncMock
-from typing import Optional, Dict, Any, Union, Tuple, AsyncGenerator, List
+from typing import Optional, Dict, Any, Union, Tuple, AsyncGenerator, List, Callable
 
-from fastapi import FastAPI, status, Request, Response
+# --- MODIFIED: Import FastAPI directly ---
+from fastapi import FastAPI, status, Request, Response, HTTPException
+# --- END MODIFIED ---
 from fastapi.testclient import TestClient
 from fastapi.responses import StreamingResponse, JSONResponse
 import pydantic # Import pydantic for ValidationError
+# --- ADDED: Import pydantic_core ---
+from pydantic_core import ValidationError
+# --- END ADDED ---
+
 
 # Import SDK components
 from agentvault_server_sdk.agent import BaseA2AAgent
 from agentvault_server_sdk.fastapi_integration import (
     create_a2a_router, SSEResponse, a2a_method,
-    # --- MODIFIED: Import renamed handlers ---
     task_not_found_handler, validation_exception_handler,
     agent_server_error_handler, generic_exception_handler
-    # --- END MODIFIED ---
 )
 from agentvault_server_sdk.exceptions import AgentServerError, TaskNotFoundError
 from agentvault_server_sdk.fastapi_integration import JSONRPC_INVALID_PARAMS, JSONRPC_METHOD_NOT_FOUND, JSONRPC_PARSE_ERROR, JSONRPC_INVALID_REQUEST, JSONRPC_APP_ERROR, JSONRPC_INTERNAL_ERROR, JSONRPC_TASK_NOT_FOUND
@@ -66,6 +70,8 @@ class MockAgent(BaseA2AAgent):
         self.sse_events_to_yield: List[A2AEvent] = []
         self.subscribe_should_raise: Optional[Exception] = None # Specific error for subscribe handler
         self.custom_echo_should_raise: Optional[Exception] = None
+        self.custom_bad_return_value: Any = None # For testing return validation
+
 
     def configure_error(self, error: Optional[Exception]):
         self.should_raise = error
@@ -81,6 +87,9 @@ class MockAgent(BaseA2AAgent):
         self.custom_echo_should_raise = error
         self.should_raise = None
         self.subscribe_should_raise = None
+
+    def configure_custom_bad_return(self, value: Any):
+        self.custom_bad_return_value = value
 
     def configure_cancel_result(self, result: bool):
         self.cancel_result = result
@@ -141,12 +150,19 @@ class MockAgent(BaseA2AAgent):
             await asyncio.sleep(0.01)
 
     @a2a_method("custom/echo")
-    async def custom_echo(self, message: str) -> str:
+    async def custom_echo(self, message: str, extra_param: Optional[int] = None) -> str:
         """A simple echo method for testing decorators."""
-        logging.info(f"Executing custom_echo with message: '{message}'")
+        logging.info(f"Executing custom_echo with message: '{message}', extra: {extra_param}")
         if self.custom_echo_should_raise:
             raise self.custom_echo_should_raise
-        return message
+        return f"Echo: {message}" + (f" | Extra: {extra_param}" if extra_param is not None else "")
+
+    @a2a_method("custom/bad_return")
+    async def custom_bad_return(self, value: int) -> str: # Expects str return
+        """Method designed to return an invalid type for testing."""
+        logging.info(f"Executing custom_bad_return with value: {value}")
+        # Return an int instead of the annotated str
+        return self.custom_bad_return_value if self.custom_bad_return_value is not None else 12345
 
 
 # --- Pytest Fixture ---
@@ -156,6 +172,8 @@ def test_app() -> Tuple[MockAgent, TestClient]:
     """Creates a FastAPI app with the A2A router and exception handlers for testing."""
     mock_agent = MockAgent()
     task_store = InMemoryTaskStore()
+    # Link the agent's task dict to the store for consistency in tests
+    # In a real scenario, the agent would likely use the injected store directly
     task_store._tasks = mock_agent.tasks
     a2a_router = create_a2a_router(agent=mock_agent, prefix="/a2a", task_store=task_store)
 
@@ -163,15 +181,15 @@ def test_app() -> Tuple[MockAgent, TestClient]:
     app = FastAPI()
     app.include_router(a2a_router)
 
-    # --- Register all handlers on the test app ---
+    # Register all handlers on the test app
     app.add_exception_handler(TaskNotFoundError, task_not_found_handler)
     app.add_exception_handler(ValueError, validation_exception_handler)
     app.add_exception_handler(TypeError, validation_exception_handler)
-    app.add_exception_handler(pydantic.ValidationError, validation_exception_handler)
+    # --- MODIFIED: Use correct ValidationError import ---
+    app.add_exception_handler(ValidationError, validation_exception_handler)
+    # --- END MODIFIED ---
     app.add_exception_handler(AgentServerError, agent_server_error_handler)
-    # --- ADDED: Explicit RuntimeError handler ---
     app.add_exception_handler(RuntimeError, generic_exception_handler)
-    # --- END ADDED ---
     app.add_exception_handler(Exception, generic_exception_handler) # Generic handler LAST
 
     client = TestClient(app)
@@ -193,7 +211,184 @@ def make_rpc_request(
 
 
 # --- Test Cases ---
-# ... (other tests remain the same) ...
+
+# Tests for Decorator Directly
+def test_a2a_method_decorator_success():
+    """Test applying decorator to async function attaches attribute."""
+    method_name = "test/method"
+    @a2a_method(method_name)
+    async def my_async_handler(param1: str): pass
+
+    assert hasattr(my_async_handler, "_a2a_method_name")
+    assert getattr(my_async_handler, "_a2a_method_name") == method_name
+
+def test_a2a_method_decorator_sync_fail():
+    """Test applying decorator to sync function raises TypeError."""
+    with pytest.raises(TypeError, match="must be an async function"):
+        @a2a_method("test/sync_fail")
+        def my_sync_handler(param1: str): pass
+
+def test_a2a_method_decorator_empty_name_fail():
+    """Test decorator raises ValueError for empty method name."""
+    with pytest.raises(ValueError, match="requires a non-empty string"):
+        a2a_method("")
+
+def test_a2a_method_decorator_non_string_name_fail():
+    """Test decorator raises ValueError for non-string method name."""
+    with pytest.raises(ValueError, match="requires a non-empty string"):
+        a2a_method(123) # type: ignore
+
+
+# Tests for Decorated Method Routing
+def test_decorated_method_routing_success(test_app: Tuple[MockAgent, TestClient]):
+    """Test a request to a decorated method is routed correctly."""
+    mock_agent, client = test_app
+    req_id = "echo-req-1"
+    params = {"message": "Hello Decorator!"}
+    response = make_rpc_request(client, "custom/echo", params=params, req_id=req_id)
+
+    assert response.status_code == status.HTTP_200_OK
+    resp_data = response.json()
+    assert resp_data.get("id") == req_id
+    assert resp_data.get("result") == "Echo: Hello Decorator!"
+
+def test_decorated_method_routing_param_validation_fail(test_app: Tuple[MockAgent, TestClient]):
+    """Test parameter validation failure for a decorated method."""
+    mock_agent, client = test_app
+    req_id = "echo-req-bad-param"
+    # Send 'message' as an integer instead of string
+    params = {"message": 12345}
+    response = make_rpc_request(client, "custom/echo", params=params, req_id=req_id)
+
+    assert response.status_code == status.HTTP_200_OK # JSON-RPC errors return 200
+    resp_data = response.json()
+    assert resp_data.get("id") == req_id
+    assert "error" in resp_data
+    assert resp_data["error"]["code"] == JSONRPC_INVALID_PARAMS
+    assert "Invalid parameters" in resp_data["error"]["message"]
+    # Check Pydantic's error detail if possible
+    assert "Input should be a valid string" in resp_data["error"]["message"]
+
+def test_decorated_method_routing_return_validation_fail(test_app: Tuple[MockAgent, TestClient]):
+    """Test return value validation failure for a decorated method."""
+    mock_agent, client = test_app
+    req_id = "bad-return-req"
+    params = {"value": 10} # Correct input param type
+
+    # Configure the mock agent to return an int instead of str
+    mock_agent.configure_custom_bad_return(999)
+
+    response = make_rpc_request(client, "custom/bad_return", params=params, req_id=req_id)
+
+    # Return type validation errors currently result in 500 Internal Server Error
+    # because it happens *after* the main request handling logic but before serialization.
+    assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+    resp_data = response.json()
+    assert resp_data.get("id") == req_id
+    assert "error" in resp_data
+    assert resp_data["error"]["code"] == JSONRPC_INTERNAL_ERROR
+    assert "Invalid return type" in resp_data["error"]["message"] # Check for specific message
+
+def test_decorated_method_routing_not_found(test_app: Tuple[MockAgent, TestClient]):
+    """Test calling a method name that is not decorated or standard."""
+    mock_agent, client = test_app
+    req_id = "not-found-req"
+    response = make_rpc_request(client, "non/existent_method", params={}, req_id=req_id)
+
+    assert response.status_code == status.HTTP_200_OK # JSON-RPC error
+    resp_data = response.json()
+    assert resp_data.get("id") == req_id
+    assert "error" in resp_data
+    assert resp_data["error"]["code"] == JSONRPC_METHOD_NOT_FOUND
+    assert resp_data["error"]["message"] == "Method not found"
+
+# --- MODIFIED: Refactored test to create app/client inside ---
+def test_decorated_method_overrides_standard_if_named_same():
+    """Test that a decorated method overrides a standard handle_ method if named identically."""
+    # 1. Create a new agent instance specifically for this test
+    agent_with_override = MockAgent()
+
+    # 2. Define and attach the overriding decorated method *before* creating the router
+    @a2a_method("tasks/get")
+    async def custom_tasks_get(self, task_id: str) -> Dict: # Return dict instead of Task
+        return {"id": task_id, "status": "overridden by decorator"}
+
+    # Use MethodType to bind 'self' correctly if needed, or just setattr
+    # setattr(agent_with_override, 'custom_tasks_get_handler', custom_tasks_get.__get__(agent_with_override, MockAgent))
+    # Simpler: just assign the async function directly if it doesn't rely on 'self' state beyond what's passed in
+    agent_with_override.custom_tasks_get_handler = custom_tasks_get.__get__(agent_with_override, MockAgent)
+
+
+    # 3. Create the router using this specific agent instance
+    task_store = InMemoryTaskStore()
+    task_store._tasks = agent_with_override.tasks # Link store if needed
+    a2a_router = create_a2a_router(agent=agent_with_override, prefix="/a2a", task_store=task_store)
+
+    # 4. Create a new FastAPI app instance
+    test_override_app = FastAPI()
+
+    # 5. Add exception handlers (copy from fixture setup)
+    test_override_app.add_exception_handler(TaskNotFoundError, task_not_found_handler)
+    test_override_app.add_exception_handler(ValueError, validation_exception_handler)
+    test_override_app.add_exception_handler(TypeError, validation_exception_handler)
+    test_override_app.add_exception_handler(ValidationError, validation_exception_handler)
+    test_override_app.add_exception_handler(AgentServerError, agent_server_error_handler)
+    test_override_app.add_exception_handler(RuntimeError, generic_exception_handler)
+    test_override_app.add_exception_handler(Exception, generic_exception_handler)
+
+    # 6. Include the router
+    test_override_app.include_router(a2a_router)
+
+    # 7. Create a TestClient for this specific app
+    client = TestClient(test_override_app)
+
+    # 8. Run the test logic
+    task_id = "task-override-test"
+    agent_with_override.tasks[task_id] = TaskContext(task_id=task_id, current_state=TaskState.WORKING)
+    req_id = "override-req"
+    response = make_rpc_request(client, "tasks/get", params={"id": task_id}, req_id=req_id) # Use the new client
+
+    # 9. Assertions
+    assert response.status_code == status.HTTP_200_OK
+    resp_data = response.json()
+    assert resp_data.get("id") == req_id
+    assert "result" in resp_data
+    # Check that the decorator's response was returned
+    assert resp_data["result"] == {"id": task_id, "status": "overridden by decorator"}
+
+# --- END MODIFIED ---
+
+
+# Test agent raising specific AgentServerError
+def test_agent_server_error(test_app: Tuple[MockAgent, TestClient]):
+    mock_agent, client = test_app
+    error_message = "Agent failed during processing"
+    mock_agent.configure_error(AgentServerError(error_message))
+    task_id = "task-agent-fail"
+    req_id = "agent-err-1" # Define req_id
+    mock_agent.tasks[task_id] = TaskContext(task_id=task_id, current_state=TaskState.WORKING)
+
+    response = make_rpc_request(client, "tasks/get", params={"id": task_id}, req_id=req_id)
+    assert response.status_code == status.HTTP_200_OK # JSON-RPC error
+    resp_data = response.json()
+    assert resp_data["error"]["code"] == JSONRPC_APP_ERROR
+    assert f"Agent error: {error_message}" in resp_data["error"]["message"]
+    assert resp_data["id"] == req_id # ID should be preserved
+
+# Test agent raising TaskNotFoundError
+def test_agent_task_not_found_error(test_app: Tuple[MockAgent, TestClient]):
+    mock_agent, client = test_app
+    task_id = "task-not-found-agent"
+    req_id = "agent-err-2" # Define req_id
+    mock_agent.configure_error(TaskNotFoundError(task_id=task_id))
+
+    response = make_rpc_request(client, "tasks/get", params={"id": task_id}, req_id=req_id)
+    assert response.status_code == status.HTTP_200_OK # JSON-RPC error
+    resp_data = response.json()
+    assert resp_data["error"]["code"] == JSONRPC_TASK_NOT_FOUND
+    assert f"Task not found: {task_id}" in resp_data["error"]["message"]
+    assert resp_data["id"] == req_id # ID should be preserved
+
 
 # Test agent raising unexpected Python error
 def test_agent_unexpected_error(test_app: Tuple[MockAgent, TestClient]):
@@ -208,11 +403,8 @@ def test_agent_unexpected_error(test_app: Tuple[MockAgent, TestClient]):
     resp_data = response.json()
     assert resp_data["error"]["code"] == JSONRPC_INTERNAL_ERROR
     assert "Internal server error: RuntimeError" in resp_data["error"]["message"]
-    # --- Assert ID matches original request ID (generic handler preserves it) ---
-    assert resp_data["id"] == req_id
-    # --- END Assert ---
+    assert resp_data["id"] == req_id # ID should be preserved
 
-# ... (other tests remain the same) ...
 
 # --- Test SSE Endpoint ---
 
@@ -223,8 +415,8 @@ async def test_subscribe_success_yields_events(test_app: Tuple[MockAgent, TestCl
     task_id = "sse-task-1"
     mock_agent.tasks[task_id] = TaskContext(task_id=task_id, current_state=TaskState.WORKING)
     now = datetime.datetime.now(datetime.timezone.utc)
-    event1 = TaskStatusUpdateEvent(task_id=task_id, state=TaskState.WORKING, timestamp=now)
-    event2 = TaskMessageEvent(task_id=task_id, message=Message(role="assistant", parts=[TextPart(content="Update")]), timestamp=now)
+    event1 = TaskStatusUpdateEvent(taskId=task_id, state=TaskState.WORKING, timestamp=now)
+    event2 = TaskMessageEvent(taskId=task_id, message=Message(role="assistant", parts=[TextPart(content="Update")]), timestamp=now)
     mock_agent.configure_sse_events([event1, event2])
 
     response = make_rpc_request(client, "tasks/sendSubscribe", params={"id": task_id}, req_id="sse-1")
@@ -239,7 +431,7 @@ async def test_subscribe_success_yields_events(test_app: Tuple[MockAgent, TestCl
 
     assert len(lines) >= 2 # Expect at least the two events
 
-    # --- Parse JSON and check alias ---
+    # Parse JSON and check alias
     event1_data_str = lines[0].split("data: ", 1)[1]
     event1_data = json.loads(event1_data_str)
     assert "event: task_status" in lines[0]

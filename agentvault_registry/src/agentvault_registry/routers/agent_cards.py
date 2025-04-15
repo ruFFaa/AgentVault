@@ -11,9 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-# --- MODIFIED: Import APIRouter earlier ---
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
-# --- END MODIFIED ---
 from pydantic import ValidationError as PydanticValidationError # To catch validation errors
 
 # Import local dependencies with absolute imports
@@ -23,11 +21,9 @@ from agentvault_registry.crud import agent_card
 # Import the AgentCard model from the core library for validation
 try:
     from agentvault import AgentCard as AgentCardModel
-    from agentvault import AgentCardValidationError # Although we catch Pydantic's directly
     _agentvault_lib_available = True
 except ImportError:
     AgentCardModel = None # type: ignore
-    AgentCardValidationError = Exception # Placeholder
     _agentvault_lib_available = False
     logging.warning("Could not import 'agentvault' library. Agent Card validation during CRUD operations will be skipped.")
 
@@ -85,15 +81,11 @@ async def submit_agent_card(
         db_agent_card = await agent_card.create_agent_card(
             db=db, developer_id=current_developer.id, card_create=card_in
         )
-        # Refresh should load relationships if configured correctly,
-        # but explicitly reload developer if needed after refresh for safety.
         if db_agent_card and (not hasattr(db_agent_card, 'developer') or not db_agent_card.developer):
              await db.refresh(db_agent_card, attribute_names=['developer'])
 
-        # Build dict manually before returning
         response_dict = _build_agent_card_read_dict(db_agent_card)
-        # Pydantic validates the dict when FastAPI returns it based on response_model
-        return response_dict # type: ignore # FastAPI handles dict -> schema
+        return response_dict # type: ignore
     except ValueError as e:
         logger.warning(f"Failed to create agent card due to validation/DB error: {e}")
         raise HTTPException(
@@ -113,30 +105,34 @@ async def submit_agent_card(
     "/",
     response_model=schemas.AgentCardListResponse,
     summary="List Agent Cards",
-    description="Retrieves a paginated list of active Agent Cards, optionally filtered by search query, tags, or ownership.",
+    description="Retrieves a paginated list of active Agent Cards, optionally filtered by search query, tags, TEE status, or ownership.",
 )
 async def list_agent_cards(
-    db: AsyncSession = Depends(database.get_db),
+    # --- MODIFIED: Added has_tee and tee_type parameters ---
     skip: int = Query(0, ge=0, description="Number of records to skip for pagination."),
     limit: int = Query(100, ge=1, le=250, description="Maximum number of records to return."),
     active_only: bool = Query(True, description="Filter for active agent cards only."),
     search: Optional[str] = Query(
         None,
-        max_length=100, # Limit search term length
+        max_length=100,
         description="Search term to filter by name or description (case-insensitive, max 100 chars)."
     ),
     tags: Optional[List[str]] = Query(
         None,
         description="List of tags to filter by (agents must have ALL specified tags)."
     ),
-    # --- ADDED: owned_only parameter and optional developer dependency ---
+    has_tee: Optional[bool] = Query(None, description="Filter for agents that have TEE details declared."),
+    tee_type: Optional[str] = Query(None, max_length=50, description="Filter by the specific TEE type string (e.g., 'Intel SGX', max 50 chars)."),
     owned_only: bool = Query(False, description="If true, only return cards owned by the authenticated developer (requires authentication)."),
+    # Depends parameters must come after Query/Path/Body parameters
+    db: AsyncSession = Depends(database.get_db),
     current_developer: Optional[models.Developer] = Depends(security.get_current_developer_optional)
-    # --- END ADDED ---
+    # --- END MODIFIED ---
 ):
     """
     Public endpoint to list and search for Agent Cards.
     Can optionally filter by owned cards if authenticated.
+    Can filter by TEE presence and type.
     """
     developer_id_filter: Optional[int] = None
     if owned_only:
@@ -146,15 +142,23 @@ async def list_agent_cards(
                 detail="Authentication required to list owned agent cards."
             )
         developer_id_filter = current_developer.id
-        logger.info(f"Listing agent cards for owner ID: {developer_id_filter}, skip={skip}, limit={limit}, active_only={active_only}, search='{search}', tags={tags}")
+        # --- MODIFIED: Updated logging ---
+        logger.info(f"Listing agent cards for owner ID: {developer_id_filter}, skip={skip}, limit={limit}, active_only={active_only}, search='{search}', tags={tags}, has_tee={has_tee}, tee_type='{tee_type}'")
+        # --- END MODIFIED ---
     else:
-        logger.info(f"Listing public agent cards with skip={skip}, limit={limit}, active_only={active_only}, search='{search}', tags={tags}")
+        # --- MODIFIED: Updated logging ---
+        logger.info(f"Listing public agent cards with skip={skip}, limit={limit}, active_only={active_only}, search='{search}', tags={tags}, has_tee={has_tee}, tee_type='{tee_type}'")
+        # --- END MODIFIED ---
 
     try:
+        # --- MODIFIED: Pass new parameters to CRUD function ---
         items, total_items = await agent_card.list_agent_cards(
             db=db, skip=skip, limit=limit, active_only=active_only, search=search, tags=tags,
-            developer_id=developer_id_filter # Pass filter value
+            developer_id=developer_id_filter,
+            has_tee=has_tee, # Pass has_tee
+            tee_type=tee_type # Pass tee_type
         )
+        # --- END MODIFIED ---
 
         # Calculate pagination details
         current_page = (skip // limit) + 1
@@ -202,9 +206,7 @@ async def get_agent_card(
         logger.warning(f"Agent card with ID {card_id} not found.")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent Card not found")
 
-    # Build dict manually before returning
     response_dict = _build_agent_card_read_dict(db_card)
-    # Pydantic validates the dict when FastAPI returns it based on response_model
     return response_dict # type: ignore
 
 
@@ -241,15 +243,11 @@ async def update_agent_card(
     try:
         updated_card = await agent_card.update_agent_card(db=db, db_card=db_card, card_update=card_in)
 
-        # Ensure developer relationship is loaded for the response schema
-        # Refresh should handle this, but check if needed
         if updated_card and (not hasattr(updated_card, 'developer') or not updated_card.developer):
              logger.info(f"Refreshing developer relationship for updated card {updated_card.id}")
              await db.refresh(updated_card, attribute_names=['developer'])
 
-        # Build dict manually before returning
         response_dict = _build_agent_card_read_dict(updated_card)
-        # Pydantic validates the dict when FastAPI returns it based on response_model
         return response_dict # type: ignore
     except ValueError as e:
         logger.warning(f"Failed to update agent card {card_id} due to validation/DB error: {e}")
@@ -287,32 +285,22 @@ async def delete_agent_card(
     # Fetch the card first to check ownership (developer relationship is loaded by get_agent_card)
     db_card = await agent_card.get_agent_card(db=db, card_id=card_id)
     if db_card is None:
-        # Return 404 even if it existed but belonged to someone else,
-        # to avoid leaking information about ownership.
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent Card not found")
 
     # Ownership check
     if db_card.developer_id != current_developer.id:
         logger.warning(f"Developer {current_developer.id} attempted to delete agent card {card_id} owned by {db_card.developer_id}")
-        # Return 403 if they don't own it
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete this agent card")
 
     # Proceed with soft delete
     success = await agent_card.delete_agent_card(db=db, card_id=card_id)
 
     if not success:
-        # This might happen if the card was deleted between the get and delete calls,
-        # or if there was a DB error during the update.
-        # Check if it still exists but failed to update
-        # Re-fetch to check current state
         check_card = await agent_card.get_agent_card(db=db, card_id=card_id)
         if check_card and check_card.is_active:
              logger.error(f"Failed to deactivate agent card {card_id} due to a database error.")
              raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to deactivate agent card")
         elif not check_card:
-             # If it disappeared, treat as 404 from the start
              raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent Card not found")
-        # If it exists and is already inactive, the CRUD function returns True, so this path shouldn't be hit often.
 
-    # Return No Content on successful deactivation
     return Response(status_code=status.HTTP_204_NO_CONTENT)

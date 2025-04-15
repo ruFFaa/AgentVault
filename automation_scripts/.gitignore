@@ -1,0 +1,21 @@
+# Python cache/build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Virtual environments (though unlikely inside here)
+.venv/
+venv/
+ENV/
+env/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Temp files/logs specific to script runs (examples)
+*.log
+temp/
+output/
+*.tmp

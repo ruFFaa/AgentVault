@@ -10,7 +10,8 @@ import asyncio
 from typing import Any, Dict, Optional, Union, AsyncGenerator, Callable, TypeVar, List
 
 import pydantic
-from pydantic import RootModel
+from pydantic import RootModel, create_model
+
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -69,10 +70,25 @@ JSONRPC_TASK_NOT_FOUND = -32001
 F = TypeVar('F', bound=Callable[..., Any])
 
 def a2a_method(method_name: str) -> Callable[[F], F]:
-    """ Decorator to mark agent methods as handlers for specific A2A JSON-RPC methods. """
+    """
+    Decorator to mark agent methods as handlers for specific A2A JSON-RPC methods.
+
+    Attaches the specified `method_name` as the '_a2a_method_name' attribute
+    to the decorated async function. Raises TypeError if applied to a sync function.
+
+    Args:
+        method_name: The JSON-RPC method name (e.g., "custom/my_action").
+    """
+    if not isinstance(method_name, str) or not method_name:
+        raise ValueError("a2a_method decorator requires a non-empty string method_name.")
+
     def _decorator(func: F) -> F:
+        """Inner decorator function."""
+        # Ensure the decorated function is async
         if not asyncio.iscoroutinefunction(func):
             raise TypeError(f"A2A method handler '{func.__name__}' must be an async function (defined with 'async def').")
+
+        # Attach the method name as an attribute
         setattr(func, '_a2a_method_name', method_name)
         logger.debug(f"Marking method '{func.__name__}' as handler for A2A method '{method_name}'")
         return func
@@ -181,18 +197,26 @@ def create_a2a_router(
     router = APIRouter(prefix=prefix, tags=tags)
     logger.info(f"Creating A2A router for agent: {agent.__class__.__name__} with prefix '{prefix}' using task store: {final_task_store.__class__.__name__}")
 
+    # Inspect agent for decorated methods
     decorated_methods: Dict[str, Callable] = {}
     logger.debug(f"Inspecting agent instance '{agent.__class__.__name__}' for @a2a_method decorators...")
     try:
+        # Iterate through methods that are coroutine functions
         for name, method_func in inspect.getmembers(agent, predicate=inspect.iscoroutinefunction):
+            # Check if the method has our specific attribute
             if hasattr(method_func, '_a2a_method_name'):
                 a2a_name = getattr(method_func, '_a2a_method_name')
+                # Ensure the attached name is a valid string
                 if isinstance(a2a_name, str) and a2a_name:
-                    if a2a_name in decorated_methods: logger.warning(f"Duplicate @a2a_method name '{a2a_name}' found on method '{name}'. Overwriting previous handler ({decorated_methods[a2a_name].__name__}).")
+                    # Check for duplicates and warn/overwrite
+                    if a2a_name in decorated_methods:
+                        logger.warning(f"Duplicate @a2a_method name '{a2a_name}' found on method '{name}'. Overwriting previous handler ({decorated_methods[a2a_name].__name__}).")
                     decorated_methods[a2a_name] = method_func
                     logger.info(f"  Found A2A method: '{a2a_name}' handled by '{name}'")
-                else: logger.warning(f"Method '{name}' has '_a2a_method_name' attribute, but it's not a valid string: {a2a_name!r}")
-    except Exception as inspect_err: logger.error(f"Error during inspection of agent methods: {inspect_err}", exc_info=True)
+                else:
+                    logger.warning(f"Method '{name}' has '_a2a_method_name' attribute, but it's not a valid string: {a2a_name!r}")
+    except Exception as inspect_err:
+        logger.error(f"Error during inspection of agent methods: {inspect_err}", exc_info=True)
     logger.debug(f"Finished inspection. Found {len(decorated_methods)} decorated methods.")
 
     def get_task_store_dependency() -> BaseTaskStore: return final_task_store
@@ -217,52 +241,80 @@ def create_a2a_router(
 
         logger.info(f"Received valid JSON-RPC request: method='{method}', id='{req_id}'")
 
-        handler_func: Optional[Callable] = decorated_methods.get(method)
+        handler_func = decorated_methods.get(method)
 
         if handler_func:
-            # (Decorator handling logic - unchanged)
-            # ...
             logger.info(f"Routing request for method '{method}' to decorated handler '{handler_func.__name__}'")
             sig = inspect.signature(handler_func)
             param_fields: Dict[str, Any] = {}
             handler_needs_task_store = False
+            python_param_names = [] # Store expected python names
+
+            # --- MODIFIED: Build dynamic model fields ---
             for param_name, param in sig.parameters.items():
                 if param_name in ('self', 'cls'): continue
+                python_param_names.append(param_name) # Store python name
                 if param.annotation is BaseTaskStore or \
                    (isinstance(param.annotation, type) and issubclass(param.annotation, BaseTaskStore)):
                     handler_needs_task_store = True
-                    continue
+                    continue # Don't add task store to the dynamic model
+
                 param_annotation = param.annotation
                 param_default = param.default
                 default_value = ... if param_default is inspect.Parameter.empty else param_default
                 annotation_to_use = Any if param_annotation is inspect.Parameter.empty else param_annotation
                 param_fields[param_name] = (annotation_to_use, default_value)
+            # --- END MODIFIED ---
 
-            ParamsModel = pydantic.create_model(f'{handler_func.__name__}Params', **param_fields) # type: ignore
+            # --- MODIFIED: Map common aliases before validation ---
             params_dict = params if isinstance(params, dict) else {}
-            validated_params_model = ParamsModel.model_validate(params_dict)
+            mapped_params_dict = params_dict.copy() # Start with original params
+
+            # Example mapping: JSON "id" -> Python "task_id"
+            if "task_id" in python_param_names and "id" in params_dict:
+                logger.debug(f"Mapping incoming param 'id' to 'task_id' for validation.")
+                mapped_params_dict['task_id'] = params_dict.get('id')
+            # Add other mappings here if needed (e.g., "message" -> "input_message")
+
+            # Create and validate using the *mapped* dictionary
+            ParamsModel = create_model(f'{handler_func.__name__}Params', **param_fields) # type: ignore
+            validated_params_model = ParamsModel.model_validate(mapped_params_dict)
+            # --- END MODIFIED ---
+
+            # Dump validated data - keys will match Python param names
             validated_params_dict = validated_params_model.model_dump()
 
+            # Prepare arguments for the handler function
             call_kwargs = validated_params_dict
             if handler_needs_task_store:
-                call_kwargs['task_store'] = task_store_dep
+                call_kwargs['task_store'] = task_store_dep # Inject the store dependency
 
+            # Call the decorated agent method
             result = await handler_func(**call_kwargs)
 
+            # Optional: Validate return type if specified
             return_annotation = sig.return_annotation
             if return_annotation is not inspect.Parameter.empty and return_annotation is not type(None):
                 is_pydantic_model = False
                 if inspect.isclass(return_annotation) and issubclass(return_annotation, pydantic.BaseModel):
                     is_pydantic_model = True
-                if is_pydantic_model:
-                    return_annotation.model_validate(result) # type: ignore
-                else:
-                    ReturnTypeModel = RootModel[return_annotation] # type: ignore
-                    ReturnTypeModel.model_validate(result)
 
+                try:
+                    if is_pydantic_model:
+                        return_annotation.model_validate(result) # type: ignore
+                    else:
+                        ReturnTypeModel = RootModel[return_annotation] # type: ignore
+                        ReturnTypeModel.model_validate(result)
+                except pydantic.ValidationError as e:
+                    logger.error(f"Return value validation failed for method '{method}': {e}", exc_info=True)
+                    error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INTERNAL_ERROR, f"Internal Error: Invalid return type from handler for method '{method}'.")
+                    return JSONResponse(content=error_resp, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            # Return success response
             success_resp = create_jsonrpc_success_response(req_id, result)
             return JSONResponse(content=success_resp, status_code=status.HTTP_200_OK)
 
+        # Fallback to standard handle_... methods
         elif method == "tasks/send":
             validated_params = TaskSendParams.model_validate(params or {})
             task_id_result: str = await agent_instance.handle_task_send(task_id=validated_params.id, message=validated_params.message)
@@ -292,19 +344,15 @@ def create_a2a_router(
             task_context = await task_store_dep.get_task(task_id)
             if task_context is None: raise TaskNotFoundError(task_id=task_id)
 
-            # --- MODIFIED: Create intermediate generator ---
             async def stream_wrapper() -> AsyncGenerator[A2AEvent, None]:
-                # Call the agent's handler to get the actual generator
                 agent_event_generator = agent_instance.handle_subscribe_request(task_id=task_id)
-                # Iterate over the agent's generator and yield its events
                 async for event in agent_event_generator:
                     yield event
-            # --- END MODIFIED ---
 
             logger.info(f"Subscription request successful for task {task_id}. Starting SSE stream.")
-            # Pass the wrapper generator to SSEResponse
             return SSEResponse(content=stream_wrapper())
 
+        # Final fallback for unknown methods
         else:
             logger.warning(f"Method not found: '{method}'")
             error_resp = create_jsonrpc_error_response(req_id, JSONRPC_METHOD_NOT_FOUND, "Method not found")

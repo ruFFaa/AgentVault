@@ -6,22 +6,25 @@ import os
 from typing import Optional, List, Dict, Any, Tuple
 
 from sqlalchemy import select, func, or_
-from sqlalchemy.dialects.postgresql import JSONB # Or just JSON if standard
+# --- MODIFIED: Import JSONB and cast ---
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import cast, Text
+# --- END MODIFIED ---
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 # Import local models and schemas with absolute imports
 from agentvault_registry import models, schemas
+from pydantic import ValidationError as PydanticValidationError
+
 
 # Import the AgentCard model from the core library for validation
 try:
     from agentvault import AgentCard as AgentCardModel
-    from agentvault import AgentCardValidationError # Although we catch Pydantic's directly
     _agentvault_lib_available = True
 except ImportError:
     AgentCardModel = None # type: ignore
-    AgentCardValidationError = Exception # Placeholder
     _agentvault_lib_available = False
     logging.warning("Could not import 'agentvault' library. Agent Card validation during CRUD operations will be skipped.")
 
@@ -37,6 +40,18 @@ def _get_placeholder_items():
         now = datetime.datetime.now(datetime.timezone.utc)
         dev1 = models.Developer(id=1, name="Dev One", is_verified=True)
         dev2 = models.Developer(id=2, name="Dev Two", is_verified=False)
+        # --- ADDED: Placeholder with TEE details ---
+        tee_card_data = {
+            "url": "http://tee-agent.example", "tags": ["tee", "secure"],
+            "capabilities": {
+                "a2aVersion": "1.0",
+                "teeDetails": {
+                    "type": "Intel SGX",
+                    "attestationEndpoint": "https://attest.example.com"
+                }
+            }
+        }
+        # --- END ADDED ---
         items = [
             models.AgentCard(
                 id=uuid.uuid4(), developer_id=1, name="Weather Agent (Placeholder)",
@@ -58,6 +73,13 @@ def _get_placeholder_items():
                 description="Internal weather tool.", is_active=True,
                 created_at=now, updated_at=now, card_data={"url": "http://weather-tool.internal", "tags": ["weather", "tool", "internal"]}, developer=dev1
             ),
+            # --- ADDED: Placeholder with TEE details ---
+            models.AgentCard(
+                id=uuid.uuid4(), developer_id=1, name="TEE Agent (Placeholder)",
+                description="Runs in a TEE.", is_active=True,
+                created_at=now, updated_at=now, card_data=tee_card_data, developer=dev1
+            ),
+            # --- END ADDED ---
         ]
         _placeholder_data_cache = {item.id: item for item in items}
     return _placeholder_data_cache
@@ -86,7 +108,7 @@ async def create_agent_card(
     else:
         try:
             validated_card_model = AgentCardModel.model_validate(card_create.card_data)
-            validated_data = validated_card_model.model_dump(mode='json')
+            validated_data = validated_card_model.model_dump(mode='json', by_alias=True) # Use by_alias
             logger.debug("Agent Card data successfully validated against core model.")
         except PydanticValidationError as e:
             logger.error(f"Agent Card validation failed: {e}", exc_info=True)
@@ -179,25 +201,18 @@ async def get_agent_card(db: AsyncSession, card_id: uuid.UUID) -> Optional[model
 async def list_agent_cards(
     db: AsyncSession, skip: int = 0, limit: int = 100, active_only: bool = True,
     search: Optional[str] = None, tags: Optional[List[str]] = None,
-    developer_id: Optional[int] = None # Added developer_id parameter
+    developer_id: Optional[int] = None,
+    # --- ADDED: Parameters from previous step ---
+    has_tee: Optional[bool] = None,
+    tee_type: Optional[str] = None
+    # --- END ADDED ---
 ) -> Tuple[List[models.AgentCard], int]:
     """
     Retrieves a list of Agent Cards with pagination and optional filtering.
-
-    Args:
-        db: The SQLAlchemy async session.
-        skip: Number of records to skip (for pagination).
-        limit: Maximum number of records to return.
-        active_only: If True, only return cards where is_active is True.
-        search: Optional search string to filter by name or description.
-        tags: Optional list of tags to filter by (requires all tags).
-        developer_id: Optional developer ID to filter by owner.
-
-    Returns:
-        A tuple containing a list of AgentCard database objects and the total count
-        of matching items before pagination.
     """
-    logger.debug(f"Listing Agent Cards: skip={skip}, limit={limit}, active_only={active_only}, search='{search}', tags={tags}, developer_id={developer_id}")
+    # --- MODIFIED: Updated logging ---
+    logger.debug(f"Listing Agent Cards: skip={skip}, limit={limit}, active_only={active_only}, search='{search}', tags={tags}, developer_id={developer_id}, has_tee={has_tee}, tee_type='{tee_type}'")
+    # --- END MODIFIED ---
 
     if os.environ.get("AGENTVAULT_USE_PLACEHOLDERS", "false").lower() == "true":
         logger.warning("!!! RETURNING PLACEHOLDER DATA FOR list_agent_cards !!!")
@@ -220,9 +235,19 @@ async def list_agent_cards(
                 item for item in filtered_items
                 if isinstance(item.card_data.get("tags"), list) and tags_set.issubset(set(item.card_data["tags"]))
             ]
-        # --- ADDED: Placeholder developer filtering ---
         if developer_id is not None:
             filtered_items = [item for item in filtered_items if item.developer_id == developer_id]
+        # --- ADDED: Placeholder TEE filtering ---
+        if has_tee is True:
+            filtered_items = [item for item in filtered_items if item.card_data.get("capabilities", {}).get("teeDetails") is not None]
+        elif has_tee is False:
+            filtered_items = [item for item in filtered_items if item.card_data.get("capabilities", {}).get("teeDetails") is None]
+        if tee_type:
+            tee_type_lower = tee_type.lower()
+            filtered_items = [
+                item for item in filtered_items
+                if item.card_data.get("capabilities", {}).get("teeDetails", {}).get("type", "").lower() == tee_type_lower
+            ]
         # --- END ADDED ---
 
         total_items = len(filtered_items)
@@ -247,15 +272,40 @@ async def list_agent_cards(
     if tags:
         if isinstance(tags, list) and tags:
             try:
+                # Ensure tags are treated as strings for the JSONB contains operator
                 base_stmt = base_stmt.where(models.AgentCard.card_data['tags'].astext.cast(JSONB).contains(tags))
                 logger.debug(f"Applied tag filter using JSONB contains: {tags}")
             except Exception as json_err:
                 logger.warning(f"Could not apply JSONB @> operator for tag filtering (maybe not JSONB or data format issue?): {json_err}. Skipping tag filter.")
-    # --- ADDED: Developer ID filtering ---
     if developer_id is not None:
         base_stmt = base_stmt.where(models.AgentCard.developer_id == developer_id)
         logger.debug(f"Applied developer ID filter: {developer_id}")
+
+    # --- ADDED: TEE Filtering Logic ---
+    if has_tee is True:
+        logger.debug("Applying filter: has_tee = True")
+        # Check if the path exists and is not JSON null
+        base_stmt = base_stmt.where(models.AgentCard.card_data['capabilities']['teeDetails'].isnot(None))
+    elif has_tee is False:
+        logger.debug("Applying filter: has_tee = False")
+        # Check if the path does not exist OR is JSON null
+        # Using `is_(None)` should handle both cases correctly with JSONB path operators
+        base_stmt = base_stmt.where(models.AgentCard.card_data['capabilities']['teeDetails'].is_(None))
+
+    if tee_type:
+        logger.debug(f"Applying filter: tee_type = '{tee_type}'")
+        # Use the ->> operator to get the value as text for direct comparison
+        # This assumes the 'type' field exists if 'teeDetails' exists.
+        # Add path existence check if needed: .where(models.AgentCard.card_data['capabilities']['teeDetails'].isnot(None))
+        base_stmt = base_stmt.where(
+            models.AgentCard.card_data['capabilities']['teeDetails']['type'].astext == tee_type
+        )
+        # Alternative using cast, might be slightly less efficient:
+        # base_stmt = base_stmt.where(
+        #     cast(models.AgentCard.card_data['capabilities']['teeDetails']['type'], Text) == tee_type
+        # )
     # --- END ADDED ---
+
 
     # Get total count matching filters *before* applying limit/offset
     try:
@@ -308,23 +358,34 @@ async def update_agent_card(
     if card_update.card_data is not None:
         update_data_provided = True
         logger.debug(f"Updating card_data for Agent Card ID: {db_card.id}")
-        # Validate the new data
+
+        if not isinstance(card_update.card_data, dict):
+            raise ValueError("Provided card_data for update must be a dictionary.")
+
+        # --- MODIFIED: Merge before validation ---
+        existing_data = db_card.card_data or {}
+        merged_data = {**existing_data, **card_update.card_data}
+        # --- END MODIFIED ---
+
+        # Validate the *merged* data
         if not _agentvault_lib_available or AgentCardModel is None:
              logger.warning("Skipping Agent Card validation as 'agentvault' library is not available.")
-             validated_data = card_update.card_data
+             validated_data = merged_data # Use merged data directly
         else:
             try:
-                validated_card_model = AgentCardModel.model_validate(card_update.card_data)
-                validated_data = validated_card_model.model_dump(mode='json')
-                logger.debug("Updated Agent Card data successfully validated.")
-            except PydanticValidationError as e:
-                logger.error(f"Updated Agent Card validation failed: {e}", exc_info=True)
-                raise ValueError(f"Invalid Agent Card data provided for update: {e}") from e
+                # --- MODIFIED: Validate merged_data ---
+                validated_card_model = AgentCardModel.model_validate(merged_data)
+                validated_data = validated_card_model.model_dump(mode='json', by_alias=True) # Use by_alias
+                # --- END MODIFIED ---
+                logger.debug("Merged Agent Card data successfully validated.")
+            except PydanticValidationError as e: # Catch imported name
+                logger.error(f"Merged Agent Card validation failed: {e}", exc_info=True)
+                raise ValueError(f"Invalid merged Agent Card data provided for update: {e}") from e
             except Exception as e:
-                logger.error(f"Unexpected error during Agent Card update validation: {e}", exc_info=True)
-                raise ValueError(f"Unexpected error validating updated Agent Card data: {e}") from e
+                logger.error(f"Unexpected error during merged Agent Card update validation: {e}", exc_info=True)
+                raise ValueError(f"Unexpected error validating merged Agent Card data: {e}") from e
 
-        # Update stored data and extracted fields
+        # Update stored data and extracted fields using validated merged data
         db_card.card_data = validated_data
         try:
             db_card.name = validated_data.get("name")

@@ -1,5 +1,8 @@
 # AgentVault Security Considerations
 
+> **Note:** For the official security policy and vulnerability reporting process, please see the [Security Policy](../root_files/SECURITY.md) document in the project root.
+
+This document details the security mechanisms, considerations, and best practices...
 Security is a fundamental aspect of the AgentVault ecosystem, designed to enable trustworthy interactions between agents and protect user/developer credentials. This document details the security mechanisms, considerations, and best practices.
 
 ## Authentication
