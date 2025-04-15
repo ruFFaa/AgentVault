@@ -1,0 +1,79 @@
+# MkDocs Configuration for AgentVault
+
+site_name: AgentVault Documentation
+# TODO: Update site_url and repo_url when deploying/publishing
+site_url: https://github.com/raphaeljeziorny/AgentVault/ # Placeholder
+repo_url: https://github.com/raphaeljeziorny/AgentVault/ # Placeholder
+repo_name: AgentVault
+edit_uri: "" # Disable edit button for now
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - toc.integrate
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.tabs.link
+    - content.code.copy
+    - content.code.annotate
+  palette:
+    - scheme: default
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+    - scheme: slate
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+  # logo: assets/logo.png # Add logo later if desired
+
+plugins:
+  - search # Enable search plugin
+
+# Define initial navigation structure (will be expanded)
+nav:
+  - Home: index.md
+  - Introduction:
+    - Concepts: concepts.md
+    - Architecture: architecture.md
+    - Security: security.md
+  - User Guide:
+    - CLI Usage: user_guide/cli.md
+  - Developer Guide:
+    - Library (Client): developer_guide/library.md
+    - Server SDK: developer_guide/server_sdk.md
+    - Registry API: developer_guide/registry.md
+    - Testing Utilities: developer_guide/testing.md
+  # --- ADDED: Protocols Section ---
+  - Protocols:
+    - A2A Profile v0.2: a2a_profile_v0.2.md
+    # - TEE Profile: tee_profile.md # Placeholder
+  # --- END ADDED ---
+  # Placeholders for future structure:
+  # - Automation: automation_scripts.md
+  # - Contributing: CONTRIBUTING.md # Link to existing?
+
+# Source directory for markdown files
+docs_dir: 'docs'
+
+# Optional: Add markdown extensions for enhanced formatting
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - admonition
+  - toc:
+      permalink: true
+      toc_depth: 3 # Adjust depth as needed
+  - attr_list # Allows adding classes/ids to markdown elements
+  - md_in_html # Allows markdown processing inside HTML blocks
+
+# Copyright notice (optional)
+# copyright: Copyright &copy; 2025 AgentVault Contributors
