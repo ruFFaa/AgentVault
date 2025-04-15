@@ -33,60 +33,80 @@ This is the abstract base class your agent logic should inherit from.
 
 Handling asynchronous tasks requires managing their state (Submitted, Working, Completed, etc.) and potentially associated data (messages, artifacts). The SDK provides tools for this.
 
-*   **`TaskContext`:** A basic dataclass holding `task_id`, `current_state`, `created_at`, `updated_at`. You can subclass this to store agent-specific task data (e.g., conversation history, intermediate results). Includes state transition validation logic.
+*   **`TaskContext`:** A basic dataclass holding `task_id`, `current_state`, `created_at`, `updated_at`. You can subclass this to store agent-specific task data.
+    ```python
+    # Example of extending TaskContext
+    from dataclasses import dataclass, field
+    from typing import List
+    from agentvault.models import Message, Artifact
+    from agentvault_server_sdk.state import TaskContext
+
+    @dataclass
+    class MyAgentTaskContext(TaskContext):
+        conversation_history: List[Message] = field(default_factory=list)
+        generated_artifacts: List[Artifact] = field(default_factory=list)
+        # Add other fields your agent needs to track per task
+    ```
 *   **`BaseTaskStore`:** An abstract base class defining the interface for storing, retrieving, updating, and deleting `TaskContext` objects (e.g., `create_task`, `get_task`, `update_task_state`, `delete_task`). It also defines the interface for managing SSE event listeners (`add_listener`, `remove_listener`) and notifying them (`notify_status_update`, `notify_message_event`, `notify_artifact_event`).
 *   **`InMemoryTaskStore`:** A simple, **non-persistent** dictionary-based implementation of `BaseTaskStore`. **Suitable only for development or single-instance agents where task state loss on restart is acceptable.** Production agents typically require implementing a custom `BaseTaskStore` backed by a persistent database (SQL, NoSQL) or a distributed cache (Redis).
-*   **Notification Helpers:** When using a `BaseTaskStore` implementation (like `InMemoryTaskStore` or your own), your agent logic should call methods like `task_store.notify_status_update(...)`, `task_store.notify_message_event(...)`, `task_store.notify_artifact_event(...)` whenever a relevant event occurs (e.g., state change, message generation). The `create_a2a_router` integration uses these notifications to automatically format and send the correct SSE events to subscribed clients via the `handle_subscribe_request` stream.
+*   **Notification Helpers:** When using a `BaseTaskStore` implementation (like `InMemoryTaskStore` or your own), your agent logic (e.g., background processing tasks) should call methods like `task_store.notify_status_update(...)`, `task_store.notify_message_event(...)`, `task_store.notify_artifact_event(...)` whenever a relevant event occurs (e.g., state change, message generation, artifact creation). The `create_a2a_router` integration uses these notifications to automatically format and send the correct SSE events to subscribed clients via the `handle_subscribe_request` stream.
 
 ### 3. FastAPI Integration (`fastapi_integration.py`)
 
 The `create_a2a_router` function bridges your agent logic (either a `BaseA2AAgent` subclass or a class using `@a2a_method`) with the FastAPI web framework.
 
 *   **Purpose:** Creates a FastAPI `APIRouter` that automatically exposes the standard A2A JSON-RPC methods (`tasks/send`, `tasks/get`, `tasks/cancel`, `tasks/sendSubscribe`) and routes them to your agent implementation's corresponding `handle_...` methods or decorated methods. It also handles JSON-RPC request parsing, basic validation, and SSE stream setup.
-*   **Usage:**
-    ```python
-    # In your main FastAPI app file (e.g., main.py)
-    from fastapi import FastAPI
-    from agentvault_server_sdk import create_a2a_router, BaseA2AAgent
-    from agentvault_server_sdk.state import InMemoryTaskStore # Or your custom store
-    # Import your agent class
-    from my_agent_logic import MyAgent
+*   **Authentication:** Note that authentication (e.g., checking `X-Api-Key` or `Authorization` headers) is typically handled *before* the request reaches the A2A router, usually via FastAPI Dependencies applied to the router or the main app. The SDK router itself does not perform authentication checks.
+*   **Usage:** The following steps outline how to integrate the router into your FastAPI application:
 
-    # 1. Instantiate your agent and task store
-    task_store = InMemoryTaskStore()
-    my_agent_instance = MyAgent(task_store_ref=task_store) # Pass store if needed
+    1.  **Instantiate Agent and Task Store:**
+        ```python
+        from fastapi import FastAPI
+        from agentvault_server_sdk import BaseA2AAgent
+        from agentvault_server_sdk.state import InMemoryTaskStore # Or your custom store
+        # Import your agent class
+        from my_agent_logic import MyAgent
 
-    # 2. Create the A2A router, passing the agent and store
-    a2a_router = create_a2a_router(
-        agent=my_agent_instance,
-        task_store=task_store # Required for SSE notifications
-    )
+        task_store = InMemoryTaskStore()
+        my_agent_instance = MyAgent(task_store_ref=task_store) # Pass store if needed
+        ```
 
-    # 3. Create the FastAPI app and include the router
-    app = FastAPI(title="My A2A Agent")
-    app.include_router(a2a_router, prefix="/a2a") # Mount at standard /a2a path
+    2.  **Create the A2A Router:** Pass the agent instance and the task store to the factory function.
+        ```python
+        from agentvault_server_sdk import create_a2a_router
 
-    # 4. !!! CRITICAL: Add Required Exception Handlers !!!
-    # These handlers translate SDK/agent errors into proper JSON-RPC error responses.
-    # Your application WILL NOT return correct errors without them.
-    from fastapi import Request
-    from fastapi.responses import JSONResponse
-    from pydantic import ValidationError as PydanticValidationError
-    # --- Use pydantic_core.ValidationError if using Pydantic v2 ---
-    # from pydantic_core import ValidationError as PydanticValidationError
-    from agentvault_server_sdk.exceptions import AgentServerError, TaskNotFoundError
-    from agentvault_server_sdk.fastapi_integration import (
-        task_not_found_handler, validation_exception_handler,
-        agent_server_error_handler, generic_exception_handler
-    )
+        a2a_router = create_a2a_router(
+            agent=my_agent_instance,
+            task_store=task_store # Required for SSE notifications
+        )
+        ```
 
-    app.add_exception_handler(TaskNotFoundError, task_not_found_handler)
-    app.add_exception_handler(ValueError, validation_exception_handler) # Catches basic validation
-    app.add_exception_handler(TypeError, validation_exception_handler) # Catches type errors in params
-    app.add_exception_handler(PydanticValidationError, validation_exception_handler) # Catches Pydantic errors
-    app.add_exception_handler(AgentServerError, agent_server_error_handler) # Catches agent-specific errors
-    app.add_exception_handler(Exception, generic_exception_handler) # Catch-all for unexpected errors
-    ```
+    3.  **Create FastAPI App and Include Router:** Mount the router at your desired prefix (typically `/a2a`).
+        ```python
+        app = FastAPI(title="My A2A Agent")
+        app.include_router(a2a_router, prefix="/a2a") # Mount at standard /a2a path
+        ```
+
+    4.  **Add Exception Handlers (CRITICAL):** You **must** add the SDK's exception handlers to your main FastAPI `app` instance. These handlers translate internal Python exceptions raised by your agent or the SDK (like `TaskNotFoundError`, `ValueError`, `AgentServerError`) into correctly formatted JSON-RPC error responses that clients expect. Without these, clients will receive generic HTTP 500 errors instead of specific, actionable JSON-RPC errors.
+        ```python
+        from fastapi import Request
+        from fastapi.responses import JSONResponse
+        from pydantic import ValidationError as PydanticValidationError
+        # from pydantic_core import ValidationError as PydanticValidationError # If using Pydantic v2
+        from agentvault_server_sdk.exceptions import AgentServerError, TaskNotFoundError
+        from agentvault_server_sdk.fastapi_integration import (
+            task_not_found_handler, validation_exception_handler,
+            agent_server_error_handler, generic_exception_handler
+        )
+
+        # Assuming 'app' is your FastAPI instance from step 3
+        app.add_exception_handler(TaskNotFoundError, task_not_found_handler)
+        app.add_exception_handler(ValueError, validation_exception_handler)
+        app.add_exception_handler(TypeError, validation_exception_handler)
+        app.add_exception_handler(PydanticValidationError, validation_exception_handler)
+        app.add_exception_handler(AgentServerError, agent_server_error_handler)
+        app.add_exception_handler(Exception, generic_exception_handler) # Catch-all
+        ```
 
 ### 4. A2A Method Decorator (`@a2a_method`)
 
@@ -116,7 +136,7 @@ An alternative or supplement to implementing the full `BaseA2AAgent` interface.
         # to implement the corresponding handle_ methods. The router will
         # prioritize decorated methods and return "Method not found" for others.
     ```
-*   **Validation:** The `create_a2a_router` automatically validates incoming JSON-RPC `params` against the decorated function's type hints (using Pydantic internally) and validates the return value against the function's return type hint.
+*   **Validation:** The `create_a2a_router` automatically validates incoming JSON-RPC `params` against the decorated function's type hints (using Pydantic internally). If validation fails (e.g., client sends wrong type for `task_id`), a `ValueError` or `PydanticValidationError` will likely be raised, which should be caught by the `validation_exception_handler` registered on the FastAPI app, returning a JSON-RPC `Invalid Params` error. The return value is also validated against the function's return type hint.
 
 ### 5. Packaging Tool (`agentvault-sdk package`) (`packager/cli.py`)
 
@@ -152,11 +172,11 @@ A CLI tool to help prepare your agent project for deployment, typically via Dock
 
 1.  **Define Agent Logic:** Create a class inheriting from `BaseA2AAgent` (or use decorators).
 2.  **Implement Handlers/Methods:** Implement the required `async handle_...` methods (or decorate specific methods) to handle A2A requests.
-3.  **Manage State:** Choose or implement a `BaseTaskStore` (start with `InMemoryTaskStore` for development). Pass it to your agent instance if needed. Use `task_store.notify_...` methods within your agent logic to trigger SSE events for subscribed clients.
+3.  **Manage State:** Choose or implement a `BaseTaskStore` (start with `InMemoryTaskStore` for development). Pass it to your agent instance. **Crucially, call `task_store.notify_...` methods from your agent's background processing logic** (e.g., the code handling the actual work initiated by `handle_task_send`) to send SSE updates to subscribed clients.
 4.  **Create FastAPI App:** Set up a standard FastAPI application (`main.py`).
 5.  **Instantiate Agent & Store:** Create instances of your agent class and task store.
 6.  **Create & Include Router:** Use `create_a2a_router(agent=..., task_store=...)` and include the returned router in your FastAPI app (e.g., at prefix `/a2a`).
-7.  **Add Exception Handlers:** **Crucially**, add the required SDK exception handlers (`task_not_found_handler`, etc.) to your main FastAPI app instance using `app.add_exception_handler(...)`.
+7.  **Add Exception Handlers:** **Add the required SDK exception handlers** (`task_not_found_handler`, etc.) to your main FastAPI app instance using `app.add_exception_handler(...)`.
 8.  **Create Agent Card:** Write an `agent-card.json` describing your agent, ensuring the `url` points to your FastAPI A2A endpoint (e.g., `http://your-host/a2a`). Include appropriate `authSchemes`.
 9.  **Run:** Use `uvicorn main:app --host ... --port ...`.
 10. **(Optional) Package:** Use `agentvault-sdk package` to generate Docker artifacts for deployment.
