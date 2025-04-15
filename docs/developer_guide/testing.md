@@ -30,7 +30,7 @@ poetry install --with dev
         from agentvault_testing_utils.mocks import MockAgentVaultClient
         from agentvault.models import Task, TaskState
         from agentvault.exceptions import A2AConnectionError
-        from unittest.mock import call
+        from unittest.mock import call, ANY # Import ANY
 
         @pytest.mark.asyncio
         async def test_cli_run_logic(mocker): # Assuming mocker fixture
@@ -113,7 +113,7 @@ poetry install --with dev
 *   **`EchoAgent`**:
     *   **Purpose:** A minimal, functional implementation of `agentvault_server_sdk.BaseA2AAgent`. It stores received messages in memory, echoes the first message content back via SSE, and transitions through basic states (Submitted -> Working -> Completed).
     *   **Use Case:** Ideal for testing the Server SDK's `create_a2a_router`, basic A2A client interactions, and SSE streaming logic without needing a complex real agent.
-    *   **Example:** See the Server SDK Developer Guide or the `basic_a2a_server` example.
+    *   **Example:** See the [Server SDK Developer Guide](server_sdk.md) or the [Basic A2A Server Example](../examples.md).
 
 ### 5. Assertion Helpers (`assertions.py`)
 

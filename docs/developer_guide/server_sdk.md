@@ -152,4 +152,4 @@ A CLI tool to help prepare your agent for deployment, typically via Docker.
 8.  **Run:** Use `uvicorn main:app --host ... --port ...`.
 9.  **(Optional) Package:** Use `agentvault-sdk package` to create Docker artifacts.
 
-Refer to the [Basic A2A Server Example](../../examples/basic_a2a_server/) for a runnable implementation.
+Refer to the [Basic A2A Server Example](../examples.md) for a runnable implementation.

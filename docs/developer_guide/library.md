@@ -41,7 +41,7 @@ Handles secure loading, storage, and retrieval of credentials needed for agent a
     # km_file_env = KeyManager(key_file_path=key_file, use_env_vars=True)
     ```
 *   **Priority Order:** File (`key_file_path`) > Environment Variables (`use_env_vars=True`) > OS Keyring (`use_keyring=True`, only checked on demand via `get_` methods if not found in file/env cache).
-*   **Service Identifier (`service_id`):** This is the key used to look up credentials. It's a *local* name you choose (e.g., "openai", "my-agent-key", "google-oauth") that maps to the credentials needed for a specific agent or service. It often corresponds to the `service_identifier` field in an Agent Card's `authSchemes`.
+*   **Service Identifier (`service_id`):** This is the key used to look up credentials. It's a *local* name you choose (e.g., "openai", "my-agent-key", "google-oauth-agent") that maps to the credentials needed for a specific agent or service. It often corresponds to the `service_identifier` field in an Agent Card's `authSchemes`.
 *   **Retrieving Credentials:**
     ```python
     # Get API Key (returns None if not found)
@@ -76,7 +76,7 @@ Handles secure loading, storage, and retrieval of credentials needed for agent a
     except ValueError as e:
         print(f"Invalid input for storing credentials: {e}")
     ```
-*   **Storage Conventions:** See the `KeyManager` docstring or the [Security Guide](../security.md#key-management-client-side) for details on environment variable names and file formats.
+*   **Storage Conventions:** See the `KeyManager` docstring or the [Security Guide](../security.md#credential-management-keymanager) for details on environment variable names and file formats.
 
 ### `AgentVaultClient`
 
@@ -86,6 +86,7 @@ The primary class for making asynchronous A2A calls to remote agents.
 *   **Usage:** Best used as an async context manager. Requires an `AgentCard` instance (loaded via `agent_card_utils`) and a `KeyManager` instance for authentication.
     ```python
     import asyncio
+    import logging # Import logging
     from agentvault import (
         AgentVaultClient, KeyManager, Message, TextPart,
         agent_card_utils, exceptions as av_exceptions, models as av_models

@@ -89,10 +89,10 @@ This project uses `pip-audit` via a GitHub Actions workflow (`.github/workflows/
 ## Reporting Issues & Security Vulnerabilities
 
 *   **Bugs & Feature Requests:** Please check existing [GitHub Issues](https://github.com/SecureAgentTools/AgentVault/issues) first. If your issue isn't there, open a new one with detailed information.
-*   **Security Vulnerabilities:** **DO NOT** report security issues publicly. Please follow the instructions in our [Security Policy (SECURITY.md)](/..SECURITY.md).
+*   **Security Vulnerabilities:** **DO NOT** report security issues publicly. Please follow the instructions in our [Security Policy (security_policy.md)](security_policy.md).
 
 ## Code of Conduct
 
-This project adheres to the [Contributor Covenant Code of Conduct](../CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code.
+This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code.
 
 Thank you for contributing to AgentVault!

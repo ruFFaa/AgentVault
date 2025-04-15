@@ -8,12 +8,12 @@ These examples are designed to help you get started quickly, whether you are bui
 
 The source code for these examples can be found in the `/examples/` directory of the [AgentVault GitHub repository](https://github.com/SecureAgentTools/AgentVault/tree/main/examples).
 
-*   **[Basic A2A Server](../../examples/basic_a2a_server/README.md)**
+*   **Basic A2A Server:** ([View Code](https://github.com/SecureAgentTools/AgentVault/tree/main/examples/basic_a2a_server))
     *   **Focus:** Demonstrates the minimal setup required to create an A2A-compliant agent server using the `agentvault-server-sdk` and FastAPI.
     *   **Features:** Implements a simple "EchoAgent", uses the SDK's router integration (`create_a2a_router`), includes a basic `agent-card.json`, and shows how to run the server with Uvicorn.
     *   **Good for:** Developers starting to build their first A2A agent.
 
-*   **[LangChain Integration](../../examples/langchain_integration/README.md)**
+*   **LangChain Integration:** ([View Code](https://github.com/SecureAgentTools/AgentVault/tree/main/examples/langchain_integration))
     *   **Focus:** Shows how to wrap an AgentVault A2A agent as a custom `Tool` within the LangChain framework.
     *   **Features:** Defines an `A2AAgentTool` class that uses the `agentvault` client library internally to communicate with a remote agent based on an agent reference (ID, URL, or file path). Includes example usage.
     *   **Good for:** Developers wanting to integrate existing or new A2A agents into LangChain applications and agentic workflows.

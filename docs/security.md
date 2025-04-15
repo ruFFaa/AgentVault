@@ -1,6 +1,6 @@
 # AgentVault Security Considerations
 
-> **Note:** For the official security policy and vulnerability reporting process, please see the [Security Policy](../root_files/SECURITY.md) document in the project root.
+> **Note:** For the official security policy and vulnerability reporting process, please see the [Security Policy](security_policy.md) document.
 
 This document details the security mechanisms, considerations, and best practices...
 Security is a fundamental aspect of the AgentVault ecosystem, designed to enable trustworthy interactions between agents and protect user/developer credentials. This document details the security mechanisms, considerations, and best practices.
@@ -79,4 +79,4 @@ The `agentvault` library's `KeyManager` provides a unified way for clients (like
 
 ## Reporting Vulnerabilities
 
-Please report suspected security vulnerabilities privately according to the [Security Policy (SECURITY.md)](../SECURITY.md).
+Please report suspected security vulnerabilities privately according to the [Security Policy](security_policy.md).

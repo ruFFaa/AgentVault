@@ -32,17 +32,15 @@ theme:
 plugins:
   - search # Enable search plugin
 
-# Define navigation structure
+# --- MODIFIED: Corrected Navigation Structure & Privacy Policy Path ---
 nav:
   - Home: index.md
   - Introduction:
     - Concepts: concepts.md
     - Architecture: architecture.md
-    - Security: security.md
   - Installation: installation.md
-  # --- ADDED: Examples Page ---
-  - Examples: examples.md
-  # --- END ADDED ---
+  - Examples:
+      - Overview: examples.md
   - User Guide:
     - CLI Usage: user_guide/cli.md
   - Developer Guide:
@@ -53,10 +51,17 @@ nav:
   - Protocols:
     - A2A Profile v0.2: a2a_profile_v0.2.md
     - TEE Profile: tee_profile.md
-  # - Automation: automation_scripts.md # Placeholder
-  # --- CORRECTED: Path relative to docs_dir ---
-  - Contributing: CONTRIBUTING.md
-  # --- END CORRECTED ---
+  - Project & Policies:
+    - Contributing: CONTRIBUTING.md
+    - Code of Conduct: CODE_OF_CONDUCT.md
+    - Security: security.md
+    - Security Policy: security_policy.md
+    # - License: LICENSE.md # Keep commented - Not in docs dir
+    - Registry Policy: REGISTRY_POLICY.md
+    - Terms of Service: TERMS_OF_SERVICE.md
+    - Privacy Policy: privacy_policy.md # Corrected path (lowercase, assume moved)
+    - Roadmap: ROADMAP.md
+# --- END MODIFIED ---
 
 # Source directory for markdown files
 docs_dir: 'docs'
@@ -69,7 +74,13 @@ markdown_extensions:
       pygments_lang_class: true
   - pymdownx.inlinehilite
   - pymdownx.snippets
-  - pymdownx.superfences
+  # --- MODIFIED: Added Mermaid configuration to superfences ---
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  # --- END MODIFIED ---
   - admonition
   - toc:
       permalink: true
