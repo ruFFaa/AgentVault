@@ -93,10 +93,14 @@ Search for agents registered in the central AgentVault Registry.
 
 ```bash
 agentvault_cli discover --help
-agentvault_cli discover [SEARCH_QUERY] [OPTIONS]```
+agentvault_cli discover [SEARCH_QUERY] [OPTIONS]
+```
 
 *   **`[SEARCH_QUERY]` (Optional):** Text to search for (case-insensitive) in agent names or descriptions.
-*   **`--registry <url>`:** Specify the URL of the AgentVault Registry. Defaults to `http://localhost:8000` or the value of the `AGENTVAULT_REGISTRY_URL` environment variable if set.
+*   **`--registry <url>`:** Specify the URL of the AgentVault Registry API.
+    *   Defaults to the value of the `AGENTVAULT_REGISTRY_URL` environment variable if set.
+    *   If the environment variable is not set, it defaults to the public registry: `https://agentvault-registry-api.onrender.com`.
+    *   *(Note: The public registry runs on a free tier and may take up to 60 seconds to wake up on the first request.)*
 *   **`--limit <n>`:** Maximum results per page (default: 25, max: 250).
 *   **`--offset <n>`:** Number of results to skip (for pagination, default: 0).
 *   **`--tags <tag>` (Repeatable):** Filter by tags. Only agents possessing *all* specified tags will be returned (e.g., `--tags weather --tags forecast`).
@@ -105,13 +109,13 @@ agentvault_cli discover [SEARCH_QUERY] [OPTIONS]```
 
 *Example:*
 ```bash
-# List first 10 agents containing "weather"
+# List first 10 agents containing "weather" from the public registry
 agentvault_cli discover weather --limit 10
 
-# List agents tagged with both "summarization" and "nlp"
-agentvault_cli discover --tags summarization --tags nlp
+# List agents tagged with "nlp" from a local registry
+agentvault_cli discover --tags nlp --registry http://localhost:8000
 
-# Find agents declaring TEE support
+# Find agents declaring TEE support on the public registry
 agentvault_cli discover --has-tee true
 ```
 
@@ -135,27 +139,29 @@ agentvault_cli run --agent <agent_ref> --input <input_data> [OPTIONS]
 *   **`--input <input_data>` / `-i <input_data>` (Required):** The input text for the agent's task.
     *   To read input from a file, prefix the path with `@`. Example: `--input @./prompts/my_request.txt`.
 *   **`--context-file <path>`:** Path to a local JSON file containing MCP context data to send with the initial message.
-*   **`--registry <url>`:** Registry URL (only used if `<agent_ref>` is an Agent ID). Defaults to `http://localhost:8000` or `AGENTVAULT_REGISTRY_URL` env var.
+*   **`--registry <url>`:** Registry URL (only used if `<agent_ref>` is an Agent ID). Defaults to `AGENTVAULT_REGISTRY_URL` env var or the public registry `https://agentvault-registry-api.onrender.com`. *(Note the cold start delay for the public instance).*
 *   **`--key-service <service_id>`:** **Important for Authentication.** If the agent requires authentication (e.g., `apiKey` or `oauth2`) and its Agent Card doesn't specify a `service_identifier`, or if you want to use credentials stored under a different local name, use this flag to tell the `KeyManager` which local service ID to use for lookup. Example: `--key-service openai`.
 *   **`--auth-key <key>`:** **INSECURE - FOR TESTING ONLY.** Directly provide the API key on the command line. This bypasses the `KeyManager` lookup for agents using the `apiKey` scheme. Avoid using this for sensitive keys.
 *   **`--output-artifacts <directory>`:** If provided, artifact content larger than 1KB received via SSE will be saved to files in this directory (named using artifact ID and inferred extension) instead of being printed (truncated) to the console.
 
-*Example (Running the basic SDK example agent):*
+*Example (Running the basic SDK example agent locally):*
 ```bash
 # Assumes the basic_a2a_server example is running on port 8000
 agentvault_cli run --agent http://localhost:8000/agent-card.json --input "Hello Agent!"
 ```
 
-*Example (Running an agent from registry requiring an OpenAI key):*
+*Example (Running an agent from the public registry requiring an OpenAI key):*
 ```bash
 # First, ensure the key is configured:
 # agentvault config set openai --keyring (and enter key)
 
 # Then run the task (assuming agent 'some-org/openai-agent' uses 'openai' service ID)
+# The --registry flag is omitted, so it uses the default public registry
 agentvault_cli run --agent some-org/openai-agent --input "Summarize the concept of AI agents."
 
 # Or, if the agent card didn't specify 'openai' as service_identifier:
-agentvault_cli run --agent some-org/openai-agent --input "Summarize..." --key-service openai```
+agentvault_cli run --agent some-org/openai-agent --input "Summarize..." --key-service openai
+```
 
 The `run` command connects to the agent and streams Server-Sent Events (SSE) back to your terminal, showing status updates, messages from the agent/tools, and artifact information using `rich` formatting for better readability.
 
@@ -177,12 +183,13 @@ If you have command-line tools like `fzf` (fuzzy finder) and `awk` installed, yo
 
 ```bash
 # Example: Discover agents matching "weather", select one, run with input
+# Assumes default public registry or AGENTVAULT_REGISTRY_URL is set
 agentvault_cli discover weather | fzf --height 40% --border --header "Select Agent:" | awk '{print $1}' | xargs -I {} agentvault_cli run --agent {} --input "What is the forecast for London?"
 ```
 
 **Explanation:**
 
-1.  `agentvault_cli discover weather`: Lists agents matching "weather".
+1.  `agentvault_cli discover weather`: Lists agents matching "weather" from the configured registry.
 2.  `| fzf ...`: Pipes the list to `fzf` for interactive selection.
 3.  `| awk '{print $1}'`: Extracts the first column (the Agent ID) from the line selected in `fzf`. *Note: You might need to adjust `$1` if the ID is in a different column based on your terminal width or `discover` output format.*
 4.  `| xargs -I {} ...`: Takes the extracted ID (`{}`) and inserts it into the `agentvault_cli run` command.

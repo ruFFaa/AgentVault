@@ -2,9 +2,12 @@
 
 The AgentVault Registry provides a central RESTful API service for discovering and managing Agent Cards. Developers interact with it to publish their agents, while clients (like the `agentvault_cli` or other applications) use it to find agents.
 
-## API Base Path
+## API Base Path & Public Instance
 
-All registry API endpoints are prefixed with `/api/v1`. The full URL depends on where the registry is deployed (e.g., `http://localhost:8000/api/v1` for local development, or the production URL).
+*   **Base Path:** All registry API endpoints are prefixed with `/api/v1`.
+*   **Public Instance:** A live instance is available at: **`https://agentvault-registry-api.onrender.com`**
+*   **Public Instance Note (Cold Start):** This instance runs on Render's free tier. If inactive, it may take **up to 60 seconds** to respond to the first request. Subsequent requests will be faster. Consider sending a simple request (e.g., `GET /health`) to wake it up before making critical calls if latency is a concern.
+*   **Local Development:** When running locally (see [Installation Guide](../installation.md)), the base URL is typically `http://localhost:8000/api/v1`.
 
 ## Authentication
 
@@ -21,6 +24,7 @@ The API uses standard HTTP status codes. Common errors include:
 *   **`404 Not Found`:** Returned if the requested resource (e.g., an Agent Card with a specific UUID) does not exist.
 *   **`422 Unprocessable Entity`:** Returned if the request body (e.g., for `POST` or `PUT`) fails validation. This commonly occurs if the submitted `card_data` does not conform to the Agent Card schema defined in the `agentvault` library, or if other required fields in the request schema are missing/invalid. The response `detail` field usually contains specific information about the validation errors from Pydantic.
 *   **`500 Internal Server Error`:** Returned for unexpected errors on the server (e.g., database connection issue, unhandled exception in the API logic). Check server logs for details.
+*   **`503 Service Unavailable`:** May be returned by the hosting platform (like Render) if the service is experiencing issues or during a cold start if the request times out before the service is fully awake.
 
 ## API Endpoints
 
@@ -98,7 +102,7 @@ The API uses standard HTTP status codes. Common errors include:
       }
     }
     ```
-*   **Errors:** 401 (if `owned_only=true` and auth fails), 500.
+*   **Errors:** 401 (if `owned_only=true` and auth fails), 500, 503 (potentially during cold start).
 
 #### `GET /{card_id}`
 
@@ -108,7 +112,7 @@ The API uses standard HTTP status codes. Common errors include:
 *   **Path Parameter:**
     *   `card_id` (UUID): The unique ID of the agent card (e.g., `a1b2c3d4-e5f6-7890-1234-567890abcdef`).
 *   **Success Response (200 OK):** `schemas.AgentCardRead` (Similar structure to the `POST /` success response).
-*   **Errors:** 404 (if ID not found), 500.
+*   **Errors:** 404 (if ID not found), 500, 503 (potentially during cold start).
 
 #### `PUT /{card_id}`
 
@@ -141,7 +145,7 @@ The API uses standard HTTP status codes. Common errors include:
     }
     ```
 *   **Success Response (200 OK):** `schemas.AgentCardRead` - Returns the full details of the updated card record.
-*   **Errors:** 401, 403 (if not owner), 404, 422 (if `card_data` is provided and invalid, or missing required fields like `name`), 500.
+*   **Errors:** 401, 403 (if not owner), 404, 422 (if `card_data` is provided and invalid, or missing required fields like `name`), 500, 503 (potentially during cold start).
 
 #### `DELETE /{card_id}`
 
@@ -151,7 +155,7 @@ The API uses standard HTTP status codes. Common errors include:
 *   **Path Parameter:**
     *   `card_id` (UUID): The ID of the agent card to deactivate.
 *   **Success Response:** `204 No Content` (Empty body).
-*   **Errors:** 401, 403 (if not owner), 404, 500.
+*   **Errors:** 401, 403 (if not owner), 404, 500, 503 (potentially during cold start).
 
 ### Utilities (`/utils`)
 
@@ -194,4 +198,4 @@ The API uses standard HTTP status codes. Common errors include:
           "validated_card_data": null
         }
         ```
-*   **Errors:** 422 (if the request body itself is invalid, e.g., missing `card_data`), 500.
+*   **Errors:** 422 (if the request body itself is invalid, e.g., missing `card_data`), 500, 503 (potentially during cold start).

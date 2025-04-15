@@ -45,6 +45,16 @@ After installing the CLI, check that the command is available:
 agentvault_cli --version
 ```
 
+**Connecting to the Public Registry:**
+
+You can use the installed CLI or library with the publicly hosted registry:
+
+*   **URL:** `https://agentvault-registry-api.onrender.com`
+*   **Usage:**
+    *   Set the environment variable: `export AGENTVAULT_REGISTRY_URL=https://agentvault-registry-api.onrender.com` (Linux/macOS) or `set AGENTVAULT_REGISTRY_URL=https://agentvault-registry-api.onrender.com` (Windows Cmd) or `$env:AGENTVAULT_REGISTRY_URL='https://agentvault-registry-api.onrender.com'` (PowerShell).
+    *   Or use the `--registry` flag with CLI commands: `agentvault_cli discover --registry https://agentvault-registry-api.onrender.com`
+*   **Note (Cold Start):** This instance runs on Render's free tier. If it hasn't received traffic recently, it might take **up to 60 seconds** to respond to the first request while it "wakes up". Subsequent requests will be faster. You can send a simple request like `curl https://agentvault-registry-api.onrender.com/health` to wake it up before running commands if needed.
+
 ## 2. Setting up for Development (Contributing or Running from Source)
 
 If you want to contribute to AgentVault, run components locally from the source code (like the registry), or use features not yet released on PyPI, follow these steps. This sets up the entire monorepo.
