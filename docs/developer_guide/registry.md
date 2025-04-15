@@ -8,7 +8,7 @@ All registry API endpoints are prefixed with `/api/v1`. The full URL depends on 
 
 ## Authentication
 
-*   **Developer Authentication:** Endpoints related to managing agent cards (creating, updating, deleting) require developer authentication. This is handled via an API key specific to the developer, provided in the `X-Api-Key` HTTP header. Keys are obtained from registry administrators (process TBD).
+*   **Developer Authentication:** Endpoints related to managing agent cards (creating, updating, deleting) require developer authentication. This is handled via an API key specific to the developer, provided in the `X-Api-Key` HTTP header. *(Note: Currently, keys are generated and distributed manually by registry administrators; a self-service portal is planned for the future).*
 *   **Public Access:** Endpoints for discovering agents (listing/searching, getting details by ID, validating cards) generally do not require authentication.
 *   **Exception:** The `GET /agent-cards/` endpoint requires authentication *only* if the `owned_only=true` query parameter is used.
 
@@ -29,7 +29,7 @@ The API uses standard HTTP status codes. Common errors include:
 #### `POST /`
 
 *   **Summary:** Submit a new Agent Card.
-*   **Description:** Submits a new Agent Card associated with the authenticated developer. The provided `card_data` is validated against the canonical `agentvault.models.AgentCard` schema. The `name` and `description` fields are automatically extracted from `card_data` for indexing.
+*   **Description:** Submits a new Agent Card associated with the authenticated developer. The provided `card_data` is validated against the canonical `agentvault.models.AgentCard` schema. The server automatically extracts the `name` and `description` fields from the validated `card_data` for indexing and faster retrieval in list views.
 *   **Authentication:** Required (`X-Api-Key`).
 *   **Request Body:** `schemas.AgentCardCreate`
     ```json
@@ -38,8 +38,8 @@ The API uses standard HTTP status codes. Common errors include:
         "schemaVersion": "1.0",
         "humanReadableId": "your-org/your-agent",
         "agentVersion": "1.1.0",
-        "name": "My Awesome Agent",
-        "description": "This agent does amazing things.",
+        "name": "My Awesome Agent", // Required within card_data
+        "description": "This agent does amazing things.", // Required within card_data
         "url": "https://my-agent.example.com/a2a",
         "provider": { "name": "My Org" },
         "capabilities": { "a2aVersion": "1.0" },
@@ -48,33 +48,33 @@ The API uses standard HTTP status codes. Common errors include:
       }
     }
     ```
-*   **Success Response (201 Created):** `schemas.AgentCardRead` - Returns the full details of the newly created card record, including its generated UUID (`id`), timestamps, and the `developer_is_verified` status inherited from the owner.
+*   **Success Response (201 Created):** `schemas.AgentCardRead` - Returns the full details of the newly created card record, including its generated UUID (`id`), timestamps, and the `developer_is_verified` status which reflects the verification status of the *developer* who submitted the card.
     ```json
     {
       "id": "a1b2c3d4-e5f6-7890-1234-567890abcdef",
       "developer_id": 15,
-      "developer_is_verified": false, // Example value
+      "developer_is_verified": false, // Reflects status of developer ID 15
       "card_data": { /* ... submitted card_data ... */ },
-      "name": "My Awesome Agent",
-      "description": "This agent does amazing things.",
+      "name": "My Awesome Agent", // Extracted from card_data
+      "description": "This agent does amazing things.", // Extracted from card_data
       "is_active": true,
       "created_at": "2024-04-15T12:00:00Z",
       "updated_at": "2024-04-15T12:00:00Z"
     }
     ```
-*   **Errors:** 401, 403, 422 (e.g., invalid `card_data`, missing required fields like `name`), 500.
+*   **Errors:** 401, 403, 422 (e.g., invalid `card_data`, missing required fields like `name` or `description` within `card_data`), 500.
 
 #### `GET /`
 
 *   **Summary:** List Agent Cards.
-*   **Description:** Retrieves a paginated list of Agent Cards, with options for filtering. By default, only active cards (`is_active=true`) are returned.
+*   **Description:** Retrieves a paginated list of Agent Cards, with options for filtering. By default, only active cards (`is_active=true`) are returned. Results are summaries (`schemas.AgentCardSummary`).
 *   **Authentication:** Optional. Required *only* if `owned_only=true`.
 *   **Query Parameters:**
     *   `skip` (int, default: 0, min: 0): Offset for pagination.
     *   `limit` (int, default: 100, min: 1, max: 250): Max items per page.
     *   `active_only` (bool, default: true): Set to `false` to include inactive cards.
     *   `search` (str, optional, max_length: 100): Case-insensitive search term applied to indexed `name` and `description` fields.
-    *   `tags` (list[str], optional): Filter by tags present in `card_data.tags`. Provide the parameter multiple times for AND logic (e.g., `?tags=weather&tags=forecast`). Requires agents to have *all* specified tags. Uses JSONB containment.
+    *   `tags` (list[str], optional): Filter by tags present in `card_data.tags`. Provide the parameter multiple times for AND logic (e.g., `?tags=weather&tags=forecast`). Requires agents to have *all* specified tags (uses JSONB containment `@>` query).
     *   `has_tee` (bool, optional): Filter by TEE support declaration (`card_data.capabilities.teeDetails` existence).
     *   `tee_type` (str, optional, max_length: 50): Filter by specific TEE type string (`card_data.capabilities.teeDetails.type`). Case-insensitive match.
     *   `owned_only` (bool, default: false): If `true`, requires `X-Api-Key` header and returns only cards owned by the authenticated developer.
@@ -103,7 +103,7 @@ The API uses standard HTTP status codes. Common errors include:
 #### `GET /{card_id}`
 
 *   **Summary:** Get Agent Card by ID.
-*   **Description:** Retrieves the full details of a specific Agent Card by its UUID. Includes the `developer_is_verified` status.
+*   **Description:** Retrieves the full details of a specific Agent Card by its UUID. Includes the `developer_is_verified` status of the owning developer.
 *   **Authentication:** Public.
 *   **Path Parameter:**
     *   `card_id` (UUID): The unique ID of the agent card (e.g., `a1b2c3d4-e5f6-7890-1234-567890abcdef`).
@@ -113,15 +113,25 @@ The API uses standard HTTP status codes. Common errors include:
 #### `PUT /{card_id}`
 
 *   **Summary:** Update an Agent Card.
-*   **Description:** Updates an existing Agent Card. Only the authenticated owner of the card can perform this action. Fields not included in the request body (`card_data`, `is_active`) are left unchanged. If `card_data` is provided, it is validated against the schema, and the `name`/`description` fields in the database are updated accordingly.
+*   **Description:** Updates an existing Agent Card. Only the authenticated owner of the card can perform this action. Fields not included in the request body (`card_data`, `is_active`) are left unchanged. If `card_data` is provided, it **replaces** the existing `card_data` entirely after validation, and the indexed `name`/`description` fields in the database are updated accordingly.
 *   **Authentication:** Required (`X-Api-Key`, must match card owner).
 *   **Path Parameter:**
     *   `card_id` (UUID): The ID of the agent card to update.
 *   **Request Body:** `schemas.AgentCardUpdate`
     ```json
     {
-      // Example: Update only card_data
-      "card_data": { /* ... complete new card data ... */ }
+      // Example: Update only card_data (must be complete and valid)
+      "card_data": {
+         "schemaVersion": "1.0",
+         "humanReadableId": "your-org/your-agent", // Usually shouldn't change ID
+         "agentVersion": "1.2.0", // Updated version
+         "name": "My Updated Agent", // Updated name
+         "description": "Now with more features!", // Updated description
+         "url": "https://my-agent.example.com/a2a/v2", // Updated URL
+         "provider": { "name": "My Org" },
+         "capabilities": { "a2aVersion": "1.0" },
+         "authSchemes": [ { "scheme": "apiKey", "service_identifier": "my-agent-service" } ]
+      }
     }
     ```
     ```json
@@ -130,15 +140,8 @@ The API uses standard HTTP status codes. Common errors include:
       "is_active": false
     }
     ```
-    ```json
-    {
-      // Example: Update both
-      "card_data": { /* ... complete new card data ... */ },
-      "is_active": true
-    }
-    ```
 *   **Success Response (200 OK):** `schemas.AgentCardRead` - Returns the full details of the updated card record.
-*   **Errors:** 401, 403 (if not owner), 404, 422 (if `card_data` is provided and invalid), 500.
+*   **Errors:** 401, 403 (if not owner), 404, 422 (if `card_data` is provided and invalid, or missing required fields like `name`), 500.
 
 #### `DELETE /{card_id}`
 
@@ -163,6 +166,13 @@ The API uses standard HTTP status codes. Common errors include:
       "card_data": {
         "schemaVersion": "1.0",
         "name": "Agent to Validate",
+        "humanReadableId": "org/test-valid",
+        "agentVersion": "1.0",
+        "description": "...",
+        "url": "http://valid.url",
+        "provider": {"name": "Test"},
+        "capabilities": {"a2aVersion": "1.0"},
+        "authSchemes": [{"scheme": "none"}]
         // ... other card fields ...
       }
     }
@@ -180,7 +190,7 @@ The API uses standard HTTP status codes. Common errors include:
         ```json
         {
           "is_valid": false,
-          "detail": "Validation Error: Field required [type=missing, loc=('humanReadableId',), ...]",
+          "detail": "Validation Error: Field required [type=missing, loc=('url',), ...]",
           "validated_card_data": null
         }
         ```
