@@ -18,6 +18,9 @@ theme:
     - content.tabs.link
     - content.code.copy
     - content.code.annotate
+    # --- ADDED: Explicitly enable mermaid feature ---
+    - mermaid
+    # --- END ADDED ---
   palette:
     - scheme: default
       toggle:
@@ -32,7 +35,6 @@ theme:
 plugins:
   - search # Enable search plugin
 
-# --- MODIFIED: Corrected Navigation Structure & Privacy Policy Path ---
 nav:
   - Home: index.md
   - Introduction:
@@ -56,12 +58,10 @@ nav:
     - Code of Conduct: CODE_OF_CONDUCT.md
     - Security: security.md
     - Security Policy: security_policy.md
-    # - License: LICENSE.md # Keep commented - Not in docs dir
     - Registry Policy: REGISTRY_POLICY.md
     - Terms of Service: TERMS_OF_SERVICE.md
-    - Privacy Policy: privacy_policy.md # Corrected path (lowercase, assume moved)
+    - Privacy Policy: privacy_policy.md
     - Roadmap: ROADMAP.md
-# --- END MODIFIED ---
 
 # Source directory for markdown files
 docs_dir: 'docs'
@@ -74,13 +74,11 @@ markdown_extensions:
       pygments_lang_class: true
   - pymdownx.inlinehilite
   - pymdownx.snippets
-  # --- MODIFIED: Added Mermaid configuration to superfences ---
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
-  # --- END MODIFIED ---
   - admonition
   - toc:
       permalink: true

@@ -24,31 +24,33 @@ graph LR
         User[User / Client App] -->|Uses| CLI(agentvault_cli)
         CLI -->|Uses| Lib(agentvault_library)
         User -->|Uses| Lib
-        Lib -->|Manages Keys via KeyManager| KeyStore([Local Credential Store<br>(Env, File, Keyring)])
+        Lib -->|Manages Keys via KeyManager| KeyStore[Local Credential Store Env/File/Keyring]
     end
 
     subgraph Developer Side
         Dev[Agent Developer] -->|Uses| SDK(agentvault_server_sdk)
-        SDK -->|Builds Agent + Card| AgentServer(A2A Agent Server<br>e.g., FastAPI)
-        Dev -->|Creates/Manages Registry Key| DevKeyStore([Developer API Key<br>Stored by Developer])
-        Dev -->|Submits Card via API<br>(Uses DevKeyStore)| RegistryAPI(Registry API<br>/api/v1)
+        SDK -->|Builds Agent + Card| AgentServer(A2A Agent Server FastAPI)
+        Dev -->|Creates/Manages Registry Key| DevKeyStore[Developer API Key Stored by Dev]
+        Dev -->|Submits Card via API Uses DevKeyStore| RegistryAPI(Registry API /api/v1)
     end
 
     subgraph Central Service
-        RegistryAPI -->|Reads/Writes Hashes| DB[(Registry PostgreSQL DB<br>Stores Cards & Hashed Dev Keys)]
-        RegistryAPI -->|Serves UI| RegistryUI(Registry Web UI<br>/ui, /ui/developer)
+        RegistryAPI -->|Reads/Writes Hashes| DB[Registry DB Cards Hashed Keys]
+        RegistryAPI -->|Serves UI| RegistryUI(Registry Web UI /ui)
         User -->|Browses| RegistryUI
     end
 
+    %% --- MODIFIED: Removed numbering from edge labels ---
     subgraph Communication Paths
-        Lib -- 1. Discover Agent (Public API) --> RegistryAPI
-        Lib -- 2. Get Agent Card (Public API) --> RegistryAPI
-        Lib -- 3. Run Task (A2A Protocol)<br>Uses KeyManager for Agent Auth --> AgentServer
+        Lib -->|Discover Agent Public API| RegistryAPI
+        Lib -->|Get Agent Card Public API| RegistryAPI
+        Lib -->|Run Task A2A Protocol| AgentServer
         AgentServer -->|Optional: Uses Lib/SDK| ExternalService[External APIs / Services]
     end
+    %% --- END MODIFIED ---
 
-    style Dev fill:#f9f,stroke:#333,stroke-width:2px
-    style User fill:#ccf,stroke:#333,stroke-width:2px
+    style Dev fill:#ff99ff,stroke:#333333,stroke-width:2px
+    style User fill:#ccccff,stroke:#333333,stroke-width:2px
     style KeyStore stroke-dasharray: 5 5
     style DevKeyStore stroke-dasharray: 5 5
 ```
