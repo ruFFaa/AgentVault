@@ -1,126 +1,141 @@
 # Developer Guide: Testing Utilities (`agentvault-testing-utils`)
 
-The `agentvault-testing-utils` package provides shared mocks, fixtures, factories, and helper functions designed to facilitate the testing of AgentVault components like the core library, CLI, registry, and server SDK implementations.
+The `agentvault-testing-utils` package is an internal development tool providing shared mocks, pytest fixtures, data factories, and helper functions. Its purpose is to streamline and standardize testing across the different AgentVault components (`agentvault_library`, `agentvault_cli`, `agentvault_registry`, `agentvault_server_sdk`).
+
+**Note:** This package is **not intended for end-users** or for distribution on PyPI. It's used within the AgentVault monorepo's development workflow.
 
 ## Installation
 
-This package is intended for development use only. Install it as a development dependency within the component you are testing using Poetry:
+This package is installed as a development dependency when setting up the main project environment using Poetry:
 
 ```bash
-# From the component's directory (e.g., agentvault_library)
-poetry add --group dev agentvault-testing-utils --path ../agentvault_testing_utils
+# From the monorepo root (AgentVault/)
+poetry install --with dev
 ```
-
-Or ensure it's included in the main `poetry install --with dev` when run from the monorepo root.
 
 ## Provided Utilities
 
-### Mocks (`MockAgentVaultClient`)
+### 1. Mocks (`mocks.py`)
 
-*   **Path:** `agentvault_testing_utils.mocks.MockAgentVaultClient`
-*   **Purpose:** A mock implementation of the core `agentvault.client.AgentVaultClient`. It allows you to simulate A2A interactions without making real network calls, configure return values or exceptions for client methods, and record calls made to the client for assertion purposes.
-*   **Usage Example:**
-    ```python
-    import pytest
-    from agentvault_testing_utils.mocks import MockAgentVaultClient
-    from agentvault.models import Task, TaskState
-    from agentvault.exceptions import A2AConnectionError
+*   **`MockAgentVaultClient`**:
+    *   **Purpose:** A mock implementation of `agentvault.client.AgentVaultClient`. Use this in tests for components that *use* the client library (like the CLI or potentially other agents) to simulate A2A interactions without network calls.
+    *   **Features:**
+        *   Configurable return values for async methods (e.g., `initiate_task_return_value`).
+        *   Configurable side effects (exceptions) for async methods (e.g., `get_task_status_side_effect = A2AConnectionError(...)`).
+        *   Call recording via the `call_recorder` attribute (an `unittest.mock.AsyncMock` instance).
+        *   Supports async context management (`async with`).
+    *   **Example:**
+        ```python
+        import pytest
+        from agentvault_testing_utils.mocks import MockAgentVaultClient
+        from agentvault.models import Task, TaskState
+        from agentvault.exceptions import A2AConnectionError
+        from unittest.mock import call
 
-    @pytest.mark.asyncio
-    async def test_client_logic():
-        mock_client = MockAgentVaultClient()
+        @pytest.mark.asyncio
+        async def test_cli_run_logic(mocker): # Assuming mocker fixture
+            mock_client = MockAgentVaultClient()
+            # Patch the client instantiation in the module under test
+            mocker.patch('agentvault_cli.commands.run.av_client.AgentVaultClient', return_value=mock_client)
 
-        # Configure return value for get_task_status
-        mock_task = Task(...) # Assume Task object is created or mocked
-        mock_client.get_task_status_return_value = mock_task
+            # Configure mock behavior
+            mock_client.initiate_task_return_value = "task-from-mock"
+            mock_task_result = Task(...) # Create or mock a Task object
+            mock_client.get_task_status_return_value = mock_task_result
 
-        # Configure initiate_task to raise an error
-        mock_client.initiate_task_side_effect = A2AConnectionError("Mock connection failed")
+            # --- Run the CLI command or function under test ---
+            # result = await run_cli_command(...)
 
-        # --- Use the mock client in your test ---
-        # Example: Test error handling
-        with pytest.raises(A2AConnectionError):
-            await mock_client.initiate_task(...)
-
-        # Example: Test successful call
-        status = await mock_client.get_task_status(...)
-        assert status == mock_task
-
-        # Example: Assert calls were made
-        mock_client.call_recorder.get_task_status.assert_awaited_once()
-    ```
-
-### Mock Server (`mock_a2a_server` fixture)
-
-*   **Path:** `agentvault_testing_utils.fixtures.mock_a2a_server`
-*   **Purpose:** A pytest fixture that utilizes `respx` to set up mock HTTP endpoints simulating an A2A agent server and an OAuth token endpoint. It provides basic stateful handling for tasks and SSE events.
-*   **Features:**
-    *   Mocks `POST /a2a` endpoint, routing based on JSON-RPC `method`.
-    *   Mocks `POST /token` endpoint for OAuth Client Credentials flow.
-    *   Provides in-memory `task_store` (dict) and `sse_event_store` (dict) accessible via the fixture's return value, allowing tests to configure mock state and expected SSE events.
-    *   Handles basic JSON-RPC request/response formatting and errors.
-*   **Usage Example:**
-    ```python
-    import httpx
-    import pytest
-    from agentvault_testing_utils.fixtures import mock_a2a_server, MockServerInfo
-    from agentvault.models import TaskState, TaskStatusUpdateEvent # Example event
-
-    @pytest.mark.asyncio
-    async def test_api_interaction(mock_a2a_server: MockServerInfo):
-        # Configure mock state before making the call
-        task_id = "test-task-123"
-        mock_a2a_server.task_store[task_id] = {"state": TaskState.WORKING}
-        mock_a2a_server.sse_event_store[task_id] = [
-            TaskStatusUpdateEvent(...) # Create event instances
-        ]
-
-        # Make calls using httpx or AgentVaultClient to mock_a2a_server.base_url
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{mock_a2a_server.base_url}/a2a",
-                json={
-                    "jsonrpc": "2.0",
-                    "method": "tasks/get",
-                    "params": {"id": task_id},
-                    "id": "req-1"
-                }
+            # --- Assert interactions with the mock client ---
+            mock_client.call_recorder.initiate_task.assert_awaited_once()
+            mock_client.call_recorder.get_task_status.assert_awaited_with(
+                 agent_card=ANY, task_id="task-from-mock", key_manager=ANY
             )
-            assert response.status_code == 200
-            assert response.json()["result"]["state"] == "WORKING"
+        ```
 
-        # Assertions on task_store or further interactions...
-    ```
+### 2. Mock Server & Fixtures (`mock_server.py`, `fixtures.py`)
 
-### Factories (`create_test_agent_card`)
+*   **`mock_a2a_server` (Pytest Fixture):**
+    *   **Purpose:** Provides a more realistic testing environment by mocking the HTTP endpoints of an A2A agent server and its associated OAuth token endpoint using `respx`. Useful for testing the `AgentVaultClient` itself or components that make real HTTP requests.
+    *   **Features:**
+        *   Sets up `respx` routes for `POST /a2a` and `POST /token`.
+        *   Handles basic JSON-RPC routing (`tasks/send`, `get`, `cancel`, `sendSubscribe`).
+        *   Simulates basic task state via an in-memory `task_store` dictionary accessible from the fixture.
+        *   Simulates SSE streaming for `tasks/sendSubscribe` based on an `sse_event_store` dictionary accessible from the fixture.
+        *   Provides the `base_url` of the mock server.
+    *   **Return Type:** `MockServerInfo` (NamedTuple) with fields `base_url`, `task_store`, `sse_event_store`.
+    *   **Example:**
+        ```python
+        import pytest
+        import httpx
+        from agentvault_testing_utils.fixtures import mock_a2a_server, MockServerInfo
+        from agentvault.models import TaskState, TaskStatusUpdateEvent # Example event
+        import datetime
 
-*   **Path:** `agentvault_testing_utils.factories.create_test_agent_card`
-*   **Purpose:** Creates `agentvault.models.AgentCard` Pydantic model instances with sensible default values, making it easy to generate valid test data. Allows overriding specific fields via keyword arguments.
-*   **Usage Example:**
-    ```python
-    from agentvault_testing_utils.factories import create_test_agent_card
+        @pytest.mark.asyncio
+        async def test_client_against_mock_server(mock_a2a_server: MockServerInfo):
+            # Configure the mock server's state BEFORE making the call
+            task_id = "live-test-task"
+            mock_a2a_server.task_store[task_id] = {"state": TaskState.WORKING}
+            mock_a2a_server.sse_event_store[task_id] = [
+                TaskStatusUpdateEvent(taskId=task_id, state=TaskState.COMPLETED, timestamp=datetime.datetime.now(datetime.timezone.utc))
+            ]
 
-    # Default card
-    card1 = create_test_agent_card()
+            # Use httpx or AgentVaultClient to interact with mock_a2a_server.base_url
+            async with httpx.AsyncClient() as client:
+                response = await client.post(f"{mock_a2a_server.base_url}/a2a", json={...})
+                # ... assertions ...
 
-    # Card with specific overrides
-    card2 = create_test_agent_card(
-        name="Specific Test Agent",
-        humanReadableId="my-org/specific-agent",
-        authSchemes=[{"scheme": "apiKey", "service_identifier": "specific-key"}]
-    )
-    ```
+            # Check if the mock server state was updated (e.g., after a cancel call)
+            # assert mock_a2a_server.task_store[task_id]["state"] == TaskState.CANCELED
+        ```
+*   **`setup_mock_a2a_routes`:** The underlying function used by the fixture to configure `respx`. Can be used directly for custom setups.
+*   **JSON-RPC Helpers:** `create_jsonrpc_success_response`, `create_jsonrpc_error_response`.
 
-### Test Agents (`EchoAgent`)
+### 3. Factories (`factories.py`)
 
-*   **Path:** `agentvault_testing_utils.agents.EchoAgent`
-*   **Purpose:** A simple implementation of `agentvault_server_sdk.BaseA2AAgent` that performs basic actions like echoing the input message via SSE and setting task states. Useful for testing the Server SDK's router (`create_a2a_router`) and basic A2A flows without needing a complex agent implementation.
-*   **Usage Example:** See [Server SDK Example](../../examples/basic_a2a_server/README.md).
+*   **`create_test_agent_card(**overrides)`**:
+    *   **Purpose:** Generates `agentvault.models.AgentCard` Pydantic model instances with sensible default values. Simplifies creating valid test data.
+    *   **Features:** Accepts keyword arguments to override any top-level or nested field in the default card structure. Performs validation using the actual `AgentCard` model.
+    *   **Example:**
+        ```python
+        from agentvault_testing_utils.factories import create_test_agent_card
 
-### Assertion Helpers (`assertions.py`)
+        default_card = create_test_agent_card()
+        custom_card = create_test_agent_card(
+            name="OAuth Agent",
+            authSchemes=[{"scheme": "oauth2", "tokenUrl": "https://test.com/token"}]
+        )
+        ```
 
-*   **Path:** `agentvault_testing_utils.assertions`
-*   **Purpose:** Provides helper functions to simplify assertions about A2A calls made during tests, whether using `respx` or `MockAgentVaultClient`.
+### 4. Test Agents (`agents.py`)
+
+*   **`EchoAgent`**:
+    *   **Purpose:** A minimal, functional implementation of `agentvault_server_sdk.BaseA2AAgent`. It stores received messages in memory, echoes the first message content back via SSE, and transitions through basic states (Submitted -> Working -> Completed).
+    *   **Use Case:** Ideal for testing the Server SDK's `create_a2a_router`, basic A2A client interactions, and SSE streaming logic without needing a complex real agent.
+    *   **Example:** See the Server SDK Developer Guide or the `basic_a2a_server` example.
+
+### 5. Assertion Helpers (`assertions.py`)
+
+*   **Purpose:** Provide convenient functions for asserting that specific A2A calls were made, simplifying tests that interact with `MockAgentVaultClient` or `respx`.
 *   **Key Functions:**
-    *   `assert_a2a_call(mock_calls, method, params_contain=None, req_id=None)`: Asserts that at least one call matching the criteria exists in the `mock_calls` (list of `httpx.Request` or `MagicMock.call_args_list`). `params_contain` performs a subset check on the call's parameters.
-    *   `assert_a2a_sequence(mock_calls, expected_sequence)`: Asserts that the sequence of parseable A2A calls matches the `expected_sequence` list of `(method, params_contain)` tuples.
+    *   `assert_a2a_call(mock_calls, method, params_contain=None, req_id=None)`: Checks if *any* call in the provided list (`httpx.Request` list or `MagicMock.call_args_list`) matches the specified JSON-RPC `method`, optional `req_id`, and optionally contains the key-value pairs in `params_contain` within its `params` object.
+    *   `assert_a2a_sequence(mock_calls, expected_sequence)`: Checks if the sequence of *parseable* A2A calls matches the `expected_sequence` (a list of `(method, params_contain)` tuples).
+    *   **Example:**
+        ```python
+        from agentvault_testing_utils.assertions import assert_a2a_call, assert_a2a_sequence
+        from unittest.mock import call # For sequence assertion
+
+        # Using MockAgentVaultClient
+        # await mock_client.initiate_task(...)
+        # await mock_client.get_task_status(...)
+        # assert_a2a_call(mock_client.call_recorder, method="tasks/get", params_contain={"id": "task-id"})
+        # expected_seq = [("initiate_task", None), ("get_task_status", {"task_id": "task-id"})] # Note: Uses method name for mock recorder
+        # assert_a2a_sequence(mock_client.call_recorder, expected_seq)
+
+        # Using respx
+        # with respx.mock:
+        #     # setup routes...
+        #     # make httpx calls...
+        # assert_a2a_call(respx.calls, method="tasks/send", params_contain={"message": {"role": "user"}})
+        ```

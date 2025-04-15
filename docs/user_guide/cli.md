@@ -4,17 +4,15 @@ The `agentvault_cli` is your command-line tool for interacting with the AgentVau
 
 ## Installation
 
-*(Link to main installation guide - coming soon)*
+Please refer to the main [Installation Guide](../installation.md) for instructions on installing the CLI using `pip`.
 
 ## Core Commands
 
-The CLI is structured around several main commands:
+The CLI is structured around several main commands. Get an overview by running:
 
 ```bash
 agentvault_cli --help
 ```
-
-This will show the main available command groups.
 
 ### `config`
 
@@ -24,41 +22,68 @@ Manage local API keys and OAuth credentials required to authenticate with differ
 
 ```bash
 agentvault_cli config --help
-agentvault_cli config set --help
-agentvault_cli config get --help
-agentvault_cli config list --help
 ```
+
+This command group helps you configure how the `agentvault_cli run` command (and underlying library) finds the necessary secrets to talk to different agents.
 
 **Key Subcommands:**
 
-*   **`set <service_id> [OPTIONS]`**: Configure how credentials for a specific service are sourced or stored.
-    *   `--env`: Provides guidance on setting API keys or OAuth credentials via environment variables (e.g., `AGENTVAULT_KEY_<SERVICE_ID>`, `AGENTVAULT_OAUTH_<SERVICE_ID>_CLIENT_ID`).
-    *   `--file <path>`: Provides guidance on setting credentials within a specified file (supports `.env` and `.json` formats).
-    *   `--keyring`: Prompts securely for an API key and stores it in the operating system's keyring associated with the `<service_id>`. This is the recommended method for storing keys directly via the CLI.
-    *   `--oauth-configure`: Prompts securely for an OAuth 2.0 Client ID and Client Secret and stores them in the OS keyring. Required for agents using the `oauth2` authentication scheme.
+*   **`set <service_id> [OPTIONS]`**:
+    *   **Purpose:** Configure how credentials for a specific service (identified by `<service_id>`) are sourced or stored. The `<service_id>` is a name *you* choose locally (e.g., `openai`, `my-custom-agent-key`, `google-oauth-agent`) that the `KeyManager` uses to find the right secret. It often corresponds to the `service_identifier` in an Agent Card's `authSchemes`, but can be different.
+    *   **Options:**
+        *   `--env`: **Guidance Only.** Prints instructions on how to set environment variables (`AGENTVAULT_KEY_<SERVICE_ID_UPPER>`, `AGENTVAULT_OAUTH_<SERVICE_ID_UPPER>_CLIENT_ID`, `AGENTVAULT_OAUTH_<SERVICE_ID_UPPER>_CLIENT_SECRET`). It does *not* store anything itself.
+        *   `--file <path>`: **Guidance Only.** Prints instructions on how to format a `.env` or `.json` file to store credentials that the `KeyManager` could potentially load (if configured during library initialization, which the CLI doesn't do by default).
+        *   `--keyring`: **Stores API Key.** Securely prompts for an API key and stores it in your operating system's default keyring, associated with the `<service_id>`. **This is the recommended secure method for storing API keys via the CLI.**
+        *   `--oauth-configure`: **Stores OAuth Credentials.** Securely prompts for an OAuth 2.0 Client ID and Client Secret and stores them in the OS keyring, associated with the `<service_id>`. Required for agents using the `oauth2` authentication scheme.
 
-    *Example (Store API Key securely):*
+    *Example (Store OpenAI API Key securely):*
     ```bash
-    agentvault_cli config set my-openai-service --keyring
-    # Prompts for key input
+    # Use 'openai' as the local service_id
+    agentvault_cli config set openai --keyring
+    # --> Enter API key: ************
+    # --> Confirm API key: ************
+    # SUCCESS: API key for 'openai' stored successfully in keyring.
     ```
-    *Example (Configure OAuth):*
+    *Example (Configure OAuth for a Google agent):*
     ```bash
-    agentvault_cli config set my-google-agent --oauth-configure
-    # Prompts for Client ID and Client Secret
+    # Use 'google-agent-oauth' as the local service_id
+    agentvault_cli config set google-agent-oauth --oauth-configure
+    # --> Enter OAuth Client ID for 'google-agent-oauth': <paste_client_id>
+    # --> Enter OAuth Client Secret for 'google-agent-oauth': ************
+    # --> Confirm OAuth Client Secret for 'google-agent-oauth': ************
+    # SUCCESS: OAuth credentials for 'google-agent-oauth' stored successfully in keyring.
+    ```
+    *Example (Guidance for Environment Variables):*
+    ```bash
+    agentvault_cli config set anthropic --env
+    # --> Guidance: To use environment variables for 'anthropic':
+    # -->   For API Key: Set AGENTVAULT_KEY_ANTHROPIC=<your_api_key>
+    # -->   ... (OAuth guidance also shown) ...
     ```
 
-*   **`get <service_id> [OPTIONS]`**: Checks how credentials for a service are currently being sourced (Environment, File, Keyring).
-    *   `--show-key`: Displays the first few characters of the found API key (use with caution).
-    *   `--show-oauth-id`: Displays the configured OAuth Client ID if found.
-
+*   **`get <service_id> [OPTIONS]`**:
+    *   **Purpose:** Checks how credentials for a given `<service_id>` are currently being sourced by the `KeyManager` (Environment, File, Keyring). It checks the cache first, then attempts to load from the keyring if enabled.
+    *   **Options:**
+        *   `--show-key`: Displays the first few characters of the found API key (use with caution).
+        *   `--show-oauth-id`: Displays the configured OAuth Client ID if found.
     *Example:*
     ```bash
-    agentvault_cli config get my-openai-service
-    agentvault_cli config get my-google-agent --show-oauth-id
+    agentvault_cli config get openai
+    # --> Credential status for service 'openai':
+    # -->   API Key: Found (Source: KEYRING)
+    # -->     (Use --show-key to display a masked version)
+    # -->   OAuth Credentials: Not Configured
+
+    agentvault_cli config get google-agent-oauth --show-oauth-id
+    # --> Credential status for service 'google-agent-oauth':
+    # -->   API Key: Not Found
+    # -->   OAuth Credentials: Configured (Source: KEYRING)
+    # -->     Client ID: 12345-abcde.apps.googleusercontent.com
     ```
 
-*   **`list`**: Shows a summary of services for which credentials have been detected from environment variables or specified key files during initialization. *Note: Does not actively scan the keyring.*
+*   **`list`**:
+    *   **Purpose:** Shows a summary of services for which credentials have been detected *during initialization* from **environment variables** or specified **key files** (if the underlying library was configured with a key file path, which the default CLI is not).
+    *   **Note:** This command **does not actively scan the OS keyring**. Keys stored *only* in the keyring will typically not appear in this list unless they were accessed previously by a `get` command in the same CLI invocation.
 
 ### `discover`
 
@@ -68,22 +93,29 @@ Search for agents registered in the central AgentVault Registry.
 
 ```bash
 agentvault_cli discover --help
-agentvault_cli discover [SEARCH_QUERY] [OPTIONS]
-```
+agentvault_cli discover [SEARCH_QUERY] [OPTIONS]```
 
-*   **`[SEARCH_QUERY]` (Optional):** Text to search for in agent names or descriptions.
-*   **`--registry <url>`:** Specify the URL of the AgentVault Registry (defaults to `http://localhost:8000` or `AGENTVAULT_REGISTRY_URL` env var).
-*   **`--limit <n>`:** Maximum results per page (default: 25).
-*   **`--offset <n>`:** Number of results to skip (for pagination).
+*   **`[SEARCH_QUERY]` (Optional):** Text to search for (case-insensitive) in agent names or descriptions.
+*   **`--registry <url>`:** Specify the URL of the AgentVault Registry. Defaults to `http://localhost:8000` or the value of the `AGENTVAULT_REGISTRY_URL` environment variable if set.
+*   **`--limit <n>`:** Maximum results per page (default: 25, max: 250).
+*   **`--offset <n>`:** Number of results to skip (for pagination, default: 0).
+*   **`--tags <tag>` (Repeatable):** Filter by tags. Only agents possessing *all* specified tags will be returned (e.g., `--tags weather --tags forecast`).
+*   **`--has-tee [true|false]` (Optional):** Filter agents based on whether they declare TEE support in their Agent Card.
+*   **`--tee-type <type>` (Optional):** Filter agents by the specific TEE type declared (e.g., `AWS Nitro Enclaves`, `Intel SGX`).
 
 *Example:*
 ```bash
 # List first 10 agents containing "weather"
 agentvault_cli discover weather --limit 10
 
-# List next page of weather agents
-agentvault_cli discover weather --limit 10 --offset 10
+# List agents tagged with both "summarization" and "nlp"
+agentvault_cli discover --tags summarization --tags nlp
+
+# Find agents declaring TEE support
+agentvault_cli discover --has-tee true
 ```
+
+The output is displayed in a table format.
 
 ### `run`
 
@@ -96,29 +128,40 @@ agentvault_cli run --help
 agentvault_cli run --agent <agent_ref> --input <input_data> [OPTIONS]
 ```
 
-*   **`--agent <agent_ref>` / `-a <agent_ref>` (Required):** Identifies the target agent. Can be:
-    *   An Agent ID from the registry (e.g., `my-org/my-agent`).
-    *   A direct URL to the agent's `agent-card.json`.
-    *   A local file path to the agent's `agent-card.json`.
-*   **`--input <input_data>` / `-i <input_data>` (Required):** The input text for the agent. Prefix with `@` to read input from a file (e.g., `--input @prompt.txt`).
+*   **`--agent <agent_ref>` / `-a <agent_ref>` (Required):** Identifies the target agent. This is crucial. It can be:
+    *   An **Agent ID** from the registry (e.g., `examples/simple-agent`, `my-org/my-agent`). The CLI will use the `--registry` URL to fetch the corresponding Agent Card.
+    *   A direct **URL** to the agent's `agent-card.json` (e.g., `http://localhost:8001/agent-card.json`).
+    *   A local **file path** to the agent's `agent-card.json` (e.g., `../examples/basic_a2a_server/agent-card.json`).
+*   **`--input <input_data>` / `-i <input_data>` (Required):** The input text for the agent's task.
+    *   To read input from a file, prefix the path with `@`. Example: `--input @./prompts/my_request.txt`.
 *   **`--context-file <path>`:** Path to a local JSON file containing MCP context data to send with the initial message.
-*   **`--registry <url>`:** Registry URL (used if `<agent_ref>` is an ID).
-*   **`--key-service <service_id>`:** Override the service ID used for looking up authentication credentials (useful if the Agent Card is ambiguous or missing a `service_identifier`).
-*   **`--auth-key <key>`:** Directly provide the API key (INSECURE, for testing only). Overrides `KeyManager` lookup for `apiKey` schemes.
-*   **`--output-artifacts <directory>`:** If provided, artifact content larger than 1KB received via SSE will be saved to files in this directory instead of being printed to the console.
+*   **`--registry <url>`:** Registry URL (only used if `<agent_ref>` is an Agent ID). Defaults to `http://localhost:8000` or `AGENTVAULT_REGISTRY_URL` env var.
+*   **`--key-service <service_id>`:** **Important for Authentication.** If the agent requires authentication (e.g., `apiKey` or `oauth2`) and its Agent Card doesn't specify a `service_identifier`, or if you want to use credentials stored under a different local name, use this flag to tell the `KeyManager` which local service ID to use for lookup. Example: `--key-service openai`.
+*   **`--auth-key <key>`:** **INSECURE - FOR TESTING ONLY.** Directly provide the API key on the command line. This bypasses the `KeyManager` lookup for agents using the `apiKey` scheme. Avoid using this for sensitive keys.
+*   **`--output-artifacts <directory>`:** If provided, artifact content larger than 1KB received via SSE will be saved to files in this directory (named using artifact ID and inferred extension) instead of being printed (truncated) to the console.
 
-*Example:*
+*Example (Running the basic SDK example agent):*
 ```bash
-# Run task on agent by ID with text input
-agentvault_cli run --agent examples/simple-agent --input "Explain A2A."
-
-# Run task using agent card URL and input from file, saving large artifacts
-agentvault_cli run -a http://localhost:8000/agent-card.json -i @my_prompt.txt --output-artifacts ./task_outputs
+# Assumes the basic_a2a_server example is running on port 8000
+agentvault_cli run --agent http://localhost:8000/agent-card.json --input "Hello Agent!"
 ```
 
-The `run` command streams events (status changes, messages, artifacts) from the agent in real-time using Server-Sent Events (SSE).
+*Example (Running an agent from registry requiring an OpenAI key):*
+```bash
+# First, ensure the key is configured:
+# agentvault config set openai --keyring (and enter key)
+
+# Then run the task (assuming agent 'some-org/openai-agent' uses 'openai' service ID)
+agentvault_cli run --agent some-org/openai-agent --input "Summarize the concept of AI agents."
+
+# Or, if the agent card didn't specify 'openai' as service_identifier:
+agentvault_cli run --agent some-org/openai-agent --input "Summarize..." --key-service openai```
+
+The `run` command connects to the agent and streams Server-Sent Events (SSE) back to your terminal, showing status updates, messages from the agent/tools, and artifact information using `rich` formatting for better readability.
 
 ## Usage Tips
+
+*(Same as before - Shell History, fzf + awk)*
 
 ### Re-running `run` Commands
 

@@ -1,111 +1,155 @@
 # Developer Guide: Server SDK (`agentvault-server-sdk`)
 
-The `agentvault-server-sdk` provides tools and abstractions to simplify the development of A2A-compliant agent servers in Python, particularly when using the FastAPI web framework.
+The `agentvault-server-sdk` provides tools and abstractions to simplify the development of A2A-compliant agent servers in Python, particularly when using the FastAPI web framework. It helps you focus on your agent's core logic while the SDK handles much of the A2A protocol boilerplate.
 
-## Key Components
+## Installation
 
-### `BaseA2AAgent`
+Install the SDK from PyPI:
 
-*   **Purpose:** This is the abstract base class that your agent logic class should inherit from. It defines the core interface expected by the A2A protocol handlers.
-*   **Implementation:** You must implement the following asynchronous methods in your subclass:
-    *   `handle_task_send(task_id: Optional[str], message: Message) -> str`: Handles task initiation (`task_id` is `None`) or subsequent messages (`task_id` is provided). Should return the task ID.
-    *   `handle_task_get(task_id: str) -> Task`: Retrieves the current state and details of a specific task.
-    *   `handle_task_cancel(task_id: str) -> bool`: Attempts to cancel an ongoing task. Returns `True` if the request was accepted.
-    *   `handle_subscribe_request(task_id: str) -> AsyncGenerator[A2AEvent, None]`: Returns an async generator that yields `A2AEvent` objects (status updates, messages, artifacts) for Server-Sent Event streaming.
-*   **Alternative:** For simpler agents or specific method handling, you can use the `@a2a_method` decorator instead of implementing all `handle_...` methods (see below).
+```bash
+pip install agentvault-server-sdk
+```
 
-### FastAPI Integration (`create_a2a_router`)
+See the main [Installation Guide](../installation.md) for more details, including setting up a development environment.
 
-*   **Purpose:** A helper function that takes an instance of your `BaseA2AAgent` subclass and returns a FastAPI `APIRouter`.
-*   **Functionality:**
-    *   Creates a single POST endpoint (typically mounted at `/a2a`).
-    *   Handles incoming JSON-RPC 2.0 requests.
-    *   Parses the request payload (`method`, `params`, `id`).
-    *   Validates `params` against the expected Pydantic models defined in `agentvault.models` (e.g., `TaskSendParams`).
-    *   Routes the request to the corresponding `handle_...` method or a decorated method on your agent instance.
-    *   Handles the `tasks/sendSubscribe` method specifically, setting up an `SSEResponse` to stream events from your agent's `handle_subscribe_request` generator.
-    *   Formats successful results and errors into standard JSON-RPC responses.
+## Core Concepts
+
+The SDK revolves around implementing an agent logic class and integrating it with a web framework (currently FastAPI).
+
+### 1. `BaseA2AAgent`
+
+This is the abstract base class your agent logic should inherit from.
+
+*   **Purpose:** Defines the standard interface the A2A protocol expects.
+*   **Required Methods:** You *must* implement these `async` methods in your subclass:
+    *   `handle_task_send(task_id: Optional[str], message: Message) -> str`: Processes incoming messages, manages task creation/updates, returns the task ID.
+    *   `handle_task_get(task_id: str) -> Task`: Retrieves the full state (`Task` model) of a specific task.
+    *   `handle_task_cancel(task_id: str) -> bool`: Attempts to cancel a task, returning `True` if the request is accepted.
+    *   `handle_subscribe_request(task_id: str) -> AsyncGenerator[A2AEvent, None]`: Returns an async generator yielding `A2AEvent` objects (status updates, messages, artifacts) for SSE streaming.
+*   **Alternative (`@a2a_method`):** For agents handling only specific or custom methods, you can use the `@a2a_method` decorator instead of implementing all `handle_...` methods.
+
+### 2. Task State Management (`agentvault_server_sdk.state`)
+
+Handling asynchronous tasks requires managing their state (Submitted, Working, Completed, etc.) and potentially associated data (messages, artifacts).
+
+*   **`TaskContext`:** A basic dataclass holding `task_id`, `current_state`, timestamps. Subclass this to store agent-specific task data.
+*   **`BaseTaskStore`:** An abstract class defining the interface for storing and retrieving `TaskContext` objects (`create_task`, `get_task`, `update_task_state`, `delete_task`). It also defines interfaces for managing SSE listeners and notifying them.
+*   **`InMemoryTaskStore`:** A simple, non-persistent dictionary-based implementation of `BaseTaskStore`. Suitable for development or single-instance agents where persistence isn't required. **Production agents typically require a persistent store (e.g., Redis, Database).**
+*   **Notification Helpers:** When using a `BaseTaskStore`, call methods like `task_store.notify_status_update(...)`, `task_store.notify_message_event(...)`, `task_store.notify_artifact_event(...)` from your agent logic. The SDK's router integration uses these to automatically send SSE events to subscribed clients.
+
+### 3. FastAPI Integration (`create_a2a_router`)
+
+This function bridges your agent logic with the FastAPI web framework.
+
+*   **Purpose:** Creates a FastAPI `APIRouter` that automatically exposes the standard A2A JSON-RPC methods (`tasks/send`, `tasks/get`, `tasks/cancel`, `tasks/sendSubscribe`) and routes them to your `BaseA2AAgent` implementation's corresponding `handle_...` methods (or decorated methods).
 *   **Usage:**
     ```python
+    # In your main FastAPI app file (e.g., main.py)
     from fastapi import FastAPI
     from agentvault_server_sdk import create_a2a_router, BaseA2AAgent
-    # Import your agent implementation
-    from my_agent_module import MyAgent
+    from agentvault_server_sdk.state import InMemoryTaskStore
+    # Import your agent class
+    from my_agent_logic import MyAgent
 
-    app = FastAPI()
-    my_agent_instance = MyAgent()
-    task_store = # ... initialize your task store (e.g., InMemoryTaskStore()) ...
+    # 1. Instantiate your agent and task store
+    task_store = InMemoryTaskStore()
+    my_agent_instance = MyAgent(task_store_ref=task_store) # Pass store if needed
 
-    # Create the router, passing the agent and store
-    a2a_router = create_a2a_router(agent=my_agent_instance, task_store=task_store)
+    # 2. Create the A2A router
+    a2a_router = create_a2a_router(
+        agent=my_agent_instance,
+        task_store=task_store # Provide the store instance
+    )
 
-    # Include the router in your FastAPI app
-    app.include_router(a2a_router, prefix="/a2a")
+    # 3. Create the FastAPI app and include the router
+    app = FastAPI(title="My A2A Agent")
+    app.include_router(a2a_router, prefix="/a2a") # Mount at /a2a
 
-    # IMPORTANT: Add required exception handlers to the main app
-    # (See Exceptions section below and example server)
+    # 4. IMPORTANT: Add required exception handlers
+    # (See example below and basic_a2a_server example)
+    # ... add exception handlers ...
     ```
-*   **Exception Handling:** The router relies on specific exception handlers being added to the main FastAPI `app` instance to correctly translate internal errors (like `TaskNotFoundError`, `ValueError`, `AgentServerError`) into appropriate JSON-RPC error responses. See the [Basic A2A Server Example](../../examples/basic_a2a_server/main.py) for required handlers.
+*   **Exception Handling:** The router relies on specific exception handlers being added to the *main FastAPI app* to translate internal errors (like `TaskNotFoundError`, `ValueError`, `AgentServerError`) into correct JSON-RPC error responses. You **must** add these handlers:
+    ```python
+    from fastapi import Request, FastAPI
+    from fastapi.responses import JSONResponse
+    from pydantic import ValidationError as PydanticValidationError
+    from agentvault_server_sdk.exceptions import AgentServerError, TaskNotFoundError
+    from agentvault_server_sdk.fastapi_integration import (
+        task_not_found_handler, validation_exception_handler,
+        agent_server_error_handler, generic_exception_handler
+    )
 
-### A2A Method Decorator (`@a2a_method`)
+    app = FastAPI() # Your app instance
+    # ... include router ...
 
-*   **Purpose:** Provides an alternative way to handle specific A2A methods without implementing the full suite of `handle_...` methods in `BaseA2AAgent`. Useful for agents that only support a subset of methods or custom methods.
-*   **Usage:** Decorate an `async def` method within your agent class.
+    app.add_exception_handler(TaskNotFoundError, task_not_found_handler)
+    app.add_exception_handler(ValueError, validation_exception_handler)
+    app.add_exception_handler(TypeError, validation_exception_handler)
+    app.add_exception_handler(PydanticValidationError, validation_exception_handler)
+    app.add_exception_handler(AgentServerError, agent_server_error_handler)
+    app.add_exception_handler(Exception, generic_exception_handler) # Catch-all
+    ```
+
+### 4. A2A Method Decorator (`@a2a_method`)
+
+An alternative for exposing specific methods without implementing the full `BaseA2AAgent` interface.
+
+*   **Purpose:** Expose individual `async def` methods in your class as specific JSON-RPC methods. Useful for simpler agents or custom methods.
+*   **Usage:**
     ```python
     from agentvault_server_sdk import BaseA2AAgent, a2a_method
-    from pydantic import BaseModel
+    from agentvault.models import Task # Example import
 
-    class EchoParams(BaseModel):
-        text_to_echo: str
+    class DecoratedAgent(BaseA2AAgent):
 
-    class MyAgentWithDecorator(BaseA2AAgent):
-        # No need to implement handle_task_send, etc. if only using decorators
+        @a2a_method("custom/ping")
+        async def ping_handler(self) -> str:
+            return "pong"
 
-        @a2a_method("custom/echo")
-        async def echo_handler(self, text_to_echo: str) -> str:
-            # Parameter 'text_to_echo' is automatically validated from params
-            return f"You sent: {text_to_echo}"
+        @a2a_method("tasks/get") # Override standard method
+        async def custom_get(self, id: str) -> Task: # Params validated from type hints
+            # ... custom logic to fetch task ...
+            task_data = await get_my_task_data(id)
+            # Return value validated against type hint
+            return Task(**task_data)
 
-        @a2a_method("tasks/get") # Override specific standard methods
-        async def custom_get_handler(self, id: str) -> Dict: # Return type validated
-             # Custom logic for getting task 'id'
-             return {"id": id, "status": "custom_handled"}
+        # No need to implement handle_task_send, handle_task_cancel etc.
+        # if only using decorators for the methods you support.
+        # The router will return "Method not found" for others.
     ```
-*   **Features:**
-    *   The router automatically discovers and routes calls to decorated methods based on the provided method name string.
-    *   It automatically validates incoming `params` against the decorated function's type hints (using Pydantic).
-    *   It automatically validates the return value against the function's return type hint.
+*   **Validation:** The router automatically validates incoming `params` against the decorated function's type hints and validates the return value against the function's return type hint using Pydantic.
 
-### Task State Management (`state.py`)
+### 5. Packaging Tool (`agentvault-sdk package`)
 
-*   **Purpose:** Provides abstractions and a basic implementation for managing the state of ongoing A2A tasks, essential for handling `tasks/get`, `tasks/cancel`, and SSE notifications.
-*   **Components:**
-    *   `TaskContext`: A simple dataclass holding basic task info (`task_id`, `current_state`, timestamps). Can be subclassed to store more agent-specific state.
-    *   `BaseTaskStore`: An abstract base class defining the interface for task storage (`get_task`, `create_task`, `update_task_state`, `delete_task`) and listener management (`add_listener`, `remove_listener`, `get_listeners`, `notify_...`).
-    *   `InMemoryTaskStore`: A basic, non-persistent implementation of `BaseTaskStore` using Python dictionaries. Suitable for development and simple agents.
-*   **Integration:** The `create_a2a_router` accepts a `task_store` instance. If provided, the router uses it for:
-    *   Checking task existence before calling `handle_task_get`, `handle_task_cancel`, `handle_subscribe_request`.
-    *   The agent implementation should also use the *same* `task_store` instance to update state (`update_task_state`) and trigger notifications (`notify_status_update`, `notify_message_event`, `notify_artifact_event`). The SDK's notification methods automatically handle fanning out events to subscribed SSE listeners.
+A CLI tool to help prepare your agent for deployment, typically via Docker.
 
-### Exceptions (`exceptions.py`)
-
-Defines custom exceptions specific to server-side agent errors:
-
-*   `AgentServerError` (Base exception)
-*   `TaskNotFoundError`: Raised when an operation targets a non-existent task ID. Handled by the router to return a specific JSON-RPC error.
-*   `InvalidStateTransitionError`: (Conceptual) Can be used by agent logic to signal invalid state changes.
-*   `AgentProcessingError`: Generic error during agent's internal processing.
-*   `ConfigurationError`: Agent configuration issue.
-
-### MCP Utilities (`mcp_utils.py`)
-
-*   **Purpose:** Provides server-side utilities for handling Model Context Protocol data.
-*   **Key Functions:**
-    *   `get_mcp_context(message: Message) -> Optional[Dict]`: Safely extracts the `mcp_context` dictionary potentially embedded within an incoming A2A `Message`'s metadata.
-
-### Packager CLI (`agentvault-sdk`)
-
-*   **Purpose:** A command-line tool to help package your SDK-based agent for deployment, typically using Docker.
 *   **Command:** `agentvault-sdk package [OPTIONS]`
-*   **Functionality:** Generates a standardized multi-stage `Dockerfile`, a `.dockerignore` file, and copies necessary files (like `requirements.txt`, `agent-card.json`) into an output directory, preparing the agent for containerization.
-*   **Documentation:** *(Link to dedicated Packager documentation - coming soon)*
+*   **Functionality:** Generates a standard multi-stage `Dockerfile`, a `.dockerignore` file, and copies `requirements.txt` and optionally `agent-card.json` to an output directory.
+*   **Key Options:**
+    *   `--output-dir` / `-o` (Required): Where to put generated files.
+    *   `--entrypoint` / `-e` (Required): Import path to your FastAPI app instance (e.g., `my_agent.main:app`).
+    *   `--python`: Python version for Docker image (default: 3.11).
+    *   `--suffix`: Base image suffix (default: slim-bookworm).
+    *   `--port`: Port inside the container (default: 8000).
+    *   `--requirements` / `-r`: Path to `requirements.txt` (defaults to `./requirements.txt`).
+    *   `--agent-card` / `-c`: Path to `agent-card.json` to copy.
+*   **Example:**
+    ```bash
+    agentvault-sdk package -o ./build -e my_agent.main:app -r ./requirements.txt -c ./agent-card.json
+    # Then build: docker build -t my-agent-image -f ./build/Dockerfile .
+    ```
+
+## Building a Basic Agent (Conceptual Steps)
+
+1.  **Define Agent Logic:** Create a class inheriting from `BaseA2AAgent`.
+2.  **Implement Handlers/Methods:** Implement the required `handle_...` methods or use the `@a2a_method` decorator for the A2A methods your agent supports. Use a `TaskStore` (like `InMemoryTaskStore` initially) to manage state. Use `notify_...` methods on the store to trigger SSE events.
+3.  **Create FastAPI App:** Set up a basic FastAPI application (`main.py`).
+4.  **Instantiate Agent & Store:** Create instances of your agent class and task store.
+5.  **Create & Include Router:** Use `create_a2a_router(agent=..., task_store=...)` and include it in your FastAPI app (e.g., at prefix `/a2a`).
+6.  **Add Exception Handlers:** Add the required handlers (shown above) to your main FastAPI app instance.
+7.  **Create Agent Card:** Write an `agent-card.json` describing your agent, ensuring the `url` points to your FastAPI endpoint (e.g., `http://your-host/a2a`).
+8.  **Run:** Use `uvicorn main:app --host ... --port ...`.
+9.  **(Optional) Package:** Use `agentvault-sdk package` to create Docker artifacts.
+
+Refer to the [Basic A2A Server Example](../../examples/basic_a2a_server/) for a runnable implementation.

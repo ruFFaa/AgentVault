@@ -1,9 +1,7 @@
 # MkDocs Configuration for AgentVault
 
 site_name: AgentVault Documentation
-# --- CORRECTED: Use the actual GitHub Pages URL ---
 site_url: https://SecureAgentTools.github.io/AgentVault/
-# --- CORRECTED: Use the correct repository URL ---
 repo_url: https://github.com/SecureAgentTools/AgentVault/
 repo_name: AgentVault
 edit_uri: "" # Disable edit button for now
@@ -34,26 +32,26 @@ theme:
 plugins:
   - search # Enable search plugin
 
-# Define initial navigation structure (will be expanded)
+# Define navigation structure
 nav:
   - Home: index.md
   - Introduction:
     - Concepts: concepts.md
     - Architecture: architecture.md
     - Security: security.md
+  - Installation: installation.md # Added Installation link
   - User Guide:
     - CLI Usage: user_guide/cli.md
   - Developer Guide:
-    - Library (Client): developer_guide/library.md
-    - Server SDK: developer_guide/server_sdk.md
-    - Registry API: developer_guide/registry.md
-    - Testing Utilities: developer_guide/testing.md
+    - Client Library (`agentvault`): developer_guide/library.md
+    - Server SDK (`agentvault-server-sdk`): developer_guide/server_sdk.md
+    - Registry API (`agentvault_registry`): developer_guide/registry.md
+    - Testing Utilities (`agentvault-testing-utils`): developer_guide/testing.md
   - Protocols:
     - A2A Profile v0.2: a2a_profile_v0.2.md
-    # - TEE Profile: tee_profile.md # Placeholder
-  # Placeholders for future structure:
-  # - Automation: automation_scripts.md
-  # - Contributing: CONTRIBUTING.md # Link to existing?
+    - TEE Profile: tee_profile.md # Placeholder link
+  # - Automation: automation_scripts.md # Placeholder
+  - Contributing: CONTRIBUTING.md # Link to existing root file
 
 # Source directory for markdown files
 docs_dir: 'docs'
