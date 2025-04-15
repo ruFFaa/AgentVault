@@ -6,12 +6,15 @@ This project provides libraries, tools, and specifications to enable seamless in
 
 ---
 
-**➡️ Public Registry Available!**
+**➡️ Public Registry & UI Available!**
 
-A live instance of the AgentVault Registry API is hosted at:
+A live instance of the AgentVault Registry API and its associated Web UI is hosted at:
 **[`https://agentvault-registry-api.onrender.com`](https://agentvault-registry-api.onrender.com)**
 
-*   **Note:** This is hosted on Render's free tier. If inactive, it may take **up to 60 seconds** to "wake up" on the first request. You can use this URL with the `agentvault_cli` (`--registry` flag or `AGENTVAULT_REGISTRY_URL` environment variable) or when interacting with the API directly.
+*   **Public Discovery UI:** [`https://agentvault-registry-api.onrender.com/ui`](https://agentvault-registry-api.onrender.com/ui)
+*   **Developer Portal UI:** [`https://agentvault-registry-api.onrender.com/ui/developer`](https://agentvault-registry-api.onrender.com/ui/developer)
+*   **API Base:** `https://agentvault-registry-api.onrender.com/api/v1`
+*   **Note (Cold Start):** This is hosted on Render's free tier. If inactive, it may take **up to 60 seconds** to "wake up" on the first request. You can visit the `/health` endpoint or the UI to wake it up.
 
 ---
 
@@ -26,7 +29,7 @@ The AgentVault monorepo contains the following key components:
 
 *   **`agentvault_library`**: ([Developer Guide](developer_guide/library.md)) Core Python client library for interacting with A2A agents, managing keys, and handling protocols (A2A, MCP).
 *   **`agentvault_cli`**: ([User Guide](user_guide/cli.md)) Command-line interface for users and developers to manage credentials, discover agents, and run tasks.
-*   **`agentvault_registry`**: ([Developer Guide](developer_guide/registry.md)) Backend API server (FastAPI) acting as the central discovery point for registered agents. Includes a basic web UI. *(Live instance available above)*
+*   **`agentvault_registry`**: ([Developer Guide](developer_guide/registry.md)) Backend API server (FastAPI) acting as the central discovery point for registered agents. Also serves a **Web UI** for public discovery (`/ui`) and developer management (`/ui/developer`). *(Live instance available above)*
 *   **`agentvault_server_sdk`**: ([Developer Guide](developer_guide/server_sdk.md)) Python SDK to help developers build A2A-compliant agent servers easily, integrating with frameworks like FastAPI. Includes packaging tools.
 *   **`agentvault_testing_utils`**: ([Developer Guide](developer_guide/testing.md)) Shared mocks, fixtures, factories, and helpers for testing AgentVault components.
 *   **`examples/`**: Contains practical examples demonstrating how to use the SDK and library (e.g., basic A2A server, LangChain integration). See the [Examples Overview](examples.md).

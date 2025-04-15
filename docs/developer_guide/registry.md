@@ -1,11 +1,14 @@
 # Developer Guide: Registry API (`agentvault_registry`)
 
-The AgentVault Registry provides a central RESTful API service for discovering and managing Agent Cards. Developers interact with it to publish their agents, while clients (like the `agentvault_cli` or other applications) use it to find agents.
+The AgentVault Registry provides a central RESTful API service for discovering and managing Agent Cards. Developers interact with it programmatically to publish their agents, while clients (like the `agentvault_cli` or other applications) use it to find agents.
+
+*(Note: Alongside the API, the `agentvault_registry` service also hosts a basic Web UI for public discovery at `/ui` and a developer portal at `/ui/developer` on the same host where the API is deployed.)*
 
 ## API Base Path & Public Instance
 
 *   **Base Path:** All registry API endpoints are prefixed with `/api/v1`.
 *   **Public Instance:** A live instance is available at: **`https://agentvault-registry-api.onrender.com`**
+    *   *API Endpoint Example:* `https://agentvault-registry-api.onrender.com/api/v1/agent-cards/`
 *   **Public Instance Note (Cold Start):** This instance runs on Render's free tier. If inactive, it may take **up to 60 seconds** to respond to the first request. Subsequent requests will be faster. Consider sending a simple request (e.g., `GET /health`) to wake it up before making critical calls if latency is a concern.
 *   **Local Development:** When running locally (see [Installation Guide](../installation.md)), the base URL is typically `http://localhost:8000/api/v1`.
 
