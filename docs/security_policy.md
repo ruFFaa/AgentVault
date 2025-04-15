@@ -21,11 +21,21 @@ We appreciate responsible disclosure. Please report any suspected security vulne
 
 **Preferred Method:**
 
-*   **GitHub Private Vulnerability Reporting:** If you are reporting via GitHub, please use the built-in "Report a vulnerability" feature within the main AgentVault repository. This allows for secure communication and tracking. [*Note: Link to GitHub Security Tab needs to be updated once available.*]
+*   **GitHub Private Vulnerability Reporting:** If you are reporting via GitHub, please use the built-in "Report a vulnerability" feature within the main AgentVault repository. This allows for secure communication and tracking.
+
+    **`[LINK_TO_GITHUB_SECURITY_TAB_PLACEHOLDER]`**
+
+    **[IMPORTANT NOTE]:** *This link is a placeholder and MUST be replaced with the actual URL to the repository's Security tab once available.*
 
 **Alternative Method:**
 
-*   **Email:** If you cannot use GitHub's reporting feature, you can email your report to `[CONTACT_EMAIL_PLACEHOLDER]` (*Note: Replace placeholder before production*). Use a clear subject line like "Security Vulnerability Report: AgentVault [Component Name]". **Please use this email address for vulnerability reports ONLY.** Other inquiries will not be addressed here.
+*   **Email:** If you cannot use GitHub's reporting feature, you can email your report to:
+
+    **`[CONTACT_EMAIL_PLACEHOLDER]`**
+
+    **[IMPORTANT NOTE]:** *This email address is a placeholder and MUST be replaced with the actual project security contact email before public release. Use this for vulnerability reports ONLY.*
+
+    Use a clear subject line like "Security Vulnerability Report: AgentVault [Component Name]".
 
 **What to Include:**
 

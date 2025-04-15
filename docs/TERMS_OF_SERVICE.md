@@ -71,4 +71,8 @@ We reserve the right to modify these Terms at any time. If we make changes, we w
 
 **11. Contact Information**
 
-For questions about these Terms of Service, please contact `[CONTACT_EMAIL_PLACEHOLDER]` (*Note: Replace placeholder before production*).
+For questions about these Terms of Service, please contact:
+
+**`[CONTACT_EMAIL_PLACEHOLDER]`**
+
+**[IMPORTANT NOTE]:** *This email address is a placeholder and MUST be replaced with the actual project contact email before public release.*

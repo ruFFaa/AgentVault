@@ -59,8 +59,12 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement at
-`[CONTACT_EMAIL_PLACEHOLDER]` (*Note: Replace placeholder before production*).
+reported to the community leaders responsible for enforcement at:
+
+**`[CONTACT_EMAIL_PLACEHOLDER]`**
+
+**[IMPORTANT NOTE]:** *This email address is a placeholder and MUST be replaced with the actual project contact email before public release.*
+
 All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the

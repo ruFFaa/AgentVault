@@ -42,7 +42,8 @@ If you want to use the AgentVault CLI to interact with agents or use the `agentv
 After installing the CLI, check that the command is available:
 
 ```bash
-agentvault_cli --version```
+agentvault_cli --version
+```
 
 ## 2. Setting up for Development (Contributing or Running from Source)
 
@@ -53,6 +54,7 @@ If you want to contribute to AgentVault, run components locally from the source 
 *   Git
 *   Python 3.10 or 3.11
 *   [Poetry](https://python-poetry.org/docs/#installation) (Python dependency management and packaging tool)
+*   **PostgreSQL Server** (Required *only* if running the `agentvault_registry` locally).
 
 **Steps:**
 
@@ -103,7 +105,7 @@ If you want to contribute to AgentVault, run components locally from the source 
 
 To run the `agentvault_registry` API locally (e.g., for testing agents or the CLI against it):
 
-1.  **Complete Development Setup:** Follow the steps in section 2 above.
+1.  **Complete Development Setup:** Follow the steps in section 2 above. Ensure you have a running **PostgreSQL** server accessible.
 2.  **Navigate:**
     ```bash
     cd agentvault_registry
