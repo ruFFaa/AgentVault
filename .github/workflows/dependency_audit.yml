@@ -1,87 +1,72 @@
-name: Security Dependency Audit
-
-# Trigger on pushes and pull requests to the main branch
-on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-  # Optional: Allow manual trigger from Actions tab
-  workflow_dispatch:
-
-jobs:
-  pip-audit:
-    runs-on: ubuntu-latest
-    # --- MODIFIED: Add matrix strategy ---
-    strategy:
-      fail-fast: false # Allow other audits to run even if one fails
-      matrix:
-        component:
-          - agentvault_library
-          - agentvault_cli
-          - agentvault_registry
-          - agentvault_server_sdk
-          # Add agentvault_testing_utils if it has its own lock file and dependencies to audit
-          # - agentvault_testing_utils
-    # --- END MODIFIED ---
-    # --- MODIFIED: Add name for better UI display ---
-    name: Audit ${{ matrix.component }}
-    # --- END MODIFIED ---
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        id: setup-python # Added id for caching key
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11' # Match project's Python version
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1
-        with:
-          virtualenvs-create: true # Recommended by poetry
-          # --- MODIFIED: Create venv within component dir for isolation ---
-          virtualenvs-in-project: true
-          # --- END MODIFIED ---
-
-      - name: Install pip-audit
-        # Run pip audit install globally for the runner, not in venv
-        run: pipx install pip-audit # Use pipx for tool isolation
-
-      # --- MODIFIED: Caching and Installation per component ---
-      - name: Load cached venv for ${{ matrix.component }}
-        id: cached-poetry-dependencies
-        uses: actions/cache@v4
-        with:
-          # Cache path relative to the component directory
-          path: ${{ matrix.component }}/.venv
-          # Include component name in the key
-          key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ matrix.component }}-${{ hashFiles(format('{0}/poetry.lock', matrix.component)) }}
-          restore-keys: |
-            venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ matrix.component }}-
-
-      - name: Install dependencies for ${{ matrix.component }} if cache doesn't exist
-        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-        # Run poetry install within the component directory
-        run: poetry install --no-interaction --no-root
-        working-directory: ${{ matrix.component }}
-      # --- END MODIFIED ---
-
-      # --- REMOVED: Consolidated lock file generation (not needed for per-component audit) ---
-      # - name: Generate consolidated lock file ...
-      # --- END REMOVED ---
-
-      - name: Run pip-audit for ${{ matrix.component }}
-        run: |
-          echo "Running pip-audit on ${{ matrix.component }}/poetry.lock file..."
-          # Activate venv for the component to ensure pip-audit checks installed versions if needed,
-          # although auditing the lock file directly is usually sufficient.
-          # source .venv/bin/activate # Optional: activate venv if needed
-          pip-audit --requirement poetry.lock --progress-spinner=off --strict
-          # Use --strict to fail on any vulnerability
-          # Remove --strict initially if you want to just see warnings
-          # Add --fix to attempt automatic upgrades (use with caution)
-        # --- MODIFIED: Run within the component directory ---
-        working-directory: ${{ matrix.component }}
-        # --- END MODIFIED ---
+  name: Security Dependency Audit
+  
+  # Trigger on pushes and pull requests to the main branch
+  on:
+    push:
+      branches: [ "main" ]
+    pull_request:
+      branches: [ "main" ]
+    # Optional: Allow manual trigger from Actions tab
+    workflow_dispatch:
+  
+  jobs:
+    pip-audit:
+      runs-on: ubuntu-latest
+      strategy:
+        fail-fast: false
+        matrix:
+          component:
+            - agentvault_library
+            - agentvault_cli
+            - agentvault_registry
+            - agentvault_server_sdk
+            # Add agentvault_testing_utils if it has dependencies to audit
+            # - agentvault_testing_utils
+      name: Audit ${{ matrix.component }}
+      steps:
+        - name: Checkout repository
+          uses: actions/checkout@v4
+  
+        - name: Set up Python
+          id: setup-python
+          uses: actions/setup-python@v5
+          with:
+            python-version: '3.11'
+  
+        - name: Install Poetry
+          uses: snok/install-poetry@v1
+          with:
+            virtualenvs-create: true
+            virtualenvs-in-project: true # Keep venv inside component dir
+  
+        - name: Install pip-audit tool
+          run: pipx install pip-audit # Install tool globally for runner
+  
+        - name: Load cached venv for ${{ matrix.component }}
+          id: cached-poetry-dependencies
+          uses: actions/cache@v4
+          with:
+            path: ${{ matrix.component }}/.venv
+            key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ matrix.component }}-${{ hashFiles(format('{0}/poetry.lock', matrix.component)) }}
+            restore-keys: |
+              venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ matrix.component }}-
+  
+        # --- ADDED: Regenerate lock file before install ---
+        - name: Update lock file for ${{ matrix.component }}
+          run: poetry lock --no-update
+          working-directory: ${{ matrix.component }}
+        # --- END ADDED ---
+  
+        - name: Install dependencies for ${{ matrix.component }}
+          # Removed cache hit check - always install after lock update if needed
+          run: poetry install --no-interaction --no-root
+          working-directory: ${{ matrix.component }}
+  
+        - name: Run pip-audit for ${{ matrix.component }}
+          run: |
+            echo "Running pip-audit on installed packages in ${{ matrix.component }}'s venv..."
+            # Activate the component's virtual environment first
+            source .venv/bin/activate
+            # Run pip-audit without --requirement to check installed packages
+            pip-audit --progress-spinner=off --strict
+          working-directory: ${{ matrix.component }} # Run from component dir to find .venv
