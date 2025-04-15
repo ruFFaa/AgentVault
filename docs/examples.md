@@ -18,9 +18,12 @@ The source code for these examples can be found in the `/examples/` directory of
     *   **Features:** Defines an `A2AAgentTool` class that uses the `agentvault` client library internally to communicate with a remote agent based on an agent reference (ID, URL, or file path). Includes example usage.
     *   **Good for:** Developers wanting to integrate existing or new A2A agents into LangChain applications and agentic workflows.
 
-*   **(Coming Soon) OAuth Agent Example:** An example agent demonstrating the implementation of the `oauth2` (Client Credentials) authentication scheme using the Server SDK.
+*   **[OAuth Agent Example](examples/oauth_agent_example.md):** ([View Code](https://github.com/SecureAgentTools/AgentVault/tree/main/examples/oauth_agent_example))
+    *   **Focus:** Demonstrates implementing the `oauth2` (Client Credentials) authentication scheme using the Server SDK and FastAPI.
+    *   **Features:** Includes a custom `/token` endpoint, uses environment variables for mock credentials, and protects the `/a2a` endpoint using a FastAPI dependency.
+    *   **Good for:** Developers needing to implement OAuth2 authentication for their agents.
 
-*   **(Coming Soon) Stateful Agent Example:** An example agent showcasing how to manage task state across multiple interactions using the Server SDK's state management features.
+*   **(Coming Soon) Stateful Agent Example:** An example agent showcasing how to manage task state across multiple interactions using the Server SDK's state management features (potentially with a persistent store).
 
 *   **(Coming Soon) Library Usage Example:** A Python script demonstrating direct usage of the `agentvault` client library to discover and interact with an agent, bypassing the CLI.
 

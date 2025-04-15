@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "1.0",
+  "humanReadableId": "examples/oauth-agent",
+  "agentVersion": "0.1.0",
+  "name": "SDK OAuth2 Agent Example",
+  "description": "An example agent demonstrating OAuth2 Client Credentials authentication.",
+  "url": "http://localhost:8002/a2a",
+  "provider": {
+    "name": "AgentVault SDK Examples"
+  },
+  "capabilities": {
+    "a2aVersion": "1.0",
+    "supportedMessageParts": ["text"]
+  },
+  "authSchemes": [
+    {
+      "scheme": "oauth2",
+      "description": "Requires OAuth2 Client Credentials Grant flow.",
+      "tokenUrl": "http://localhost:8002/token",
+      "service_identifier": "example-oauth-agent"
+    }
+  ],
+  "skills": [
+    {
+      "id": "authenticated_echo",
+      "name": "Authenticated Echo",
+      "description": "Receives text input and echoes it back if authenticated."
+    }
+  ],
+  "tags": ["example", "sdk", "oauth", "authentication"]
+}

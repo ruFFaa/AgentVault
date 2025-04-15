@@ -1,0 +1,13 @@
+# FastAPI framework and ASGI server
+fastapi>=0.111,<0.112
+uvicorn[standard]>=0.29,<0.35
+
+# AgentVault Server SDK (Install from local path for development)
+# Adjust the path based on your monorepo structure relative to this example dir
+-e ../../agentvault_server_sdk
+
+# AgentVault Core Library (dependency of the SDK)
+# -e ../../agentvault_library
+
+# For loading .env file
+python-dotenv>=1.0.0,<2.0.0

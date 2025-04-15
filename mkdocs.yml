@@ -33,7 +33,7 @@ theme:
 plugins:
   - search # Enable search plugin
 
-# --- MODIFIED: Updated Example Links in Nav ---
+# --- MODIFIED: Added OAuth Example to Nav ---
 nav:
   - Home: index.md
   - Introduction:
@@ -42,9 +42,9 @@ nav:
   - Installation: installation.md
   - Examples:
       - Overview: examples.md
-      # Point to the copied files within docs/examples/
       - Basic A2A Server: examples/basic_a2a_server.md
       - LangChain Tool: examples/langchain_integration.md
+      - OAuth Agent: examples/oauth_agent_example.md # Added new example
   - User Guide:
     - CLI Usage: user_guide/cli.md
   - Developer Guide:
