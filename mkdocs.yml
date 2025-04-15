@@ -1,78 +1,81 @@
 # MkDocs Configuration for AgentVault
 
-    site_name: AgentVault Documentation
-    site_url: https://SecureAgentTools.github.io/AgentVault/
-    repo_url: https://github.com/SecureAgentTools/AgentVault/
-    repo_name: AgentVault
-    edit_uri: "" # Disable edit button for now
+site_name: AgentVault Documentation
+site_url: https://SecureAgentTools.github.io/AgentVault/
+repo_url: https://github.com/SecureAgentTools/AgentVault/
+repo_name: AgentVault
+edit_uri: "" # Disable edit button for now
 
-    theme:
-      name: material
-      features:
-        - navigation.tabs
-        - navigation.sections
-        - toc.integrate
-        - navigation.top
-        - search.suggest
-        - search.highlight
-        - content.tabs.link
-        - content.code.copy
-        - content.code.annotate
-      palette:
-        - scheme: default
-          toggle:
-            icon: material/weather-sunny
-            name: Switch to dark mode
-        - scheme: slate
-          toggle:
-            icon: material/weather-night
-            name: Switch to light mode
-      # logo: assets/logo.png # Add logo later if desired
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - toc.integrate
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.tabs.link
+    - content.code.copy
+    - content.code.annotate
+  palette:
+    - scheme: default
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+    - scheme: slate
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+  # logo: assets/logo.png # Add logo later if desired
 
-    plugins:
-      - search # Enable search plugin
+plugins:
+  - search # Enable search plugin
 
-    # Define navigation structure
-    nav:
-      - Home: index.md
-      - Introduction:
-        - Concepts: concepts.md
-        - Architecture: architecture.md
-        - Security: security.md
-      - Installation: installation.md
-      - User Guide:
-        - CLI Usage: user_guide/cli.md
-      - Developer Guide:
-        - Client Library (`agentvault`): developer_guide/library.md
-        - Server SDK (`agentvault-server-sdk`): developer_guide/server_sdk.md
-        - Registry API (`agentvault_registry`): developer_guide/registry.md
-        - Testing Utilities (`agentvault-testing-utils`): developer_guide/testing.md
-      - Protocols:
-        - A2A Profile v0.2: a2a_profile_v0.2.md
-        - TEE Profile: tee_profile.md # Placeholder link
-      # - Automation: automation_scripts.md # Placeholder
-      # --- MODIFIED: Use absolute URL ---
-      - Contributing: https://github.com/SecureAgentTools/AgentVault/blob/main/CONTRIBUTING.md
-      # --- END MODIFIED ---
+# Define navigation structure
+nav:
+  - Home: index.md
+  - Introduction:
+    - Concepts: concepts.md
+    - Architecture: architecture.md
+    - Security: security.md
+  - Installation: installation.md
+  # --- ADDED: Examples Page ---
+  - Examples: examples.md
+  # --- END ADDED ---
+  - User Guide:
+    - CLI Usage: user_guide/cli.md
+  - Developer Guide:
+    - Client Library (`agentvault`): developer_guide/library.md
+    - Server SDK (`agentvault-server-sdk`): developer_guide/server_sdk.md
+    - Registry API (`agentvault_registry`): developer_guide/registry.md
+    - Testing Utilities (`agentvault-testing-utils`): developer_guide/testing.md
+  - Protocols:
+    - A2A Profile v0.2: a2a_profile_v0.2.md
+    - TEE Profile: tee_profile.md
+  # - Automation: automation_scripts.md # Placeholder
+  # --- CORRECTED: Path relative to docs_dir ---
+  - Contributing: CONTRIBUTING.md
+  # --- END CORRECTED ---
 
-    # Source directory for markdown files
-    docs_dir: 'docs'
+# Source directory for markdown files
+docs_dir: 'docs'
 
-    # Optional: Add markdown extensions for enhanced formatting
-    markdown_extensions:
-      - pymdownx.highlight:
-          anchor_linenums: true
-          line_spans: __span
-          pygments_lang_class: true
-      - pymdownx.inlinehilite
-      - pymdownx.snippets
-      - pymdownx.superfences
-      - admonition
-      - toc:
-          permalink: true
-          toc_depth: 3 # Adjust depth as needed
-      - attr_list # Allows adding classes/ids to markdown elements
-      - md_in_html # Allows markdown processing inside HTML blocks
+# Optional: Add markdown extensions for enhanced formatting
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - admonition
+  - toc:
+      permalink: true
+      toc_depth: 3 # Adjust depth as needed
+  - attr_list # Allows adding classes/ids to markdown elements
+  - md_in_html # Allows markdown processing inside HTML blocks
 
-    # Copyright notice (optional)
-    # copyright: Copyright &copy; 2025 AgentVault Contributors
+# Copyright notice (optional)
+# copyright: Copyright &copy; 2025 AgentVault Contributors
