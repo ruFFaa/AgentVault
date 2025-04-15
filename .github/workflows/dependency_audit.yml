@@ -47,30 +47,26 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ matrix.component }}/.venv
-          # Include component name and lock file hash in the key
-          # NOTE: We might still get cache misses if pyproject.toml changed, forcing lock/sync
+          # Cache key depends on the lock file hash
           key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ matrix.component }}-${{ hashFiles(format('{0}/poetry.lock', matrix.component)) }}
           restore-keys: |
             venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ matrix.component }}-
 
-      # --- ADDED: Regenerate lock file before install/sync ---
-      # This step ensures the lock file is consistent with pyproject.toml AND path dependencies
+      # --- CORRECTED: Run 'poetry lock' without '--no-update' ---
+      # This ensures the lock file is consistent with pyproject.toml and path dependencies
       - name: Update lock file for ${{ matrix.component }}
-        run: poetry lock --no-update
+        run: poetry lock
         working-directory: ${{ matrix.component }}
-      # --- END ADDED ---
+      # --- END CORRECTION ---
 
-      # --- CORRECTED: Use 'poetry sync' as recommended ---
+      # --- Use 'poetry install --sync' as recommended ---
       # This ensures the environment matches the (potentially updated) lock file exactly.
       - name: Synchronize dependencies for ${{ matrix.component }}
         run: |
-          echo "Attempting to sync environment with lock file using 'poetry sync'..."
-          poetry sync --no-root --no-interaction
-          # Fallback commented out for now, sync should be preferred
-          # echo "Fallback: Attempting 'poetry install --sync'..."
-          # poetry install --sync --no-root --no-interaction
+          echo "Attempting to sync environment with lock file using 'poetry install --sync'..."
+          # Using install --sync as 'poetry sync' is newer and might have subtle differences
+          poetry install --sync --no-root --no-interaction
         working-directory: ${{ matrix.component }}
-      # --- END CORRECTION ---
 
       - name: Run pip-audit for ${{ matrix.component }}
         run: |
