@@ -89,6 +89,7 @@ Handles secure loading, storage, and retrieval of credentials (API keys, OAuth 2
         status = km.get_oauth_config_status("google-oauth-agent")
         print(f"Found Google OAuth Credentials ({status})")
         print(f"  Client ID: {client_id}")
+        # Note: AgentVaultClient uses these to automatically fetch the Bearer token.
     ```
 *   **Storing Credentials (Primarily for CLI/Setup):**
     ```python
@@ -115,12 +116,13 @@ Handles secure loading, storage, and retrieval of credentials (API keys, OAuth 2
 
 The primary class for making asynchronous A2A calls to remote agents.
 
-*   **Purpose:** Handles HTTP requests (using `httpx`), authentication logic (including OAuth token fetching/caching), JSON-RPC formatting, SSE streaming, and response parsing according to the [A2A Profile v0.2](../a2a_profile_v0.2.md).
+*   **Purpose:** Handles HTTP requests (using `httpx`), authentication logic (including OAuth2 Client Credentials token fetching/caching), JSON-RPC formatting, SSE streaming, and response parsing according to the [A2A Profile v0.2](../a2a_profile_v0.2.md).
 *   **Usage:** Best used as an async context manager (`async with`) to ensure the underlying HTTP client is properly closed. Requires an `AgentCard` instance (loaded via `agent_card_utils`) and a `KeyManager` instance for authentication.
+
     ```python
     import asyncio
     import logging
-    import pathlib # Import pathlib
+    import pathlib
     from agentvault import (
         AgentVaultClient, KeyManager, Message, TextPart,
         agent_card_utils, exceptions as av_exceptions, models as av_models
@@ -131,49 +133,36 @@ The primary class for making asynchronous A2A calls to remote agents.
 
     async def run_agent_task(agent_ref: str, input_text: str):
         # Initialize KeyManager - typically done once per application
-        # Loads from env vars and keyring (if available) by default
         key_manager = KeyManager(use_keyring=True)
         agent_card = None
         task_id = None
 
         try:
             # --- 1. Load Agent Card ---
-            # Determine if agent_ref is URL, file path, or ID
-            # (Simplified logic here; production code might need more robust checks)
             print(f"Loading agent card: {agent_ref}")
-            if agent_ref.startswith("http"):
-                agent_card = await agent_card_utils.fetch_agent_card_from_url(agent_ref)
-            else:
-                agent_path = pathlib.Path(agent_ref)
-                if agent_path.is_file():
-                    agent_card = agent_card_utils.load_agent_card_from_file(agent_path)
-                else:
-                    # Assume it's an ID - requires registry lookup (not shown here)
-                    # You would typically use a separate registry client or function
-                    raise NotImplementedError("Loading by Agent ID requires registry interaction.")
+            # (Simplified loading logic - see previous version for URL/File/ID handling)
+            agent_card = await agent_card_utils.fetch_agent_card_from_url(agent_ref) # Example URL load
 
             if not agent_card:
                  print(f"Error: Could not load agent card for {agent_ref}")
                  return
-
             print(f"Loaded Agent: {agent_card.name}")
 
             # --- 2. Prepare Initial Message ---
             initial_message = Message(role="user", parts=[TextPart(content=input_text)])
-            # Optional: Prepare MCP context if needed
-            mcp_data = {"user_preference": "verbose"}
+            mcp_data = {"user_preference": "verbose"} # Optional MCP context
 
             # --- 3. Interact using AgentVaultClient ---
-            # Use async with for proper client lifecycle management
             async with AgentVaultClient() as client:
                 # Initiate the task
+                # AgentVaultClient automatically handles authentication (apiKey or oauth2)
+                # based on agent_card.authSchemes and credentials from key_manager.
                 print(f"Initiating task...")
                 task_id = await client.initiate_task(
                     agent_card=agent_card,
                     initial_message=initial_message,
                     key_manager=key_manager,
-                    mcp_context=mcp_data, # Optional context
-                    # webhook_url="https://...", # Optional webhook (if agent supports)
+                    mcp_context=mcp_data,
                 )
                 print(f"Task initiated: {task_id}")
 
@@ -186,7 +175,6 @@ The primary class for making asynchronous A2A calls to remote agents.
                     if isinstance(event, av_models.TaskStatusUpdateEvent):
                         print(f"  Status Update: {event.state} "
                               f"(Msg: {event.message or 'N/A'})")
-                        # Check for terminal states to stop listening
                         if event.state in [av_models.TaskState.COMPLETED,
                                            av_models.TaskState.FAILED,
                                            av_models.TaskState.CANCELED]:
@@ -197,22 +185,38 @@ The primary class for making asynchronous A2A calls to remote agents.
                         for part in event.message.parts:
                             if isinstance(part, TextPart):
                                 print(f"    Text: {part.content}")
-                                # Aggregate assistant responses
                                 if event.message.role == "assistant":
                                     final_response_text += part.content + "\n"
+                            # --- ADDED: Example handling other part types ---
+                            elif isinstance(part, av_models.FilePart):
+                                print(f"    File Ref: {part.url} (Type: {part.media_type}, Name: {part.filename})")
+                            elif isinstance(part, av_models.DataPart):
+                                print(f"    Data (Type: {part.media_type}): {part.content}")
+                            # --- END ADDED ---
                             else:
-                                print(f"    Part (Type: {part.type}): {part}") # Handle other parts
+                                print(f"    Part (Type: {getattr(part, 'type', 'Unknown')}): {part}")
                     elif isinstance(event, av_models.TaskArtifactUpdateEvent):
-                         print(f"  Artifact Update (ID: {event.artifact.id}, Type: {event.artifact.type}):")
-                         print(f"    Content: {str(event.artifact.content)[:100]}...") # Example display
-                         print(f"    URL: {event.artifact.url}")
-                         print(f"    Media Type: {event.artifact.media_type}")
+                         artifact = event.artifact
+                         print(f"  Artifact Update (ID: {artifact.id}, Type: {artifact.type}):")
+                         if artifact.url: print(f"    URL: {artifact.url}")
+                         if artifact.media_type: print(f"    Media Type: {artifact.media_type}")
+                         # Handle content display/saving based on size/type
+                         if artifact.content:
+                             content_repr = repr(artifact.content)
+                             print(f"    Content: {content_repr[:100]}{'...' if len(content_repr) > 100 else ''}")
+                         else:
+                             print("    Content: [Not provided directly]")
+                    # --- ADDED: Handling potential error events within stream ---
+                    # Note: A2ARemoteAgentError might also be raised by receive_messages
+                    # if the stream itself returns an error status initially.
+                    elif isinstance(event, dict) and event.get("error"): # Check for error structure
+                         print(f"  ERROR received via SSE stream: {event}")
+                         # Decide how to handle stream errors (e.g., break, log, append to response)
+                         final_response_text += f"\n[Stream Error: {event.get('message', 'Unknown')}]"
+                         break # Example: Stop processing on stream error
+                    # --- END ADDED ---
                     else:
                         print(f"  Received unknown event type: {type(event)}")
-
-                # --- 4. Optional: Check final status ---
-                # final_task_details = await client.get_task_status(agent_card, task_id, key_manager)
-                # print(f"\nFinal task status check: {final_task_details.state}")
 
                 print("\n--- Final Aggregated Agent Response ---")
                 print(final_response_text.strip())
@@ -229,9 +233,9 @@ The primary class for making asynchronous A2A calls to remote agents.
         except av_exceptions.A2ARemoteAgentError as e:
             # Agent returned an error (e.g., JSON-RPC error or non-2xx HTTP status)
             print(f"Agent returned an error:")
-            print(f"  Status Code (if HTTP error): {e.status_code}")
+            print(f"  Status Code (if HTTP/RPC error): {e.status_code}") # Can be HTTP status or RPC code
             print(f"  Message: {e}")
-            print(f"  Response Body/Data: {e.response_body}")
+            print(f"  Response Body/Data: {e.response_body}") # Contains JSON RPC error data or HTTP body
         except av_exceptions.A2AMessageError as e:
              print(f"A2A protocol message error (e.g., invalid format): {e}")
         except av_exceptions.A2ATimeoutError as e:
@@ -241,44 +245,34 @@ The primary class for making asynchronous A2A calls to remote agents.
         except NotImplementedError as e:
              print(f"Functionality not implemented: {e}")
         except Exception as e:
-            # Catch any other unexpected errors
             print(f"An unexpected error occurred: {type(e).__name__}: {e}")
-            logging.exception("Unexpected error details:") # Log traceback for debugging
+            logging.exception("Unexpected error details:")
 
-    # Example usage (replace with a real agent reference)
-    # asyncio.run(run_agent_task("http://localhost:8001/agent-card.json", "Tell me a joke about AI."))
+    # Example usage:
+    # asyncio.run(run_agent_task("https://some-agent.com/agent-card.json", "Summarize this document."))
     ```
 
 ### Models (`agentvault.models`)
 
-Pydantic models defining the data structures for Agent Cards and the A2A protocol. Key models include:
-
-*   `AgentCard`: Represents the metadata describing an agent.
-*   `Message`: Represents a message exchanged between client and agent, containing `Part` objects.
-*   `Part` (Union): Can be `TextPart`, `FilePart`, or `DataPart`.
-*   `Task`: Represents the state of an ongoing task, including messages and artifacts.
-*   `TaskState`: Enum defining the lifecycle states of a task.
-*   `A2AEvent` (Union): Represents events streamed via SSE (`TaskStatusUpdateEvent`, `TaskMessageEvent`, `TaskArtifactUpdateEvent`).
-
-Refer to the source code docstrings or the [A2A Profile v0.2](../a2a_profile_v0.2.md) for detailed field descriptions and validation rules.
+Pydantic models defining the data structures for Agent Cards and the A2A protocol. Refer to the source code docstrings or the [A2A Profile v0.2](../a2a_profile_v0.2.md) for details on specific models like `AgentCard`, `Message`, `Task`, `TaskState`, `A2AEvent`, etc.
 
 ### Exceptions (`agentvault.exceptions`)
 
-Custom exceptions provide granular error handling for different failure scenarios during A2A communication or setup. Catching these specific exceptions allows for more robust client applications. Key exceptions include:
+Custom exceptions provide granular error handling. Catching these allows for more robust client applications.
 
-*   `AgentVaultError`: Base class for all library errors.
-*   `AgentCardError`: Base for card loading/validation issues (`AgentCardValidationError`, `AgentCardFetchError`).
-*   `A2AError`: Base for A2A protocol communication errors.
-    *   `A2AAuthenticationError`: Missing/invalid credentials, OAuth failures.
-    *   `A2AConnectionError`: Network issues (connection refused, DNS errors).
-    *   `A2ATimeoutError`: Request timed out.
-    *   `A2ARemoteAgentError`: Agent returned an error (non-2xx HTTP or JSON-RPC error). Contains `status_code` and `response_body`.
-    *   `A2AMessageError`: Invalid JSON-RPC format, unexpected response structure.
-*   `KeyManagementError`: Issues saving/loading keys with `KeyManager`.
+*   **`AgentCardError`**: Issues loading/validating the Agent Card.
+*   **`A2AAuthenticationError`**: Missing/invalid credentials, OAuth flow failures. Check KeyManager setup.
+*   **`A2AConnectionError`**: Network issues connecting to the agent or token endpoint (DNS, connection refused).
+*   **`A2ATimeoutError`**: Request timed out.
+*   **`A2ARemoteAgentError`**: The agent returned an error. Check `e.status_code` (can be HTTP status or JSON-RPC error code) and `e.response_body` (can be HTTP response text or JSON-RPC error data) for details from the agent.
+*   **`A2AMessageError`**: Invalid JSON-RPC format or unexpected response structure from the agent.
+*   **`KeyManagementError`**: Issues saving/loading keys with `KeyManager`.
+
+See the example above for a basic `try...except` block structure.
 
 ### Utilities (`agentvault.agent_card_utils`, `agentvault.mcp_utils`)
 
-*   **`agent_card_utils`**: Provides helper functions (`load_agent_card_from_file`, `fetch_agent_card_from_url`, `parse_agent_card_from_dict`) to simplify obtaining and validating `AgentCard` objects.
+*   **`agent_card_utils`**: Functions like `load_agent_card_from_file` and `fetch_agent_card_from_url` simplify obtaining and validating `AgentCard` objects.
 *   **`mcp_utils`**: Contains helpers for handling Model Context Protocol data.
     *   `format_mcp_context`: (Primarily for advanced clients or server-side) Validates and formats a dictionary intended as MCP context.
     *   `get_mcp_context`: (Client-side) Safely extracts the `mcp_context` dictionary from a received `Message`'s metadata.
