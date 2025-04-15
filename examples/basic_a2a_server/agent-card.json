@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "1.0",
+  "humanReadableId": "examples/simple-agent",
+  "agentVersion": "0.1.0",
+  "name": "SDK Basic Echo Agent",
+  "description": "A simple example agent built with the AgentVault Server SDK that echoes input.",
+  "url": "http://localhost:8000/a2a",
+  "provider": {
+    "name": "AgentVault SDK Examples"
+  },
+  "capabilities": {
+    "a2aVersion": "1.0",
+    "supportedMessageParts": ["text"],
+    "supportsPushNotifications": false
+  },
+  "authSchemes": [
+    {
+      "scheme": "none",
+      "description": "No authentication required for this example agent."
+    }
+  ],
+  "skills": [
+    {
+      "id": "echo",
+      "name": "Echo Input",
+      "description": "Receives text input and echoes it back in the response stream."
+    }
+  ],
+  "tags": ["example", "sdk", "echo"]
+}

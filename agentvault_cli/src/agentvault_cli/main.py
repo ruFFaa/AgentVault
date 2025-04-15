@@ -1,13 +1,15 @@
 import click
 import logging
+import asyncio # Import asyncio
+import sys # Import sys
 
 # --- Basic Logging Setup ---
-# Configure logging early, can be refined later
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
 # --- Main CLI Group ---
+# Keep cli() synchronous as Click manages async subcommands
 @click.group()
 @click.version_option(package_name="agentvault-cli", prog_name="agentvault_cli")
 def cli():
@@ -17,25 +19,29 @@ def cli():
     Manage local API keys, discover agents via the registry,
     and run tasks on remote agents using the A2A protocol.
     """
-    # This main group function can be used for global setup if needed later
-    # e.g., setting up global context objects, configuring logging based on flags
     pass
 
 # --- Command Imports and Registration ---
-# Import command groups/commands from other modules here
 from .commands import config
 from .commands import discover
-from .commands import run # Added run command import
+from .commands import run
 
-# Add the imported commands/groups to the main CLI group
-cli.add_command(config.config_group) # Register the config group
-cli.add_command(discover.discover_command) # Register the discover command
-cli.add_command(run.run_command) # Register the run command
+cli.add_command(config.config_group)
+cli.add_command(discover.discover_command) # discover_command is async
+cli.add_command(run.run_command) # run_command is async
 
 
 # --- Entry Point Check ---
-# Allows running the script directly for development/testing
 if __name__ == "__main__":
-    # In a packaged installation, the entry point defined in pyproject.toml
-    # (`agentvault_cli = "agentvault_cli.main:cli"`) calls cli() directly.
-    cli()
+    # --- MODIFIED: Use asyncio.run() on the result of cli() ---
+    # Click's group object, when called, returns the result of the
+    # invoked command. If the command is async, this result is a
+    # coroutine. We pass this coroutine to asyncio.run().
+    # This seems to be the most reliable way to handle async commands
+    # when the script is run directly or via `python -m`.
+    command_result = cli(standalone_mode=False) # Run Click, but don't let it exit
+    if asyncio.iscoroutine(command_result):
+        asyncio.run(command_result)
+    # If the command was synchronous, command_result is likely None or some other
+    # value, and we don't need to do anything further as Click already ran it.
+    # --- END MODIFIED ---

@@ -1,0 +1,12 @@
+# Core LangChain dependency
+langchain-core>=0.1.0,<0.2.0
+
+# AgentVault Client Library (Install from local path for development)
+# Adjust the path based on your monorepo structure relative to this example dir
+-e ../../agentvault_library
+
+# HTTP client used by AgentVault library
+httpx>=0.27,<0.29
+
+# Optional: Pydantic is usually a transitive dependency but can be explicit
+# pydantic>=2.0,<3.0
