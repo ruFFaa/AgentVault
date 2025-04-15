@@ -8,12 +8,12 @@ These examples are designed to help you get started quickly, whether you are bui
 
 The source code for these examples can be found in the `/examples/` directory of the [AgentVault GitHub repository](https://github.com/SecureAgentTools/AgentVault/tree/main/examples).
 
-*   **Basic A2A Server:** ([View Code](https://github.com/SecureAgentTools/AgentVault/tree/main/examples/basic_a2a_server))
+*   **[Basic A2A Server](examples/basic_a2a_server.md):** ([View Code](https://github.com/SecureAgentTools/AgentVault/tree/main/examples/basic_a2a_server))
     *   **Focus:** Demonstrates the minimal setup required to create an A2A-compliant agent server using the `agentvault-server-sdk` and FastAPI.
     *   **Features:** Implements a simple "EchoAgent", uses the SDK's router integration (`create_a2a_router`), includes a basic `agent-card.json`, and shows how to run the server with Uvicorn.
     *   **Good for:** Developers starting to build their first A2A agent.
 
-*   **LangChain Integration:** ([View Code](https://github.com/SecureAgentTools/AgentVault/tree/main/examples/langchain_integration))
+*   **[LangChain Integration](examples/langchain_integration.md):** ([View Code](https://github.com/SecureAgentTools/AgentVault/tree/main/examples/langchain_integration))
     *   **Focus:** Shows how to wrap an AgentVault A2A agent as a custom `Tool` within the LangChain framework.
     *   **Features:** Defines an `A2AAgentTool` class that uses the `agentvault` client library internally to communicate with a remote agent based on an agent reference (ID, URL, or file path). Includes example usage.
     *   **Good for:** Developers wanting to integrate existing or new A2A agents into LangChain applications and agentic workflows.
@@ -26,7 +26,7 @@ The source code for these examples can be found in the `/examples/` directory of
 
 ## Running the Examples
 
-Please refer to the `README.md` file within each specific example directory for detailed setup and execution instructions. Generally, you will need to:
+Please refer to the `README.md` file within each specific example directory (linked via "[View Code]" above) for detailed setup and execution instructions. Generally, you will need to:
 
 1.  Ensure you have the main development environment set up (see [Installation Guide](installation.md)).
 2.  Navigate to the specific example directory (e.g., `cd examples/basic_a2a_server`).

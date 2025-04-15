@@ -11,6 +11,7 @@ This policy applies to the following components and repositories within the Agen
 *   **`agentvault` (Core Library):** Located in the `agentvault_library/` directory.
 *   **`agentvault-registry` (Registry API):** Located in the `agentvault_registry/` directory.
 *   **`agentvault-cli` (CLI Client):** Located in the `agentvault_cli/` directory.
+*   **`agentvault-server-sdk` (Server SDK):** Located in the `agentvault_server_sdk/` directory.
 
 Vulnerabilities discovered in third-party agents listed in the registry should be reported directly to the respective agent provider according to their own security policy. The AgentVault registry itself only stores metadata.
 
@@ -20,17 +21,17 @@ We appreciate responsible disclosure. Please report any suspected security vulne
 
 **Preferred Method:**
 
-*   **GitHub Private Vulnerability Reporting:** If you are reporting via GitHub, please use the built-in "Report a vulnerability" feature within the main AgentVault repository. This allows for secure communication and tracking. [Link to GitHub Security Tab - *You will need to replace this with the actual link once the repo exists*]
+*   **GitHub Private Vulnerability Reporting:** If you are reporting via GitHub, please use the built-in "Report a vulnerability" feature within the main AgentVault repository. This allows for secure communication and tracking. [*Note: Link to GitHub Security Tab needs to be updated once available.*]
 
 **Alternative Method:**
 
-*   **Email:** If you cannot use GitHub's reporting feature, you can email your report to `AgentVault@proton.me` . Use a clear subject line like "Security Vulnerability Report: AgentVault [Component Name]". **Please use this email address for vulnerability reports ONLY.** Other inquiries will not be addressed here.
+*   **Email:** If you cannot use GitHub's reporting feature, you can email your report to `[CONTACT_EMAIL_PLACEHOLDER]` (*Note: Replace placeholder before production*). Use a clear subject line like "Security Vulnerability Report: AgentVault [Component Name]". **Please use this email address for vulnerability reports ONLY.** Other inquiries will not be addressed here.
 
 **What to Include:**
 
 Please include the following details in your report:
 
-*   **Component:** Which part of AgentVault is affected (library, registry, CLI)?
+*   **Component:** Which part of AgentVault is affected (library, registry, CLI, SDK)?
 *   **Version:** The specific version number or commit hash, if known.
 *   **Description:** A clear and concise description of the vulnerability.
 *   **Steps to Reproduce:** Detailed steps required to reproduce the vulnerability. Include code snippets, configuration details, or specific API requests if applicable.

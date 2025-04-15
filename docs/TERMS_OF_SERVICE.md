@@ -71,4 +71,4 @@ We reserve the right to modify these Terms at any time. If we make changes, we w
 
 **11. Contact Information**
 
-For questions about these Terms of Service, please contact `AgentVault@proton.me` (*Note: Replace domain before production*).
+For questions about these Terms of Service, please contact `[CONTACT_EMAIL_PLACEHOLDER]` (*Note: Replace placeholder before production*).

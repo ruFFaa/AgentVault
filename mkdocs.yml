@@ -18,9 +18,7 @@ theme:
     - content.tabs.link
     - content.code.copy
     - content.code.annotate
-    # --- ADDED: Explicitly enable mermaid feature ---
     - mermaid
-    # --- END ADDED ---
   palette:
     - scheme: default
       toggle:
@@ -35,6 +33,7 @@ theme:
 plugins:
   - search # Enable search plugin
 
+# --- MODIFIED: Updated Example Links in Nav ---
 nav:
   - Home: index.md
   - Introduction:
@@ -43,6 +42,9 @@ nav:
   - Installation: installation.md
   - Examples:
       - Overview: examples.md
+      # Point to the copied files within docs/examples/
+      - Basic A2A Server: examples/basic_a2a_server.md
+      - LangChain Tool: examples/langchain_integration.md
   - User Guide:
     - CLI Usage: user_guide/cli.md
   - Developer Guide:
@@ -62,6 +64,7 @@ nav:
     - Terms of Service: TERMS_OF_SERVICE.md
     - Privacy Policy: privacy_policy.md
     - Roadmap: ROADMAP.md
+# --- END MODIFIED ---
 
 # Source directory for markdown files
 docs_dir: 'docs'

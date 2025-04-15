@@ -4,21 +4,46 @@ This document outlines the planned development phases and features for the Agent
 
 *Disclaimer: This roadmap represents our current plans and priorities. It is subject to change based on development progress, community feedback, and the evolution of underlying standards.*
 
-## Current Status (Post Phase 2.5 Plan Definition)
+## Current Status (April 2025)
+
+The AgentVault project has established a functional baseline across its core components:
 
 *   **`agentvault` Library:** Core client implemented for A2A JSON-RPC/SSE interactions, API Key/None/OAuth2 (Client Creds) auth, secure local KeyManager (env, file, keyring), Agent Card parsing/validation, basic MCP utilities. Published on PyPI.
 *   **`agentvault_registry` API:** FastAPI backend operational, supporting Agent Card submission/management (developer key auth), validation, list/search/get (including basic TEE/tag filtering), developer verification status. Uses PostgreSQL/Alembic. Basic rate limiting and CORS in place. Basic Web UI for discovery and developer portal implemented.
 *   **`agentvault_cli`:** Functional CLI for local key config (`config`), registry discovery (`discover`), and task execution (`run`) using the library. Includes `rich` output formatting and artifact saving.
 *   **`agentvault_server_sdk`:** Foundational SDK available with `BaseA2AAgent`, FastAPI integration (`create_a2a_router`, `@a2a_method`), `InMemoryTaskStore` with listener/notification support, and packaging tool (`agentvault-sdk package`). Published on PyPI.
 *   **`agentvault_testing_utils`:** Shared utilities including `MockAgentVaultClient`, `mock_a2a_server` fixture, `create_test_agent_card` factory, `EchoAgent`, and assertion helpers.
-*   **Documentation:** Initial documentation structure created with MkDocs, core concepts/architecture/security outlined, basic guides drafted, A2A profile documented. Deployed via GitHub Pages.
+*   **Documentation:** Initial documentation structure created with MkDocs, core concepts/architecture/security outlined, basic guides drafted, A2A profile documented. Deployed via GitHub Pages. Core structure and links recently refined.
 *   **CI/CD:** Workflows for dependency audit and documentation deployment are functional.
 
-## Next Steps (Consolidated Phase 2.5 Implementation)
+## Next Steps: Phase 2.5 - Ecosystem Enablement & Refinement
 
-**Objective:** Execute the tasks outlined in the **"Phase 2.5: Ecosystem Enablement & Refinement"** plan. This involves significantly enhancing documentation, creating diverse examples, refining the registry UI/UX, polishing the SDK and testing utilities, and ensuring TEE discovery features are fully implemented and tested.
+**Objective:** Solidify the existing components, improve developer/user experience through better documentation and examples, and prepare for broader adoption.
 
-*(Refer to the detailed Phase 2.5 plan for specific task breakdowns)*
+**Key Tasks:**
+
+1.  **Documentation Overhaul (Ongoing):**
+    *   **Enhance Component Guides:** Detail usage, APIs, and configuration for `agentvault_library`, `agentvault_cli`, `agentvault_registry`, `agentvault_server_sdk`. (Phase 3 of Doc Improvement Plan)
+    *   **Improve Core Concepts:** Ensure clarity and accuracy in `concepts.md`, `architecture.md`, `a2a_profile_v0.2.md`. (Phase 2 of Doc Improvement Plan - In Progress)
+    *   **Finalize Policies:** Review and finalize `REGISTRY_POLICY.md`, `TERMS_OF_SERVICE.md`, `PRIVACY_POLICY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`. Replace placeholder contacts. (Phase 4 of Doc Improvement Plan)
+    *   **Installation Guide:** Ensure `installation.md` is comprehensive and accurate. (Phase 4 of Doc Improvement Plan)
+2.  **Example Implementations:**
+    *   **Refine Existing:** Ensure `basic_a2a_server` and `langchain_integration` examples are robust and well-documented in their READMEs and linked from the main docs (`examples.md`). (Phase 4 of Doc Improvement Plan)
+    *   **Create New Examples:**
+        *   Agent using OAuth2 authentication scheme (Server SDK).
+        *   Agent demonstrating stateful task management (Server SDK).
+        *   Script demonstrating direct client library usage (bypassing CLI).
+3.  **Registry UI/UX Improvements:**
+    *   Enhance the developer portal UI (`/ui/developer`) for easier card management (editing, viewing status).
+    *   Improve filtering/search capabilities on the public UI (`/ui`).
+    *   Display developer verification status clearly.
+4.  **SDK & Testing Refinements:**
+    *   Improve Server SDK state management abstractions (consider adding basic persistent store examples or interfaces).
+    *   Expand `agentvault-testing-utils` with more assertion helpers or complex mocks as needed.
+    *   Increase test coverage across all components.
+5.  **TEE Feature Polish:**
+    *   Ensure TEE filtering in the registry API and UI works reliably.
+    *   Clarify TEE support limitations (declarative only) in documentation (`tee_profile.md`).
 
 ## Future Considerations (Beyond Phase 2.5 / Ideas)
 
@@ -26,18 +51,14 @@ This document outlines the planned development phases and features for the Agent
     *   Implement the `automation_scripts/` (`av_create_package_agent`, `av_deploy_register_agent`, `av_find_run_task`).
     *   Address scalability concerns (e.g., registry developer key lookup).
     *   Enhance Server SDK state management (persistent stores like DB/Redis).
-    *   Improve error handling depth and test coverage across all components.
-*   **Phase 3: Advanced Multimodality (WebRTC):**
-    *   Integrate `aiortc` for optional real-time audio/video streaming support within the A2A protocol.
-    *   Define signaling mechanisms via A2A.
-    *   Provide SDK hooks for media track and data channel handling.
-*   **Registry Enhancements:** Community reviews/ratings, usage analytics (opt-in), more advanced search/filtering, improved developer portal features.
-*   **Deeper MCP Integration:** Align with finalized MCP specifications, provide SDK helpers for context manipulation.
-*   **TEE Attestation Verification:** Implement client-side verification of TEE attestations based on `attestationEndpoint` in Agent Cards.
-*   **Other Language SDKs/Libraries:** Explore SDKs for Node.js, Go, etc.
-*   **Security Audits:** Formal third-party security reviews.
-*   **"No-Code/Low-Code" Builder:** (Potential separate initiative) UI tools for creating simple agents.
-*   **Visual Workflow Builder:** Graphical tool for orchestrating discovered agents.
+    *   Improve error handling depth across all components.
+*   **Phase 3: Advanced Features & Ecosystem Growth:**
+    *   **Multimodality (WebRTC):** Integrate `aiortc` for optional real-time audio/video streaming support within the A2A protocol.
+    *   **Deeper MCP Integration:** Align with finalized MCP specifications, provide SDK helpers for context manipulation.
+    *   **TEE Attestation Verification:** Implement client-side verification of TEE attestations based on `attestationEndpoint` in Agent Cards.
+    *   **Registry Enhancements:** Community reviews/ratings, usage analytics (opt-in), more advanced search/filtering, improved developer portal features (key rotation, etc.).
+    *   **Other Language SDKs/Libraries:** Explore SDKs for Node.js, Go, etc.
+    *   **Security Audits:** Formal third-party security reviews.
 
 ## Contributing
 

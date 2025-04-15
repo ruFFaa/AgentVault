@@ -129,6 +129,8 @@ Initiates a new task or sends a subsequent message to an existing task.
             "mcp_context": { "user_pref": "celsius" }
           }
         }
+        {# Example including optional webhook: #}
+        {# "webhookUrl": "https://my-client.example.com/webhook/task-updates" #}
       },
       "id": "req-1"
     }

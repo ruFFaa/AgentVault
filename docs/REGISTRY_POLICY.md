@@ -18,7 +18,7 @@ The AgentVault Registry serves as a **public discovery hub** for AI agents compa
 
 ## 3. Vetting Process
 
-*   **Automated Validation:** Submitted Agent Cards undergo automated validation against the official A2A Agent Card schema to ensure structural correctness. Basic checks may also be performed to verify the format of the specified A2A endpoint URL.
+*   **Automated Validation:** Submitted Agent Cards undergo automated validation against the official A2A Agent Card schema (`agentvault.models.AgentCard`) to ensure structural correctness. Basic checks may also be performed to verify the format of the specified A2A endpoint URL.
 *   **No Behavioral Vetting:** The AgentVault Registry **does not perform manual reviews or vetting** of the underlying agent's functionality, security practices, data handling procedures, or ethical alignment. Listing in the registry does not imply endorsement or certification by the AgentVault project.
 
 ## 4. Content Guidelines (Summary)
@@ -37,7 +37,7 @@ Agent Card metadata submitted to the registry must not:
 
 Users who encounter Agent Cards that appear to violate the Content Guidelines, are misleading, link to non-functional or malicious endpoints, or represent agents engaging in harmful activities are encouraged to report them.
 
-*   **How to Report:** Please send a detailed report including the Agent Card ID (the UUID) and a description of the issue to: `AgentVault@proton.me` (*Note: Replace domain before production*).
+*   **How to Report:** Please send a detailed report including the Agent Card ID (the UUID) and a description of the issue to: `[CONTACT_EMAIL_PLACEHOLDER]` (*Note: Replace placeholder before production*).
 *   **Review Process:** Reports will be reviewed by the AgentVault maintainers based on this policy.
 
 ## 6. Enforcement
