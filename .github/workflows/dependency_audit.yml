@@ -48,15 +48,27 @@ jobs:
         with:
           path: ${{ matrix.component }}/.venv
           # Include component name and lock file hash in the key
+          # NOTE: We might still get cache misses if pyproject.toml changed, forcing lock/sync
           key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ matrix.component }}-${{ hashFiles(format('{0}/poetry.lock', matrix.component)) }}
           restore-keys: |
             venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ matrix.component }}-
 
-      # --- CORRECTED: Use 'poetry install --sync' to match lock file ---
-      # This ensures the environment matches the lock file exactly, resolving potential
-      # inconsistencies flagged in previous runs.
+      # --- ADDED: Regenerate lock file before install/sync ---
+      # This step ensures the lock file is consistent with pyproject.toml AND path dependencies
+      - name: Update lock file for ${{ matrix.component }}
+        run: poetry lock --no-update
+        working-directory: ${{ matrix.component }}
+      # --- END ADDED ---
+
+      # --- CORRECTED: Use 'poetry sync' as recommended ---
+      # This ensures the environment matches the (potentially updated) lock file exactly.
       - name: Synchronize dependencies for ${{ matrix.component }}
-        run: poetry install --sync --no-root --no-interaction
+        run: |
+          echo "Attempting to sync environment with lock file using 'poetry sync'..."
+          poetry sync --no-root --no-interaction
+          # Fallback commented out for now, sync should be preferred
+          # echo "Fallback: Attempting 'poetry install --sync'..."
+          # poetry install --sync --no-root --no-interaction
         working-directory: ${{ matrix.component }}
       # --- END CORRECTION ---
 
