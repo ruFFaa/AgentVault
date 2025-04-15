@@ -33,6 +33,6 @@ This documentation serves as the central hub for understanding, using, and contr
 *   **[AgentVault Registry (`agentvault_registry`)](developer_guide/registry.md):** Central discovery API and UI.
 *   **[AgentVault Server SDK (`agentvault-server-sdk`)](developer_guide/server_sdk.md):** Tools for building A2A agents.
 *   **[Testing Utilities (`agentvault-testing-utils`)](developer_guide/testing.md):** Shared testing resources.
-*   **[Examples](../../examples/):** Practical usage examples.
+*   **[Examples](examples.md):** Practical usage examples.
 
 *(This documentation is under active development alongside the AgentVault project.)*
