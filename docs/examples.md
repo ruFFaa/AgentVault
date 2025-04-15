@@ -23,7 +23,10 @@ The source code for these examples can be found in the `/examples/` directory of
     *   **Features:** Includes a custom `/token` endpoint, uses environment variables for mock credentials, and protects the `/a2a` endpoint using a FastAPI dependency.
     *   **Good for:** Developers needing to implement OAuth2 authentication for their agents.
 
-*   **(Coming Soon) Stateful Agent Example:** An example agent showcasing how to manage task state across multiple interactions using the Server SDK's state management features (potentially with a persistent store).
+*   **[Stateful Agent Example](examples/stateful_agent_example.md):** ([View Code](https://github.com/SecureAgentTools/AgentVault/tree/main/examples/stateful_agent_example))
+    *   **Focus:** Demonstrates managing task state (like chat history) across multiple client interactions within a single task ID using the Server SDK.
+    *   **Features:** Uses a custom `TaskContext` subclass, `InMemoryTaskStore`, and `asyncio.Event` to handle multi-turn interactions and background processing.
+    *   **Good for:** Developers building conversational agents or agents that require maintaining context over several requests.
 
 *   **(Coming Soon) Library Usage Example:** A Python script demonstrating direct usage of the `agentvault` client library to discover and interact with an agent, bypassing the CLI.
 
