@@ -1,0 +1,25 @@
+# {{ agent_name }}
+
+{{ agent_description }}
+
+Agent ID: `{{ agent_id }}`
+
+Built with the [AgentVault Server SDK](https://github.com/SecureAgentTools/AgentVault).
+
+## Running Locally
+
+1.  Install dependencies: `poetry install`
+2.  Run server: `uvicorn src.{{ package_name }}.main:{{ fastapi_app_variable }} --reload --port {{ agent_port }}`
+
+## Docker
+
+A `Dockerfile` is provided via the SDK packager. Build and run:
+
+```bash
+# Ensure agentvault-sdk is installed in your environment
+# Generate Dockerfile (if not already done by create script)
+# agentvault-sdk package -o . -e src.{{ package_name }}.main:{{ fastapi_app_variable }} -r requirements.txt -c agent-card.json --port {{ agent_port }} --py {{ python_version }}
+
+docker build -t {{ agent_id | replace('/', '-') }}:latest .
+docker run -d -p {{ agent_port }}:{{ agent_port }} --name {{ agent_name | lower | replace(' ', '-') }} {{ agent_id | replace('/', '-') }}:latest
+```

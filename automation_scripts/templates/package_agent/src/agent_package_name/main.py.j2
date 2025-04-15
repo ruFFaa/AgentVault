@@ -1,0 +1,78 @@
+import logging
+from fastapi import FastAPI, HTTPException
+from pydantic import ValidationError as PydanticValidationError
+
+# SDK Imports
+from agentvault_server_sdk import create_a2a_router
+from agentvault_server_sdk.exceptions import AgentServerError, TaskNotFoundError
+from agentvault_server_sdk.state import InMemoryTaskStore # Use persistent store in production
+from agentvault_server_sdk.fastapi_integration import (
+    task_not_found_handler, validation_exception_handler,
+    agent_server_error_handler, generic_exception_handler
+)
+
+# Import your agent logic
+from .agent import {{ agent_name | replace(' ', '') | replace('-', '') }}Agent # Generate class name
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# --- FastAPI App Setup ---
+app = FastAPI(
+    title="{{ agent_name }}",
+    description="{{ agent_description }}",
+    version="0.1.0" # Agent specific version
+)
+
+# --- Agent and Router Setup ---
+# Use a persistent store (Redis, DB) in production!
+task_store = InMemoryTaskStore()
+agent_instance = {{ agent_name | replace(' ', '') | replace('-', '') }}Agent(task_store_ref=task_store)
+
+a2a_router = create_a2a_router(
+    agent=agent_instance,
+    task_store=task_store,
+    prefix="/a2a", # Standard A2A endpoint prefix
+    tags=["A2A"]
+)
+app.include_router(a2a_router)
+
+# --- Exception Handlers (Required for SDK Router) ---
+app.add_exception_handler(TaskNotFoundError, task_not_found_handler)
+app.add_exception_handler(ValueError, validation_exception_handler)
+app.add_exception_handler(TypeError, validation_exception_handler)
+app.add_exception_handler(PydanticValidationError, validation_exception_handler)
+app.add_exception_handler(AgentServerError, agent_server_error_handler)
+app.add_exception_handler(Exception, generic_exception_handler) # Catch-all
+
+# --- Root Endpoint ---
+@app.get("/", tags=["Status"])
+async def read_root():
+    return {"message": f"{ { agent_name } } running"}
+
+# Add other non-A2A endpoints if needed
+
+# --- Optional: Serve Agent Card ---
+# import json
+# from pathlib import Path
+# from fastapi.responses import JSONResponse
+# CARD_PATH = Path(__file__).parent.parent / "agent-card.json" # Adjust path if needed
+# @app.get("/agent-card.json", tags=["Agent Card"])
+# async def get_agent_card():
+#     if not CARD_PATH.is_file():
+#         raise HTTPException(status_code=404, detail="Agent card not found")
+#     try:
+#         with open(CARD_PATH, 'r') as f:
+#             card_data = json.load(f)
+#         return JSONResponse(content=card_data)
+#     except Exception as e:
+#         logger.error(f"Failed to load agent card: {e}")
+#         raise HTTPException(status_code=500, detail="Could not load agent card")
+
+logger.info(f"'{ { agent_name } }' application initialized.")
+
+# --- Uvicorn Runner (for direct execution) ---
+# if __name__ == "__main__":
+#     import uvicorn
+#     uvicorn.run("main:app", host="0.0.0.0", port={{ agent_port }}, reload=True) # Use configured port

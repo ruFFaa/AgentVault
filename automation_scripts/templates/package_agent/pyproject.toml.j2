@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "{{ package_name }}"
+version = "0.1.0"
+description = "{{ agent_description }}"
+authors = ["{{ author_name }} <{{ author_email }}>"]
+license = "Apache-2.0" # Or your preferred license
+readme = "README.md"
+packages = [{include = "{{ package_name }}", from = "src"}]
+
+[tool.poetry.dependencies]
+python = "^{{ python_version }}"
+fastapi = ">=0.111,<0.112"
+uvicorn = {extras = ["standard"], version = ">=0.29,<0.35"}
+agentvault-server-sdk = "{{ sdk_version_req }}"
+# Add other agent-specific dependencies here
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.0,<9.0"
+pytest-asyncio = ">=0.23,<0.24"
+httpx = ">=0.27,<0.29" # For testing client interactions
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

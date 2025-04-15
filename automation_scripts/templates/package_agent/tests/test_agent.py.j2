@@ -1,0 +1,31 @@
+import pytest
+from unittest.mock import MagicMock, AsyncMock
+
+# Import your agent class
+# from {{ package_name }}.agent import {{ agent_name | replace(' ', '') | replace('-', '') }}Agent
+
+# Import SDK testing utilities if needed
+# from agentvault_testing_utils.mocks import MockTaskStore
+
+# Import core models
+# from agentvault.models import Message, TextPart, TaskState
+
+# TODO: Add actual tests for your agent's logic here
+
+@pytest.mark.skip(reason="Placeholder test - implement actual agent tests")
+def test_placeholder():
+    """Remove this test once real tests are added."""
+    assert True
+
+# Example structure for testing a handler (adapt as needed)
+# @pytest.mark.asyncio
+# async def test_handle_task_send_example():
+#     mock_store = MockTaskStore() # Or use InMemoryTaskStore
+#     agent = {{ agent_name | replace(' ', '') | replace('-', '') }}Agent(task_store_ref=mock_store)
+#     test_message = Message(role="user", parts=[TextPart(content="Test input")])
+#
+#     task_id = await agent.handle_task_send(task_id=None, message=test_message)
+#
+#     assert isinstance(task_id, str)
+#     # Add assertions to check interactions with the mock_store or agent state
+#     # mock_store.create_task.assert_awaited_once_with(task_id)

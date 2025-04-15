@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "1.0",
+  "humanReadableId": "{{ agent_id }}",
+  "agentVersion": "0.1.0",
+  "name": "{{ agent_name }}",
+  "description": "{{ agent_description }}",
+  "url": "http://localhost:{{ agent_port }}/a2a", {# Adjust URL for deployment #}
+  "provider": {
+    "name": "{{ author_name }}"
+  },
+  "capabilities": {
+    "a2aVersion": "1.0",
+    "supportedMessageParts": ["text"] {# Add more as needed #}
+  },
+  "authSchemes": [
+    {
+      "scheme": "none", {# Change if auth is needed #}
+      "description": "No authentication required."
+    }
+  ],
+  "skills": [
+      {# Add skills specific to your agent #}
+      {"id": "default", "name": "Default Task", "description": "Handles the primary function."}
+  ],
+  "tags": ["agentvault", "example"] {# Add relevant tags #}
+}

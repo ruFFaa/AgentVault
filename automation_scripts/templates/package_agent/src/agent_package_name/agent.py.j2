@@ -1,0 +1,137 @@
+import logging
+import asyncio
+import datetime
+from typing import Optional, AsyncGenerator
+
+# SDK Imports
+from agentvault_server_sdk import BaseA2AAgent, a2a_method
+from agentvault_server_sdk.state import BaseTaskStore, TaskContext
+from agentvault_server_sdk.exceptions import TaskNotFoundError
+
+# Core Model Imports
+from agentvault.models import Message, Task, TaskState, A2AEvent, TextPart, TaskStatusUpdateEvent, TaskMessageEvent
+
+logger = logging.getLogger(__name__)
+
+class {{ agent_name | replace(' ', '') | replace('-', '') }}Agent(BaseA2AAgent):
+    """
+    Boilerplate implementation for {{ agent_name }}.
+    Replace this with your agent's actual logic.
+    """
+    def __init__(self, task_store_ref: BaseTaskStore):
+        super().__init__(agent_metadata={"name": "{{ agent_name }}"})
+        self.task_store = task_store_ref
+        logger.info("{{ agent_name }} initialized.")
+
+    async def handle_task_send(self, task_id: Optional[str], message: Message) -> str:
+        """Handle task initiation or continuation."""
+        logger.info(f"Handling task send: task_id={task_id}")
+        if task_id:
+            task_context = await self.task_store.get_task(task_id)
+            if task_context is None: raise TaskNotFoundError(task_id=task_id)
+            # TODO: Add logic for handling subsequent messages if needed
+            await self.task_store.update_task_state(task_id, TaskState.WORKING) # Example
+            return task_id
+        else:
+            new_task_id = f"task-{{ package_name[:8] }}-{datetime.datetime.now().strftime('%H%M%S')}"
+            await self.task_store.create_task(new_task_id)
+            # Start background processing after creation
+            asyncio.create_task(self._process_task(new_task_id, message))
+            return new_task_id
+
+    async def handle_task_get(self, task_id: str) -> Task:
+        """Retrieve task status."""
+        logger.info(f"Handling task get: task_id={task_id}")
+        task_context = await self.task_store.get_task(task_id)
+        if task_context is None: raise TaskNotFoundError(task_id=task_id)
+
+        # Construct Task model from TaskContext
+        # Note: Message/artifact history needs to be stored separately or in extended context
+        return Task(
+            id=task_context.task_id,
+            state=task_context.current_state,
+            createdAt=task_context.created_at,
+            updatedAt=task_context.updated_at,
+            messages=[], # Placeholder
+            artifacts=[], # Placeholder
+            metadata={"agent_name": self.agent_metadata.get("name")}
+        )
+
+    async def handle_task_cancel(self, task_id: str) -> bool:
+        """Handle task cancellation request."""
+        logger.info(f"Handling task cancel: task_id={task_id}")
+        task_context = await self.task_store.get_task(task_id)
+        if task_context is None: raise TaskNotFoundError(task_id=task_id)
+
+        terminal_states = {TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELED}
+        if task_context.current_state not in terminal_states:
+            # TODO: Add logic here to actually stop any background processing
+            await self.task_store.update_task_state(task_id, TaskState.CANCELED)
+            logger.info(f"Task {task_id} marked as canceled.")
+            return True
+        else:
+            logger.warning(f"Task {task_id} already in terminal state {task_context.current_state}.")
+            return False # Cannot cancel
+
+    async def handle_subscribe_request(self, task_id: str) -> AsyncGenerator[A2AEvent, None]:
+        """Stream task updates via SSE."""
+        logger.info(f"Handling subscribe request: task_id={task_id}")
+        task_context = await self.task_store.get_task(task_id)
+        if task_context is None: raise TaskNotFoundError(task_id=task_id)
+
+        # This generator will be managed by the SDK's router.
+        # Events should be sent using self.task_store.notify_... methods
+        # from the background processing task (_process_task).
+        # This generator might just wait until the task is terminal or yield
+        # initial status if needed, but the core updates come via notifications.
+
+        # Example: Yield initial status immediately if desired
+        # yield TaskStatusUpdateEvent(taskId=task_id, state=task_context.current_state, timestamp=datetime.datetime.now(datetime.timezone.utc))
+
+        # Keep connection open while task is running - the store listener handles events
+        while task_context.current_state not in {TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELED}:
+            await asyncio.sleep(1) # Check periodically or use a more sophisticated wait
+            task_context = await self.task_store.get_task(task_id) # Re-fetch context
+            if task_context is None: # Task might have been deleted
+                 logger.warning(f"Task {task_id} disappeared during subscription.")
+                 break
+        logger.info(f"Subscription stream ending for task {task_id} (final state: {task_context.current_state if task_context else 'deleted'}).")
+        # No need to yield anything here if notifications are used for all updates
+
+    async def _process_task(self, task_id: str, initial_message: Message):
+        """Placeholder for the agent's background processing logic."""
+        logger.info(f"Starting background processing for task {task_id}")
+        try:
+            # 1. Set state to WORKING
+            await self.task_store.update_task_state(task_id, TaskState.WORKING)
+            await asyncio.sleep(1) # Simulate work
+
+            # 2. Process the message (simple echo for boilerplate)
+            input_text = "No text found in initial message"
+            if initial_message.parts and isinstance(initial_message.parts[0], TextPart):
+                input_text = initial_message.parts[0].content
+
+            response_text = f"Agent '{self.agent_metadata.get('name', 'Unknown')}' processed: {input_text}"
+            response_message = Message(role="assistant", parts=[TextPart(content=response_text)])
+
+            # 3. Notify message event
+            await self.task_store.notify_message_event(task_id, response_message)
+            await asyncio.sleep(1) # Simulate more work
+
+            # 4. Set state to COMPLETED
+            await self.task_store.update_task_state(task_id, TaskState.COMPLETED)
+            logger.info(f"Successfully completed processing task {task_id}")
+
+        except Exception as e:
+            logger.exception(f"Error processing task {task_id}")
+            try:
+                # Attempt to notify FAILED state
+                await self.task_store.update_task_state(task_id, TaskState.FAILED, message=f"Processing error: {e}")
+            except Exception as notify_err:
+                logger.error(f"Failed to notify FAILED state for task {task_id}: {notify_err}")
+
+    # --- Example Decorated Method ---
+    # @a2a_method("custom/get_info")
+    # async def get_agent_info(self) -> dict:
+    #     """Returns basic agent metadata."""
+    #     return self.agent_metadata
