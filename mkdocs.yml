@@ -33,9 +33,10 @@ theme:
 plugins:
   - search # Enable search plugin
 
-# --- MODIFIED: Added Library Usage Example to Nav ---
+# --- MODIFIED: Added Vision to Nav (Option A) ---
 nav:
   - Home: index.md
+  - Vision: vision.md # Added Vision page prominently
   - Introduction:
     - Concepts: concepts.md
     - Architecture: architecture.md
@@ -46,7 +47,7 @@ nav:
       - LangChain Tool: examples/langchain_integration.md
       - OAuth Agent: examples/oauth_agent_example.md
       - Stateful Agent: examples/stateful_agent_example.md
-      - Direct Library Usage: examples/library_usage_example.md # Added new example
+      - Direct Library Usage: examples/library_usage_example.md
   - User Guide:
     - CLI Usage: user_guide/cli.md
   - Developer Guide:
