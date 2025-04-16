@@ -2,7 +2,7 @@
 [project]
     name = "agentvault"
     # --- VERSION UPDATED ---
-    version = "0.2.0"
+    version = "0.2.1"
     # --- VERSION UPDATED ---
     description = "Core Python client library for A2A protocol, MCP, and secure local key management."
     authors = [{ name = "Raphael Zbigniew Jeziorny", email = "AgentVault@proton.me" }]
@@ -52,7 +52,7 @@ build-backend = "poetry.core.masonry.api"
 # Poetry Specific Configuration (Minimal - Only what's needed beyond [project])
 [tool.poetry]
 # --- VERSION UPDATED ---
-version = "0.2.0" # Keep consistent with [project] for poetry commands
+version = "0.2.1" # Keep consistent with [project] for poetry commands
 # --- VERSION UPDATED ---
 # name, description, authors, license, readme are now primarily in [project]
 packages = [{include = "agentvault", from = "src"}]
