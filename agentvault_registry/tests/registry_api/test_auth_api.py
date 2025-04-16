@@ -1,21 +1,39 @@
 import pytest
-# --- MODIFIED: Added MagicMock ---
+# --- MODIFIED: Added datetime, timezone, timedelta ---
 from unittest.mock import patch, MagicMock, ANY, AsyncMock, call
-# --- END MODIFIED ---
 from typing import List, Optional
 import secrets
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta # Added imports
+# --- MODIFIED: Added logging ---
+import logging
+# --- END MODIFIED ---
+# --- END MODIFIED ---
 
-from fastapi import status
+
+# --- MODIFIED: Added HTTPException, Depends ---
+from fastapi import status, HTTPException, Depends # Added Depends
+# --- END MODIFIED ---
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 from pydantic import EmailStr
+# --- ADDED: Import jose ---
+from jose import jwt, JWTError
+# --- END ADDED ---
+
 
 # Local imports
 from agentvault_registry import schemas, models, security
-from agentvault_registry.config import settings # Import settings for expiry calc if needed
+from agentvault_registry.database import get_db
+from agentvault_registry.crud import developer as developer_crud # Use alias
+# --- MODIFIED: Import both email functions ---
+from agentvault_registry.email_utils import send_verification_email, send_password_reset_email # Added send_password_reset_email
+# --- END MODIFIED ---
+# --- ADDED: Import settings ---
+from agentvault_registry.config import settings
+# --- END ADDED ---
 
-# Fixtures are implicitly used from conftest.py
+
+logger = logging.getLogger(__name__)
 
 AUTH_URL = "/auth" # Base prefix for auth routes
 
@@ -51,7 +69,8 @@ def test_register_developer_success(
     mock_created_dev = models.Developer(
         id=1, name="New Dev", email="new@example.com", hashed_password="hashed_password_abc",
         is_verified=False, email_verification_token="test_verification_token",
-        verification_token_expires=datetime.now(timezone.utc) + timedelta(hours=1), # Use settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS if defined
+        # Use settings for expiry calculation consistency
+        verification_token_expires=datetime.now(timezone.utc) + timedelta(hours=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS),
         hashed_recovery_key="hashed_recovery_key_xyz",
         created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc)
     )
@@ -253,4 +272,239 @@ def test_login_incorrect_password(
     mock_crud_get_email.assert_awaited_once_with(mock_db_session, email=mock_developer.email)
     mock_verify_pass.assert_called_once_with("wrongpassword", mock_developer.hashed_password)
 
-# TODO: Add tests for /verify-email, /recover-account, /set-new-password later
+# --- Tests for /auth/verify-email ---
+@patch("agentvault_registry.crud.developer.get_developer_by_verification_token", new_callable=AsyncMock)
+def test_verify_email_success(
+    mock_crud_get_token: AsyncMock,
+    sync_test_client: TestClient,
+    mock_db_session: MagicMock,
+    mock_developer: models.Developer
+):
+    """Test successful email verification."""
+    # --- Arrange ---
+    test_token = "valid_verify_token"
+    mock_developer.is_verified = False
+    mock_developer.email_verification_token = test_token
+    mock_developer.verification_token_expires = datetime.now(timezone.utc) + timedelta(hours=1)
+    mock_crud_get_token.return_value = mock_developer
+
+    # --- Act ---
+    response = sync_test_client.get(f"{AUTH_URL}/verify-email", params={"token": test_token})
+
+    # --- Assert ---
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json() == {"status": "verified"}
+    mock_crud_get_token.assert_awaited_once_with(mock_db_session, token=test_token)
+    mock_db_session.add.assert_called_once_with(mock_developer)
+    mock_db_session.commit.assert_awaited_once()
+    assert mock_developer.is_verified is True
+    assert mock_developer.email_verification_token is None
+    assert mock_developer.verification_token_expires is None
+
+@patch("agentvault_registry.crud.developer.get_developer_by_verification_token", new_callable=AsyncMock)
+def test_verify_email_invalid_token(mock_crud_get_token: AsyncMock, sync_test_client: TestClient, mock_db_session: MagicMock):
+    """Test verification with an invalid/unknown token."""
+    mock_crud_get_token.return_value = None
+    response = sync_test_client.get(f"{AUTH_URL}/verify-email", params={"token": "invalid_token"})
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "Invalid or expired verification token" in response.json()["detail"]
+
+@patch("agentvault_registry.crud.developer.get_developer_by_verification_token", new_callable=AsyncMock)
+def test_verify_email_expired_token(mock_crud_get_token: AsyncMock, sync_test_client: TestClient, mock_db_session: MagicMock, mock_developer: models.Developer):
+    """Test verification with an expired token."""
+    test_token = "expired_token"
+    mock_developer.is_verified = False
+    mock_developer.email_verification_token = test_token
+    mock_developer.verification_token_expires = datetime.now(timezone.utc) - timedelta(hours=1) # Expired
+    mock_crud_get_token.return_value = mock_developer
+
+    response = sync_test_client.get(f"{AUTH_URL}/verify-email", params={"token": test_token})
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "Invalid or expired verification token" in response.json()["detail"]
+
+@patch("agentvault_registry.crud.developer.get_developer_by_verification_token", new_callable=AsyncMock)
+def test_verify_email_already_verified(mock_crud_get_token: AsyncMock, sync_test_client: TestClient, mock_db_session: MagicMock, mock_developer: models.Developer):
+    """Test verification when the developer is already verified."""
+    test_token = "valid_token_but_verified"
+    mock_developer.is_verified = True # Already verified
+    mock_developer.email_verification_token = test_token
+    mock_developer.verification_token_expires = datetime.now(timezone.utc) + timedelta(hours=1)
+    mock_crud_get_token.return_value = mock_developer
+
+    response = sync_test_client.get(f"{AUTH_URL}/verify-email", params={"token": test_token})
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json() == {"status": "already_verified"}
+    mock_db_session.commit.assert_not_awaited() # Should not commit changes
+
+# --- Tests for Recovery Key Flow ---
+@patch("agentvault_registry.routers.auth.developer_crud.get_developer_by_email", new_callable=AsyncMock)
+@patch("agentvault_registry.routers.auth.security.verify_recovery_key")
+@patch("agentvault_registry.routers.auth.security.create_access_token")
+def test_recover_account_success(
+    mock_create_token: MagicMock,
+    mock_verify_recovery: MagicMock,
+    mock_crud_get_email: AsyncMock,
+    sync_test_client: TestClient,
+    mock_db_session: MagicMock,
+    mock_developer: models.Developer
+):
+    """Test successful account recovery initiation using a recovery key."""
+    # --- Arrange ---
+    mock_developer.is_verified = True
+    mock_developer.hashed_recovery_key = security.hash_password("key-hash-placeholder") # Needs a stored hash
+    mock_crud_get_email.return_value = mock_developer
+    mock_verify_recovery.return_value = True # Simulate key matches hash
+    mock_create_token.return_value = "temp_password_set_token"
+
+    recover_payload = {"email": mock_developer.email, "recovery_key": "plain-rec-key-1"}
+
+    # --- Act ---
+    response = sync_test_client.post(f"{AUTH_URL}/recover-account", json=recover_payload)
+
+    # --- Assert ---
+    assert response.status_code == status.HTTP_200_OK
+    resp_data = response.json()
+    assert resp_data["access_token"] == "temp_password_set_token"
+    assert resp_data["token_type"] == "bearer"
+
+    mock_crud_get_email.assert_awaited_once_with(mock_db_session, email=mock_developer.email)
+    mock_verify_recovery.assert_called_once_with("plain-rec-key-1", mock_developer.hashed_recovery_key)
+    mock_create_token.assert_called_once()
+    # Check that the token has the correct purpose and a short expiry
+    call_args, call_kwargs = mock_create_token.call_args
+    assert call_kwargs['data'] == {"sub": str(mock_developer.id), "purpose": "password-set"}
+    assert isinstance(call_kwargs['expires_delta'], timedelta)
+    assert call_kwargs['expires_delta'] <= timedelta(minutes=10) # Check for reasonably short expiry
+
+@patch("agentvault_registry.routers.auth.developer_crud.get_developer_by_email", new_callable=AsyncMock)
+def test_recover_account_dev_not_found(mock_crud_get_email: AsyncMock, sync_test_client: TestClient, mock_db_session: MagicMock):
+    """Test recovery failure if email not found."""
+    mock_crud_get_email.return_value = None
+    recover_payload = {"email": "not.found@example.com", "recovery_key": "plain-rec-key-1"}
+    response = sync_test_client.post(f"{AUTH_URL}/recover-account", json=recover_payload)
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "Invalid email or recovery key" in response.json()["detail"]
+
+@patch("agentvault_registry.routers.auth.developer_crud.get_developer_by_email", new_callable=AsyncMock)
+def test_recover_account_dev_not_verified(mock_crud_get_email: AsyncMock, sync_test_client: TestClient, mock_db_session: MagicMock, mock_developer: models.Developer):
+    """Test recovery failure if developer is not verified."""
+    mock_developer.is_verified = False
+    mock_crud_get_email.return_value = mock_developer
+    recover_payload = {"email": mock_developer.email, "recovery_key": "plain-rec-key-1"}
+    response = sync_test_client.post(f"{AUTH_URL}/recover-account", json=recover_payload)
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "Invalid email or recovery key" in response.json()["detail"]
+
+@patch("agentvault_registry.routers.auth.developer_crud.get_developer_by_email", new_callable=AsyncMock)
+@patch("agentvault_registry.routers.auth.security.verify_recovery_key")
+def test_recover_account_invalid_key(
+    mock_verify_recovery: MagicMock,
+    mock_crud_get_email: AsyncMock,
+    sync_test_client: TestClient,
+    mock_db_session: MagicMock,
+    mock_developer: models.Developer
+):
+    """Test recovery failure with an invalid recovery key."""
+    mock_developer.is_verified = True
+    mock_developer.hashed_recovery_key = security.hash_password("key-hash-placeholder")
+    mock_crud_get_email.return_value = mock_developer
+    mock_verify_recovery.return_value = False # Simulate key mismatch
+
+    recover_payload = {"email": mock_developer.email, "recovery_key": "wrong-key"}
+    response = sync_test_client.post(f"{AUTH_URL}/recover-account", json=recover_payload)
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "Invalid email or recovery key" in response.json()["detail"]
+
+# --- Test /auth/set-new-password ---
+@patch("agentvault_registry.crud.developer.get_developer_by_id", new_callable=AsyncMock)
+@patch("agentvault_registry.routers.auth.security.hash_password")
+def test_set_new_password_success(
+    mock_hash_pass: MagicMock,
+    mock_crud_get_id: AsyncMock,
+    sync_test_client: TestClient,
+    mock_db_session: MagicMock,
+    mock_developer: models.Developer,
+    mocker
+):
+    """Test successfully setting a new password using the temporary token."""
+    # --- Arrange ---
+    temp_token_dev_id = mock_developer.id
+    new_password = "newSecurePassword123"
+    new_hashed_password = "new_hashed_password_xyz"
+
+    # Mock the dependency using app override
+    async def mock_verify_temp_success(token: str = Depends(security.oauth2_scheme_required)): # Add Depends back
+        # Simulate successful verification by returning the ID
+        # In a real scenario, this would decode the token passed in the header
+        return temp_token_dev_id
+
+    original_override = sync_test_client.app.dependency_overrides.get(security.verify_temp_password_token)
+    sync_test_client.app.dependency_overrides[security.verify_temp_password_token] = mock_verify_temp_success
+
+    mock_developer.hashed_recovery_key = "some_hash"
+    mock_crud_get_id.return_value = mock_developer
+    mock_hash_pass.return_value = new_hashed_password
+
+    # --- CORRECTED PAYLOAD (Based on user research) ---
+    set_payload = {"new_password": new_password}
+    # --- END CORRECTION ---
+
+    temp_token = security.create_access_token(
+        data={"sub": str(temp_token_dev_id), "purpose": "password-set"},
+        expires_delta=timedelta(minutes=5)
+    )
+    headers = {"Authorization": f"Bearer {temp_token}"}
+
+    # --- Act ---
+    response = sync_test_client.post(f"{AUTH_URL}/set-new-password", json=set_payload, headers=headers)
+
+    # --- Assert ---
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json() == {"message": "Password updated successfully."}
+
+    mock_crud_get_id.assert_awaited_once_with(mock_db_session, developer_id=temp_token_dev_id)
+    mock_hash_pass.assert_called_once_with(new_password)
+    mock_db_session.add.assert_called_once_with(mock_developer)
+    mock_db_session.commit.assert_awaited_once()
+    assert mock_developer.hashed_password == new_hashed_password
+    assert mock_developer.hashed_recovery_key is None
+
+    # Clean up override
+    if original_override: sync_test_client.app.dependency_overrides[security.verify_temp_password_token] = original_override
+    else: del sync_test_client.app.dependency_overrides[security.verify_temp_password_token]
+
+
+def test_set_new_password_invalid_token(
+    sync_test_client: TestClient,
+    mocker
+):
+    """Test setting password fails with invalid/expired temp token."""
+    # --- Arrange ---
+    # Mock the dependency using app override to raise 401
+    async def mock_verify_temp_fail(token: str = Depends(security.oauth2_scheme_required)): # Add Depends back
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired password recovery token"
+        )
+
+    original_override = sync_test_client.app.dependency_overrides.get(security.verify_temp_password_token)
+    sync_test_client.app.dependency_overrides[security.verify_temp_password_token] = mock_verify_temp_fail
+
+    # --- CORRECTED PAYLOAD (Based on user research) ---
+    set_payload = {"new_password": "newpassword"}
+    # --- END CORRECTION ---
+    headers = {"Authorization": "Bearer invalid-or-expired-token"}
+
+    # --- Act ---
+    response = sync_test_client.post(f"{AUTH_URL}/set-new-password", json=set_payload, headers=headers)
+
+    # --- Assert ---
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert "Invalid or expired password recovery token" in response.json()["detail"]
+
+    # Clean up override
+    if original_override: sync_test_client.app.dependency_overrides[security.verify_temp_password_token] = original_override
+    else: del sync_test_client.app.dependency_overrides[security.verify_temp_password_token]
+
+
+# TODO: Add tests for email-based password reset endpoints when implemented

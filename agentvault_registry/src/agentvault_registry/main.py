@@ -87,9 +87,9 @@ app.include_router(
 )
 # --- ADDED: Include Auth and Developer routers ---
 app.include_router(auth.router) # Prefix is defined within auth.py
-# --- MODIFIED: Comment out developers router inclusion for debugging ---
-# app.include_router(developers.router) # Prefix is defined within developers.py
-logger.warning("DEBUG: developers.router inclusion is temporarily commented out.")
+# --- MODIFIED: Uncomment developers router inclusion ---
+app.include_router(developers.router) # Prefix is defined within developers.py
+logger.info("Included developers router.") # Log inclusion
 # --- END MODIFIED ---
 
 # --- REMOVED: Old placeholder comment ---

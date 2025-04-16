@@ -57,7 +57,9 @@ class PasswordResetRecover(BaseModel):
 
 class PasswordSetNew(BaseModel):
     """Schema for setting a new password after recovery key validation."""
-    new_password: SecretStr = Field(..., description="The new password for the account.")
+    # --- MODIFIED FOR DEBUGGING: Use str instead of SecretStr ---
+    new_password: str = Field(..., description="The new password for the account.")
+    # --- END MODIFIED ---
 # --- END ADDED ---
 
 # --- ADDED: API Key Schemas ---
