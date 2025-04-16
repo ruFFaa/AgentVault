@@ -17,9 +17,15 @@
     </header>
     <main>
         <section id="login-section">
-            <h2>Developer Login</h2>
-            <label for="developer-api-key">API Key:</label>
-            <input type="password" id="developer-api-key" placeholder="Enter your API key">
+            <h2>Developer Login / Access</h2>
+            <!-- ADDED: Explanation on how to get a key -->
+            <p>To submit or manage agent cards, you need a Developer API Key.</p>
+            <p><strong>Currently, API keys are provided manually.</strong> Please contact the project maintainers at <strong><code>[AgentVault@proton.me]</code></strong> to request a key.</p>
+            <p><em>(Self-service sign-up is planned for the future).</em></p>
+            <hr style="margin: 15px 0;">
+            <!-- END ADDED -->
+            <label for="developer-api-key">Enter Your API Key:</label>
+            <input type="password" id="developer-api-key" placeholder="Enter your provided API key">
             <button id="login-button">Login</button>
             <p id="login-error" style="color: red; display: none;"></p>
             <p><small>Your API key will be stored in session storage for this browser session only.</small></p>

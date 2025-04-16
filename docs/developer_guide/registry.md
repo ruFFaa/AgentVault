@@ -12,9 +12,10 @@ The AgentVault Registry provides a central RESTful API service for discovering a
 *   **Public Instance Note (Cold Start):** This instance runs on Render's free tier. If inactive, it may take **up to 60 seconds** to respond to the first request. Subsequent requests will be faster. Consider sending a simple request (e.g., `GET /health`) to wake it up before making critical calls if latency is a concern.
 *   **Local Development:** When running locally (see [Installation Guide](../installation.md)), the base URL is typically `http://localhost:8000/api/v1`.
 
-## Authentication
+## Authentication & Developer Registration
 
-*   **Developer Authentication:** Endpoints related to managing agent cards (creating, updating, deleting) require developer authentication. This is handled via an API key specific to the developer, provided in the `X-Api-Key` HTTP header. *(Note: Currently, keys are generated and distributed manually by registry administrators; a self-service portal is planned for the future).*
+*   **Developer Authentication:** Endpoints related to managing agent cards (creating, updating, deleting) require developer authentication. This is handled via an API key specific to the developer, provided in the `X-Api-Key` HTTP header.
+*   **Obtaining an API Key (Current Process):** Currently, there is no self-service registration. To obtain a Developer API Key for submitting agents to the public registry, please contact the AgentVault project maintainers at: **`[CONTACT_EMAIL_PLACEHOLDER]`** (*Note: Replace placeholder before production*). Include your desired developer name. A key will be generated and securely provided to you. *(Self-service registration is planned for a future release - see Roadmap).*
 *   **Public Access:** Endpoints for discovering agents (listing/searching, getting details by ID, validating cards) generally do not require authentication.
 *   **Exception:** The `GET /agent-cards/` endpoint requires authentication *only* if the `owned_only=true` query parameter is used.
 
