@@ -1,8 +1,8 @@
 import uuid
 import datetime
-from typing import List, Optional, Dict, Any
-# --- MODIFIED: Removed computed_field ---
-from pydantic import BaseModel, Field, ConfigDict
+# --- MODIFIED: Added EmailStr, SecretStr, Literal ---
+from typing import List, Optional, Dict, Any, Literal
+from pydantic import BaseModel, Field, ConfigDict, EmailStr, SecretStr
 # --- END MODIFIED ---
 
 # Import local models for type checking
@@ -10,14 +10,74 @@ from pydantic import BaseModel, Field, ConfigDict
 
 # --- Developer Schemas (Define before AgentCardRead) ---
 
+# --- ADDED: DeveloperCreate Schema ---
+class DeveloperCreate(BaseModel):
+    """Schema for creating a new developer."""
+    name: str = Field(..., min_length=3, max_length=100, description="Unique name for the developer.")
+    email: EmailStr = Field(..., description="Developer's email address.")
+    password: SecretStr = Field(..., description="Developer's chosen password.")
+# --- END ADDED ---
+
 class DeveloperRead(BaseModel):
     """Schema for reading developer information."""
     id: int
     name: str
+    # --- ADDED: email field ---
+    email: EmailStr = Field(..., description="Developer's email address.")
+    # --- END ADDED ---
     created_at: datetime.datetime
     is_verified: bool = Field(..., description="Indicates if the developer is verified.")
 
     model_config = ConfigDict(from_attributes=True)
+
+# --- ADDED: Auth Related Schemas ---
+class Token(BaseModel):
+    """Schema for access token response."""
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+
+class RegistrationResponse(BaseModel):
+    """Schema for the response after successful registration."""
+    message: str
+    recovery_keys: List[str] = Field(..., description="Generated recovery keys. Store these securely!")
+
+class PasswordResetRequest(BaseModel):
+    """Schema for requesting a password reset email."""
+    email: EmailStr
+
+class PasswordResetConfirm(BaseModel):
+    """Schema for confirming password reset using a token."""
+    token: str = Field(..., description="The password reset token received via email.")
+    new_password: SecretStr = Field(..., description="The new password for the account.")
+
+class PasswordResetRecover(BaseModel):
+    """Schema for initiating password reset using a recovery key."""
+    email: EmailStr = Field(..., description="The email address associated with the account.")
+    recovery_key: str = Field(..., description="One of the recovery keys provided during registration.")
+
+class PasswordSetNew(BaseModel):
+    """Schema for setting a new password after recovery key validation."""
+    new_password: SecretStr = Field(..., description="The new password for the account.")
+# --- END ADDED ---
+
+# --- ADDED: API Key Schemas ---
+class ApiKeyRead(BaseModel):
+    """Schema for reading details about a developer's API key (excluding the key itself)."""
+    id: int # Added ID for potential future management needs
+    key_prefix: str = Field(..., description="The non-secret prefix of the API key (e.g., 'avreg_').")
+    description: Optional[str] = Field(None, description="User-provided description for the key.")
+    is_active: bool = Field(..., description="Whether the API key is currently active.")
+    created_at: datetime.datetime = Field(..., description="Timestamp when the key was created.")
+    last_used_at: Optional[datetime.datetime] = Field(None, description="Timestamp when the key was last used (if tracked).")
+
+    model_config = ConfigDict(from_attributes=True)
+
+class NewApiKeyResponse(BaseModel):
+    """Schema for the response when a new API key is generated."""
+    plain_api_key: str = Field(..., description="The full, plain-text API key. Store this securely, it will not be shown again.")
+    api_key_info: ApiKeyRead = Field(..., description="Metadata about the newly created key.")
+# --- END ADDED ---
+
 
 # --- Agent Card Schemas ---
 
@@ -95,13 +155,11 @@ class AgentCardListResponse(BaseModel):
 # --- Developer Schemas (Moved earlier) ---
 # class DeveloperRead defined above
 
-class DeveloperCreate(BaseModel):
-    """Schema for creating a new developer (e.g., via an admin interface)."""
-    name: str = Field(..., min_length=3, max_length=100, description="Unique name for the developer.")
-
-class DeveloperCreateResponse(DeveloperRead):
-    """Schema for response after creating a developer, including the plain API key."""
-    api_key: str = Field(..., description="The generated plain-text API key. Store this securely!")
+# --- REMOVED: Old DeveloperCreateResponse ---
+# class DeveloperCreateResponse(DeveloperRead):
+#     """Schema for response after creating a developer, including the plain API key."""
+#     api_key: str = Field(..., description="The generated plain-text API key. Store this securely!")
+# --- END REMOVED ---
 
 # --- Validation Schemas ---
 class AgentCardValidationRequest(BaseModel):

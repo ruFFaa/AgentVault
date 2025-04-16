@@ -3,7 +3,11 @@ import uuid
 import datetime
 import os
 # --- ADDED: Import mocker ---
+# --- ADDED: Import security for hashing ---
 from unittest.mock import patch, MagicMock, ANY, AsyncMock, call
+import logging
+from agentvault_registry import security # Import security module
+# --- END ADDED ---
 # --- END ADDED ---
 from typing import Optional, List, Dict, Any, Tuple, AsyncGenerator
 
@@ -36,7 +40,9 @@ def test_create_agent_card_success(
     )
 
     now = datetime.datetime.now(datetime.timezone.utc)
-    mock_developer.is_verified = False
+    # Ensure the mock developer from fixture has correct fields (already fixed in conftest)
+    # mock_developer.is_verified = False # Fixture default is False
+
     mock_db_return = models.AgentCard(
         id=uuid.uuid4(),
         developer_id=mock_developer.id,
@@ -46,12 +52,13 @@ def test_create_agent_card_success(
         is_active=True,
         created_at=now,
         updated_at=now,
-        developer=mock_developer
+        developer=mock_developer # Pass the mock developer from fixture
     )
     mock_create = mocker.patch(
         "agentvault_registry.crud.agent_card.create_agent_card",
         new_callable=AsyncMock, return_value=mock_db_return
     )
+    # Mock the refresh call on the session
     mock_db_session.refresh = AsyncMock()
 
     create_schema = schemas.AgentCardCreate(card_data=valid_agent_card_data_dict)
@@ -59,7 +66,7 @@ def test_create_agent_card_success(
     response = sync_test_client.post(
         API_BASE_URL + "/",
         json=create_schema.model_dump(mode='json'),
-        headers={"X-Api-Key": "fake-key"}
+        headers={"Authorization": "Bearer fake-token"} # Use Authorization header now
     )
 
     assert response.status_code == status.HTTP_201_CREATED
@@ -67,7 +74,7 @@ def test_create_agent_card_success(
     validated_response = schemas.AgentCardRead.model_validate(response_data)
     assert validated_response.name == valid_agent_card_data_dict["name"]
     assert validated_response.developer_id == mock_developer.id
-    assert validated_response.developer_is_verified == mock_developer.is_verified
+    assert validated_response.developer_is_verified == mock_developer.is_verified # Check against fixture
     assert validated_response.card_data == valid_agent_card_data_dict
 
     mock_create.assert_awaited_once()
@@ -79,7 +86,7 @@ def test_create_agent_card_success(
 
 def test_create_agent_card_auth_fail(
     sync_test_client: TestClient,
-    override_get_current_developer_forbidden: None,
+    override_get_current_developer_forbidden: None, # Use fixture that raises 403
     valid_agent_card_data_dict: dict
 ):
     """Test create endpoint with missing/invalid auth header."""
@@ -87,6 +94,7 @@ def test_create_agent_card_auth_fail(
     response = sync_test_client.post(
         API_BASE_URL + "/",
         json=create_schema.model_dump(mode='json')
+        # No Authorization header provided, dependency should raise 403
     )
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
@@ -110,7 +118,7 @@ def test_create_agent_card_validation_fail(
     response = sync_test_client.post(
         API_BASE_URL + "/",
         json=create_schema.model_dump(mode='json'),
-        headers={"X-Api-Key": "fake-key"}
+        headers={"Authorization": "Bearer fake-token"} # Provide dummy token
     )
 
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
@@ -126,6 +134,9 @@ def test_list_agent_cards_success(
     mocker
 ):
     """Test successful listing of agent cards (no filters)."""
+    if not hasattr(mock_agent_card_db_object, 'developer') or not mock_agent_card_db_object.developer:
+         mock_agent_card_db_object.developer = models.Developer(id=1, name="Temp Dev", email="temp@dev.com", hashed_password="hash", is_verified=False)
+
     mock_cards = [mock_agent_card_db_object] * 3
     total_items = 15
     mock_list = mocker.patch(
@@ -133,8 +144,9 @@ def test_list_agent_cards_success(
         new_callable=AsyncMock, return_value=(mock_cards, total_items)
     )
 
-    response = sync_test_client.get(API_BASE_URL + "/")
+    response = sync_test_client.get(API_BASE_URL + "/") # No auth header needed
 
+    # --- MODIFIED: Expect 200 OK ---
     assert response.status_code == status.HTTP_200_OK
     response_data = response.json()
     assert schemas.AgentCardListResponse.model_validate(response_data)
@@ -143,13 +155,14 @@ def test_list_agent_cards_success(
     assert response_data["pagination"]["total_items"] == total_items
     assert response_data["pagination"]["limit"] == 100
     assert response_data["pagination"]["offset"] == 0
+    # --- END MODIFIED ---
 
+    # --- ADDED: Assert mock was called ---
     mock_list.assert_awaited_once_with(
         db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=None, developer_id=None,
-        # --- ADDED: Assert default None for TEE params ---
         has_tee=None, tee_type=None
-        # --- END ADDED ---
     )
+    # --- END ADDED ---
 
 
 @pytest.mark.parametrize(
@@ -179,15 +192,17 @@ def test_list_agent_cards_with_params(
     if tags is not None:
         query_params['tags'] = tags
 
-    response = sync_test_client.get(API_BASE_URL + "/", params=query_params)
+    response = sync_test_client.get(API_BASE_URL + "/", params=query_params) # No auth header
 
+    # --- MODIFIED: Expect 200 OK ---
     assert response.status_code == status.HTTP_200_OK
+    # --- END MODIFIED ---
+    # --- ADDED: Assert mock was called ---
     mock_list.assert_awaited_once_with(
         db=mock_db_session, skip=skip, limit=limit, active_only=active_only, search=search, tags=tags, developer_id=None,
-        # --- ADDED: Assert default None for TEE params ---
         has_tee=None, tee_type=None
-        # --- END ADDED ---
     )
+    # --- END ADDED ---
 
 # --- Tag Filtering Tests ---
 def test_list_agent_cards_filter_single_tag(sync_test_client: TestClient, mock_db_session: MagicMock, mocker):
@@ -195,33 +210,45 @@ def test_list_agent_cards_filter_single_tag(sync_test_client: TestClient, mock_d
     mock_list = mocker.patch("agentvault_registry.crud.agent_card.list_agent_cards", new_callable=AsyncMock, return_value=([], 0))
     tag_to_filter = "weather"
 
-    response = sync_test_client.get(API_BASE_URL + "/", params={"tags": tag_to_filter})
+    response = sync_test_client.get(API_BASE_URL + "/", params={"tags": tag_to_filter}) # No auth header
 
+    # --- MODIFIED: Expect 200 OK ---
     assert response.status_code == status.HTTP_200_OK
+    # --- END MODIFIED ---
+    # --- ADDED: Assert mock was called ---
     mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=[tag_to_filter], developer_id=None, has_tee=None, tee_type=None)
+    # --- END ADDED ---
 
 def test_list_agent_cards_filter_multiple_tags(sync_test_client: TestClient, mock_db_session: MagicMock, mocker):
     """Test filtering by multiple tags."""
     mock_list = mocker.patch("agentvault_registry.crud.agent_card.list_agent_cards", new_callable=AsyncMock, return_value=([], 0))
     tags_to_filter = ["tool", "internal"]
 
-    response = sync_test_client.get(API_BASE_URL + "/", params={"tags": tags_to_filter})
+    response = sync_test_client.get(API_BASE_URL + "/", params={"tags": tags_to_filter}) # No auth header
 
+    # --- MODIFIED: Expect 200 OK ---
     assert response.status_code == status.HTTP_200_OK
+    # --- END MODIFIED ---
+    # --- ADDED: Assert mock was called ---
     mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=tags_to_filter, developer_id=None, has_tee=None, tee_type=None)
+    # --- END ADDED ---
 
 def test_list_agent_cards_filter_tag_no_match(sync_test_client: TestClient, mock_db_session: MagicMock, mocker):
     """Test filtering by a tag that returns no results."""
     mock_list = mocker.patch("agentvault_registry.crud.agent_card.list_agent_cards", new_callable=AsyncMock, return_value=([], 0))
     tag_to_filter = "nonexistent-tag"
 
-    response = sync_test_client.get(API_BASE_URL + "/", params={"tags": tag_to_filter})
+    response = sync_test_client.get(API_BASE_URL + "/", params={"tags": tag_to_filter}) # No auth header
 
+    # --- MODIFIED: Expect 200 OK ---
     assert response.status_code == status.HTTP_200_OK
     resp_data = response.json()
     assert resp_data["items"] == []
     assert resp_data["pagination"]["total_items"] == 0
+    # --- END MODIFIED ---
+    # --- ADDED: Assert mock was called ---
     mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=[tag_to_filter], developer_id=None, has_tee=None, tee_type=None)
+    # --- END ADDED ---
 
 def test_list_agent_cards_filter_tags_and_search(sync_test_client: TestClient, mock_db_session: MagicMock, mocker):
     """Test filtering by both tags and search term."""
@@ -229,98 +256,112 @@ def test_list_agent_cards_filter_tags_and_search(sync_test_client: TestClient, m
     tags_to_filter = ["nlp"]
     search_term = "summary"
 
-    response = sync_test_client.get(API_BASE_URL + "/", params={"tags": tags_to_filter, "search": search_term})
+    response = sync_test_client.get(API_BASE_URL + "/", params={"tags": tags_to_filter, "search": search_term}) # No auth header
 
+    # --- MODIFIED: Expect 200 OK ---
     assert response.status_code == status.HTTP_200_OK
+    # --- END MODIFIED ---
+    # --- ADDED: Assert mock was called ---
     mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=search_term, tags=tags_to_filter, developer_id=None, has_tee=None, tee_type=None)
+    # --- END ADDED ---
 
 # --- Tests for owned_only filter ---
 def test_list_agent_cards_owned_only_success(
     sync_test_client: TestClient, mock_db_session: MagicMock, mock_developer: models.Developer,
-    override_get_current_developer_optional: None,
+    override_get_current_developer_optional: None, # Use the *optional* override fixture
     mocker
 ):
     """Test filtering by owned_only=true with valid authentication."""
     mock_list = mocker.patch("agentvault_registry.crud.agent_card.list_agent_cards", new_callable=AsyncMock, return_value=([], 0))
 
-    async def mock_dev_scalar_gen(): yield mock_developer
-    mock_db_session.execute.return_value.scalars.return_value = mock_dev_scalar_gen()
+    response = sync_test_client.get(API_BASE_URL + "/", params={"owned_only": True}, headers={"Authorization": "Bearer fake-token"}) # Use Authorization header now
 
-    response = sync_test_client.get(API_BASE_URL + "/", params={"owned_only": True}, headers={"X-Api-Key": "fake-key"})
-
-    assert response.status_code == status.HTTP_200_OK
+    assert response.status_code == status.HTTP_200_OK # This one SHOULD work
     mock_list.assert_awaited_once_with(
         db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=None, developer_id=mock_developer.id,
-        # --- ADDED: Assert default None for TEE params ---
         has_tee=None, tee_type=None
-        # --- END ADDED ---
     )
 
 def test_list_agent_cards_owned_only_no_auth(
     sync_test_client: TestClient, mock_db_session: MagicMock,
-    override_get_current_developer_optional_none: None,
+    override_get_current_developer_optional_none: None, # Use fixture that returns None
     mocker
 ):
     """Test filtering by owned_only=true without authentication."""
     mock_list = mocker.patch("agentvault_registry.crud.agent_card.list_agent_cards")
 
-    response = sync_test_client.get(API_BASE_URL + "/", params={"owned_only": True})
+    response = sync_test_client.get(API_BASE_URL + "/", params={"owned_only": True}) # No auth header
 
-    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED # Correctly fails
     assert "Authentication required" in response.json()["detail"]
     mock_list.assert_not_called()
 
 def test_list_agent_cards_owned_only_false_with_auth(
     sync_test_client: TestClient, mock_db_session: MagicMock, mock_developer: models.Developer,
-    override_get_current_developer_optional: None,
+    override_get_current_developer_optional: None, # Use optional override
     mocker
 ):
     """Test owned_only=false with authentication (should ignore auth)."""
     mock_list = mocker.patch("agentvault_registry.crud.agent_card.list_agent_cards", new_callable=AsyncMock, return_value=([], 0))
 
-    async def mock_dev_scalar_gen(): yield mock_developer
-    mock_db_session.execute.return_value.scalars.return_value = mock_dev_scalar_gen()
+    response = sync_test_client.get(API_BASE_URL + "/", params={"owned_only": False}, headers={"Authorization": "Bearer fake-token"}) # Provide auth header
 
-    response = sync_test_client.get(API_BASE_URL + "/", params={"owned_only": False}, headers={"X-Api-Key": "fake-key"})
-
+    # --- MODIFIED: Expect 200 OK ---
     assert response.status_code == status.HTTP_200_OK
+    # --- END MODIFIED ---
+    # --- ADDED: Assert mock was called ---
     mock_list.assert_awaited_once_with(
-        db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=None, developer_id=None,
-        # --- ADDED: Assert default None for TEE params ---
+        db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=None, developer_id=None, # developer_id should be None
         has_tee=None, tee_type=None
-        # --- END ADDED ---
     )
+    # --- END ADDED ---
 
 # --- ADDED: Tests for TEE Filtering ---
 def test_list_agent_cards_filter_has_tee_true(sync_test_client: TestClient, mock_db_session: MagicMock, mocker):
     """Test filtering by has_tee=true."""
     mock_list = mocker.patch("agentvault_registry.crud.agent_card.list_agent_cards", new_callable=AsyncMock, return_value=([], 0))
-    response = sync_test_client.get(API_BASE_URL + "/", params={"has_tee": True})
+    response = sync_test_client.get(API_BASE_URL + "/", params={"has_tee": True}) # No auth header
+    # --- MODIFIED: Expect 200 OK ---
     assert response.status_code == status.HTTP_200_OK
+    # --- END MODIFIED ---
+    # --- ADDED: Assert mock was called ---
     mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=None, developer_id=None, has_tee=True, tee_type=None)
+    # --- END ADDED ---
 
 def test_list_agent_cards_filter_has_tee_false(sync_test_client: TestClient, mock_db_session: MagicMock, mocker):
     """Test filtering by has_tee=false."""
     mock_list = mocker.patch("agentvault_registry.crud.agent_card.list_agent_cards", new_callable=AsyncMock, return_value=([], 0))
-    response = sync_test_client.get(API_BASE_URL + "/", params={"has_tee": False})
+    response = sync_test_client.get(API_BASE_URL + "/", params={"has_tee": False}) # No auth header
+    # --- MODIFIED: Expect 200 OK ---
     assert response.status_code == status.HTTP_200_OK
+    # --- END MODIFIED ---
+    # --- ADDED: Assert mock was called ---
     mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=None, developer_id=None, has_tee=False, tee_type=None)
+    # --- END ADDED ---
 
 def test_list_agent_cards_filter_tee_type(sync_test_client: TestClient, mock_db_session: MagicMock, mocker):
     """Test filtering by tee_type."""
     mock_list = mocker.patch("agentvault_registry.crud.agent_card.list_agent_cards", new_callable=AsyncMock, return_value=([], 0))
     tee_type_filter = "Intel SGX"
-    response = sync_test_client.get(API_BASE_URL + "/", params={"tee_type": tee_type_filter})
+    response = sync_test_client.get(API_BASE_URL + "/", params={"tee_type": tee_type_filter}) # No auth header
+    # --- MODIFIED: Expect 200 OK ---
     assert response.status_code == status.HTTP_200_OK
+    # --- END MODIFIED ---
+    # --- ADDED: Assert mock was called ---
     mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=None, developer_id=None, has_tee=None, tee_type=tee_type_filter)
+    # --- END ADDED ---
 
 def test_list_agent_cards_filter_has_tee_and_type(sync_test_client: TestClient, mock_db_session: MagicMock, mocker):
     """Test filtering by both has_tee and tee_type."""
     mock_list = mocker.patch("agentvault_registry.crud.agent_card.list_agent_cards", new_callable=AsyncMock, return_value=([], 0))
     tee_type_filter = "AMD SEV"
-    response = sync_test_client.get(API_BASE_URL + "/", params={"has_tee": True, "tee_type": tee_type_filter})
+    response = sync_test_client.get(API_BASE_URL + "/", params={"has_tee": True, "tee_type": tee_type_filter}) # No auth header
+    # --- MODIFIED: Expect 200 OK ---
     assert response.status_code == status.HTTP_200_OK
+    # --- END MODIFIED ---
+    # --- ADDED: Assert mock was called ---
     mock_list.assert_awaited_once_with(db=mock_db_session, skip=0, limit=100, active_only=True, search=None, tags=None, developer_id=None, has_tee=True, tee_type=tee_type_filter)
+    # --- END ADDED ---
 # --- END ADDED ---
 
 
@@ -361,7 +402,13 @@ def test_get_agent_card_includes_developer_verified(
     mocker
 ):
     """Test GET /agent-cards/{card_id} includes developer_is_verified."""
-    test_dev = models.Developer(id=5, name="Verified Dev", api_key_hash="abc", is_verified=True)
+    test_dev = models.Developer(
+        id=5,
+        name="Verified Dev",
+        email="verified.dev@example.com",
+        hashed_password=security.hash_password("dummy"),
+        is_verified=True
+    )
     test_card_id = uuid.uuid4()
     test_card_data = {"name": "Verified Agent Card", "description": "Desc", "schemaVersion": "1.0", "humanReadableId": "vd/vac", "agentVersion": "1", "url": "http://localhost", "provider": {"name": "vd"}, "capabilities": {"a2aVersion": "1"}, "authSchemes": [{"scheme": "none"}]}
     mock_card_db = models.AgentCard(
@@ -457,7 +504,7 @@ def test_update_agent_card_success(
     response = sync_test_client.put(
         f"{API_BASE_URL}/{card_id}",
         json=update_schema.model_dump(mode='json', exclude_unset=True),
-        headers={"X-Api-Key": "fake-key"}
+        headers={"Authorization": "Bearer fake-token"}
     )
 
     assert response.status_code == status.HTTP_200_OK
@@ -495,7 +542,7 @@ def test_update_agent_card_not_found(
     response = sync_test_client.put(
         f"{API_BASE_URL}/{card_id}",
         json=update_schema.model_dump(mode='json', exclude_unset=True),
-        headers={"X-Api-Key": "fake-key"}
+        headers={"Authorization": "Bearer fake-token"}
     )
 
     assert response.status_code == status.HTTP_404_NOT_FOUND
@@ -526,7 +573,7 @@ def test_update_agent_card_forbidden(
     response = sync_test_client.put(
         f"{API_BASE_URL}/{card_id}",
         json=update_schema.model_dump(mode='json', exclude_unset=True),
-        headers={"X-Api-Key": "fake-key"}
+        headers={"Authorization": "Bearer fake-token"}
     )
 
     assert response.status_code == status.HTTP_403_FORBIDDEN
@@ -564,7 +611,7 @@ def test_update_agent_card_validation_fail(
     response = sync_test_client.put(
         f"{API_BASE_URL}/{card_id}",
         json=update_schema.model_dump(mode='json', exclude_unset=True),
-        headers={"X-Api-Key": "fake-key"}
+        headers={"Authorization": "Bearer fake-token"}
     )
 
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
@@ -598,7 +645,7 @@ def test_delete_agent_card_success(
 
     response = sync_test_client.delete(
         f"{API_BASE_URL}/{card_id}",
-        headers={"X-Api-Key": "fake-key"}
+        headers={"Authorization": "Bearer fake-token"}
     )
 
     assert response.status_code == status.HTTP_204_NO_CONTENT
@@ -622,7 +669,7 @@ def test_delete_agent_card_not_found(
 
     response = sync_test_client.delete(
         f"{API_BASE_URL}/{card_id}",
-        headers={"X-Api-Key": "fake-key"}
+        headers={"Authorization": "Bearer fake-token"}
     )
 
     assert response.status_code == status.HTTP_404_NOT_FOUND
@@ -652,7 +699,7 @@ def test_delete_agent_card_forbidden(
 
     response = sync_test_client.delete(
         f"{API_BASE_URL}/{card_id}",
-        headers={"X-Api-Key": "fake-key"}
+        headers={"Authorization": "Bearer fake-token"}
     )
 
     assert response.status_code == status.HTTP_403_FORBIDDEN
@@ -673,6 +720,7 @@ def test_delete_agent_card_db_error(
     card_id = mock_agent_card_db_object.id
     mock_agent_card_db_object.developer_id = mock_developer.id
     mock_agent_card_db_object.developer = mock_developer
+    mock_agent_card_db_object.is_active = True
 
     mock_get = mocker.patch(
         "agentvault_registry.crud.agent_card.get_agent_card",
@@ -686,7 +734,7 @@ def test_delete_agent_card_db_error(
 
     response = sync_test_client.delete(
         f"{API_BASE_URL}/{card_id}",
-        headers={"X-Api-Key": "fake-key"}
+        headers={"Authorization": "Bearer fake-token"}
     )
 
     assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR

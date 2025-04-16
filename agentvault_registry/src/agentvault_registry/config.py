@@ -1,8 +1,10 @@
 import os
 import sys # Import sys
-from typing import List, Union
+# --- ADDED: Import List, Union, Optional ---
+from typing import List, Union, Optional
+# --- END ADDED ---
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import AnyHttpUrl
+from pydantic import AnyHttpUrl, EmailStr # Added EmailStr
 import logging
 from pathlib import Path # Import Path
 
@@ -30,77 +32,87 @@ class Settings(BaseSettings):
     # --- Core Settings ---
     PROJECT_NAME: str = "AgentVault Registry API"
     API_V1_STR: str = "/api/v1" # Base path for API endpoints
+    BASE_URL: AnyHttpUrl = "http://localhost:8000" # Default for local dev, override in production .env
+
 
     # --- Database Settings ---
-    # Example: postgresql+asyncpg://user:password@host:port/dbname
-    # Loaded from DATABASE_URL environment variable or .env file
     DATABASE_URL: str
 
     # --- Security Settings ---
-    # Secret key for signing tokens, etc. MUST be kept secret.
-    # Generate a strong key, e.g., using: openssl rand -hex 32
-    # Loaded from API_KEY_SECRET environment variable or .env file
-    API_KEY_SECRET: str
+    API_KEY_SECRET: str # Used for JWT signing now
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30 # Default JWT expiry
+    # --- ADDED: Verification Token Expiry ---
+    EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS: int = 24 # Default: 24 hours
+    # --- END ADDED ---
+
 
     # --- CORS Settings ---
-    # List of allowed origins. Use ["*"] for development, but restrict in production.
-    ALLOWED_ORIGINS: List[Union[AnyHttpUrl, str]] = ["*"] # Default to allow all for dev
+    ALLOWED_ORIGINS: List[Union[AnyHttpUrl, str]] = ["*"]
 
     # --- Logging Settings ---
     LOG_LEVEL: str = "INFO"
 
+    # --- ADDED: Email Settings ---
+    MAIL_USERNAME: Optional[str] = None
+    MAIL_PASSWORD: Optional[str] = None
+    MAIL_FROM: Optional[EmailStr] = None
+    MAIL_PORT: int = 587
+    MAIL_SERVER: Optional[str] = None
+    MAIL_STARTTLS: bool = True
+    MAIL_SSL_TLS: bool = False
+    MAIL_FROM_NAME: Optional[str] = "AgentVault Registry"
+    # --- END ADDED ---
+
+
     # --- Pydantic Settings Configuration ---
-    # Tells pydantic-settings where to load the .env file from
     model_config = SettingsConfigDict(
-        # --- MODIFIED: Use the explicit path ---
         env_file=ENV_FILE_PATH if ENV_FILE_PATH.is_file() else None,
-        # --- END MODIFIED ---
-        env_file_encoding='utf-8',      # Specify encoding
-        case_sensitive=True,            # Environment variable names are case-sensitive
-        extra='ignore',                 # Ignore extra fields not defined in the model
-        validate_default=False,         # Don't validate default values (helpful for URL validation in testing)
+        env_file_encoding='utf-8',
+        case_sensitive=True,
+        extra='ignore',
+        validate_default=False,
     )
 
 # Function to help detect testing environments
 def is_testing() -> bool:
     """Check if we're running in a test environment"""
-    # Using pytest's environment variable is more reliable than checking sys.argv
     return 'PYTEST_CURRENT_TEST' in os.environ
 
 # Instantiate settings. This will load values upon import.
 try:
     settings = Settings()
-    # --- Add logging *after* successful instantiation ---
     logger_config.info("Settings loaded successfully.")
-    # Optionally log *which* env file was actually used by pydantic-settings
-    # Note: This relies on internal details and might change in future pydantic-settings versions
     try:
         loaded_env_files = settings.model_config.get('env_file')
         logger_config.info(f"Pydantic settings loaded env_file: {loaded_env_files}")
     except Exception:
-        pass # Ignore if internal structure changes
-    # --- End logging ---
+        pass
+    if not settings.MAIL_SERVER or not settings.MAIL_USERNAME or not settings.MAIL_FROM:
+        logger_config.warning("Email settings (MAIL_SERVER, MAIL_USERNAME, MAIL_FROM) are not fully configured. Email sending will likely fail.")
+
 
 except Exception as e:
-    logger_config.error(f"Failed to instantiate Settings: {e}", exc_info=True) # Log the error here
+    logger_config.error(f"Failed to instantiate Settings: {e}", exc_info=True)
     if is_testing():
-        # Provide default test values if running tests *and* loading failed
         logger_config.warning("Loading settings failed, falling back to test defaults.")
         settings = Settings(
             DATABASE_URL="postgresql+asyncpg://test:test@localhost:5432/test_db",
-            API_KEY_SECRET="test_secret_key_for_testing_only_fallback_1234567890abcdef"
+            API_KEY_SECRET="test_secret_key_for_testing_only_fallback_1234567890abcdef",
+            # --- ADDED: Default for testing ---
+            EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS=1,
+            # --- END ADDED ---
+            MAIL_SERVER="smtp.example.com",
+            MAIL_USERNAME="test@example.com",
+            MAIL_FROM="test@example.com",
+            BASE_URL="http://testserver"
         )
-        logger_config.warning("Using test settings for DATABASE_URL and API_KEY_SECRET")
+        logger_config.warning("Using test settings for DATABASE_URL, API_KEY_SECRET, BASE_URL and placeholder EMAIL settings.")
     else:
-        # Re-raise the exception in production environments if loading fails
         logger_config.critical("CRITICAL: Failed to load application settings from environment or .env file.")
         raise e
 
 # --- Configure Logging ---
-# Basic logging configuration based on settings
 log_level_int = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
-# Ensure the root logger is configured
 logging.basicConfig(level=log_level_int, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', force=True)
 logger = logging.getLogger(__name__)
 logger.info(f"Logging configured with level: {settings.LOG_LEVEL}")
-# You might want a more sophisticated logging setup using logging.config later

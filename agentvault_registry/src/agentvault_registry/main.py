@@ -18,7 +18,9 @@ from slowapi.middleware import SlowAPIMiddleware
 # Import settings - this also triggers loading from .env
 from agentvault_registry.config import settings
 # Import the router
-from agentvault_registry.routers import agent_cards, utils
+# --- MODIFIED: Import auth and developers routers ---
+from agentvault_registry.routers import agent_cards, utils, auth, developers # Added auth, developers
+# --- END MODIFIED ---
 
 
 # --- Logging Setup ---
@@ -83,10 +85,15 @@ app.include_router(
     prefix=settings.API_V1_STR + "/utils",
     tags=["Utilities"]
 )
+# --- ADDED: Include Auth and Developer routers ---
+app.include_router(auth.router) # Prefix is defined within auth.py
+# --- MODIFIED: Comment out developers router inclusion for debugging ---
+# app.include_router(developers.router) # Prefix is defined within developers.py
+logger.warning("DEBUG: developers.router inclusion is temporarily commented out.")
+# --- END MODIFIED ---
 
-# Placeholder: Import and include other routers later
-# from .routers import developers # Example
-# app.include_router(developers.router, prefix=settings.API_V1_STR + "/developers", tags=["Developers"])
+# --- REMOVED: Old placeholder comment ---
+# --- END REMOVED ---
 
 
 # --- Mount Static Files ---

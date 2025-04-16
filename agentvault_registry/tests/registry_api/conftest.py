@@ -5,7 +5,9 @@ import pytest_asyncio
 import asyncio
 import uuid
 import datetime
+# --- MODIFIED: Added List ---
 from typing import AsyncGenerator, Dict, Any, Generator, List # Added List
+# --- END MODIFIED ---
 from unittest.mock import MagicMock, AsyncMock
 
 # Set test environment variables BEFORE importing any app modules
@@ -78,20 +80,32 @@ async def mock_db_session() -> AsyncGenerator[MagicMock, None]:
 @pytest.fixture
 def mock_developer() -> models.Developer:
     """Provides a mock Developer object."""
+    # --- MODIFIED: Use email/hashed_password, remove api_key_hash ---
     return models.Developer(
-        id=1, name="Test Developer", api_key_hash=security.hash_api_key("fake-key"), is_verified=False, # Hash the key
+        id=1,
+        name="Test Developer",
+        email="test.developer@example.com",
+        hashed_password=security.hash_password("testpassword"), # Hash a dummy password
+        is_verified=False,
         created_at=datetime.datetime.now(datetime.timezone.utc),
         updated_at=datetime.datetime.now(datetime.timezone.utc)
     )
+    # --- END MODIFIED ---
 
 @pytest.fixture
 def mock_other_developer() -> models.Developer:
     """Provides a different mock Developer object for ownership tests."""
+     # --- MODIFIED: Use email/hashed_password, remove api_key_hash ---
     return models.Developer(
-        id=99, name="Other Developer", api_key_hash="hashed_key_xyz", is_verified=True, # Make this one verified
+        id=99,
+        name="Other Developer",
+        email="other.dev@example.com",
+        hashed_password=security.hash_password("otherpass"), # Hash a dummy password
+        is_verified=True, # Make this one verified
         created_at=datetime.datetime.now(datetime.timezone.utc),
         updated_at=datetime.datetime.now(datetime.timezone.utc)
     )
+     # --- END MODIFIED ---
 
 @pytest.fixture
 def valid_agent_card_data_dict() -> Dict[str, Any]:
@@ -118,25 +132,25 @@ def mock_agent_card_db_object(mock_developer: models.Developer, valid_agent_card
 @pytest_asyncio.fixture
 async def override_get_current_developer(mock_developer: models.Developer):
     """Fixture to override the authentication dependency to return a mock developer."""
-    original_override = app.dependency_overrides.get(get_current_developer)
+    original_override = app.dependency_overrides.get(security.get_current_developer) # Use security.get_current_developer
     async def mock_auth():
         return mock_developer
-    app.dependency_overrides[get_current_developer] = mock_auth
+    app.dependency_overrides[security.get_current_developer] = mock_auth
     yield
-    if original_override: app.dependency_overrides[get_current_developer] = original_override
-    else: del app.dependency_overrides[get_current_developer]
+    if original_override: app.dependency_overrides[security.get_current_developer] = original_override
+    else: del app.dependency_overrides[security.get_current_developer]
 
 # --- ADDED: Fixture to override OPTIONAL auth ---
 @pytest_asyncio.fixture
 async def override_get_current_developer_optional(mock_developer: models.Developer):
     """Fixture to override the OPTIONAL authentication dependency to return a mock developer."""
-    original_override = app.dependency_overrides.get(get_current_developer_optional)
+    original_override = app.dependency_overrides.get(security.get_current_developer_optional) # Use security.get_current_developer_optional
     async def mock_auth_opt():
         return mock_developer
-    app.dependency_overrides[get_current_developer_optional] = mock_auth_opt
+    app.dependency_overrides[security.get_current_developer_optional] = mock_auth_opt
     yield
-    if original_override: app.dependency_overrides[get_current_developer_optional] = original_override
-    else: del app.dependency_overrides[get_current_developer_optional]
+    if original_override: app.dependency_overrides[security.get_current_developer_optional] = original_override
+    else: del app.dependency_overrides[security.get_current_developer_optional]
 # --- END ADDED ---
 
 
@@ -156,18 +170,18 @@ async def override_get_current_developer_optional_none():
 async def override_get_current_developer_forbidden():
     """Fixture to override the authentication dependency to raise 403."""
     async def _mock_forbidden(): raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authenticated")
-    original_override = app.dependency_overrides.get(get_current_developer)
-    app.dependency_overrides[get_current_developer] = _mock_forbidden
+    original_override = app.dependency_overrides.get(security.get_current_developer)
+    app.dependency_overrides[security.get_current_developer] = _mock_forbidden
     yield
-    if original_override: app.dependency_overrides[get_current_developer] = original_override
-    else: del app.dependency_overrides[get_current_developer]
+    if original_override: app.dependency_overrides[security.get_current_developer] = original_override
+    else: del app.dependency_overrides[security.get_current_developer]
 
 @pytest_asyncio.fixture
 async def override_get_current_developer_unauthorized():
     """Fixture to override the authentication dependency to raise 401."""
     async def _mock_unauthorized(): raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key")
-    original_override = app.dependency_overrides.get(get_current_developer)
-    app.dependency_overrides[get_current_developer] = _mock_unauthorized
+    original_override = app.dependency_overrides.get(security.get_current_developer)
+    app.dependency_overrides[security.get_current_developer] = _mock_unauthorized
     yield
-    if original_override: app.dependency_overrides[get_current_developer] = original_override
-    else: del app.dependency_overrides[get_current_developer]
+    if original_override: app.dependency_overrides[security.get_current_developer] = original_override
+    else: del app.dependency_overrides[security.get_current_developer]

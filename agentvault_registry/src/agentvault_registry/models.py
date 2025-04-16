@@ -1,13 +1,18 @@
 import uuid
 import datetime
-from typing import List, Dict, Any
+# --- MODIFIED: Added Optional ---
+from typing import List, Dict, Any, Optional
+# --- END MODIFIED ---
 
 from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, ForeignKey, JSON, Index,
-    UUID as SQLUUID, func
+    # --- MODIFIED: Added unique=True for email token ---
+    UUID as SQLUUID, func, UniqueConstraint
+    # --- END MODIFIED ---
 )
 # --- MODIFIED: Import mapped_column and relationship directly if not already ---
-from sqlalchemy.orm import relationship, Mapped, mapped_column, selectinload # Added selectinload
+# --- MODIFIED: Added DateTime ---
+from sqlalchemy.orm import relationship, Mapped, mapped_column, selectinload # Added selectinload, DateTime
 # --- END MODIFIED ---
 
 
@@ -21,11 +26,17 @@ class Developer(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
-    # Store only the hash of the API key
-    api_key_hash: Mapped[str] = mapped_column(String, nullable=False)
-    # --- ADDED: is_verified field ---
-    is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # --- ADDED: New fields for email/password auth ---
+    email: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String, nullable=False)
+    email_verification_token: Mapped[Optional[str]] = mapped_column(String, unique=True, index=True, nullable=True)
+    verification_token_expires: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    hashed_recovery_key: Mapped[Optional[str]] = mapped_column(String, nullable=True) # Hash of one representative key
     # --- END ADDED ---
+    # --- REMOVED: Old api_key_hash ---
+    # api_key_hash: Mapped[str] = mapped_column(String, nullable=False)
+    # --- END REMOVED ---
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True) # Ensure index=True
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -37,10 +48,15 @@ class Developer(Base):
     agent_cards: Mapped[List["AgentCard"]] = relationship(
         "AgentCard", back_populates="developer", cascade="all, delete-orphan"
     )
+    # --- ADDED: Relationship to DeveloperApiKey ---
+    api_keys: Mapped[List["DeveloperApiKey"]] = relationship(
+        "DeveloperApiKey", back_populates="developer", cascade="all, delete-orphan"
+    )
+    # --- END ADDED ---
 
     def __repr__(self):
-        # --- MODIFIED: Add is_verified to repr ---
-        return f"<Developer(id={self.id}, name='{self.name}', verified={self.is_verified})>"
+        # --- MODIFIED: Add email and is_verified to repr ---
+        return f"<Developer(id={self.id}, name='{self.name}', email='{self.email}', verified={self.is_verified})>"
         # --- END MODIFIED ---
 
 
@@ -92,3 +108,23 @@ class AgentCard(Base):
 
     def __repr__(self):
         return f"<AgentCard(id={self.id}, name='{self.name}', developer_id={self.developer_id})>"
+
+# --- ADDED: DeveloperApiKey Model ---
+class DeveloperApiKey(Base):
+    """SQLAlchemy model for storing developer-specific programmatic API keys."""
+    __tablename__ = "developer_api_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
+    developer_id: Mapped[int] = mapped_column(Integer, ForeignKey("developers.id"), nullable=False, index=True)
+    key_prefix: Mapped[str] = mapped_column(String(10), nullable=False, index=True) # e.g., "avreg_"
+    hashed_key: Mapped[str] = mapped_column(String, nullable=False, unique=True) # Hash of the full key
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_used_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    description: Mapped[Optional[str]] = mapped_column(String, nullable=True) # User-provided description
+
+    developer: Mapped["Developer"] = relationship("Developer", back_populates="api_keys")
+
+    def __repr__(self):
+        return f"<DeveloperApiKey(id={self.id}, developer_id={self.developer_id}, prefix='{self.key_prefix}', active={self.is_active})>"
+# --- END ADDED ---
