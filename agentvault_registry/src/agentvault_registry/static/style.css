@@ -143,14 +143,16 @@ h2 {
 
 .verified-badge {
     font-weight: 500;
-    color: #28a745; /* Green for verified */
-    background-color: #e9f7ef;
+    color: #1e7e34; /* Darker green */
+    background-color: #d4edda; /* Lighter green */
     padding: 0.2em 0.5em;
     border-radius: 4px;
     font-size: 0.75rem;
-    margin-left: 5px;
+    margin-left: 8px; /* Space from name */
     display: inline-block;
+    border: 1px solid #c3e6cb;
 }
+
 
 /* Buttons */
 button {
@@ -206,44 +208,124 @@ button {
     font-size: 0.9rem;
 }
 
-/* Agent Detail View */
+/* --- ADDED: Agent Detail View Styles --- */
 #agent-detail-section {
     margin-top: 2rem;
     padding-top: 1.5rem;
     border-top: 1px solid #eee;
 }
 
-#agent-detail-section h2 {
+#agent-detail-section h2 { /* Agent Name */
     margin-bottom: 1rem;
+    color: #343a40;
 }
 
-#agent-detail-content {
+#back-to-list {
+    margin-bottom: 1.5rem;
+    float: right; /* Position back button */
+}
+
+.detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); /* Responsive grid */
+    gap: 1.5rem 2rem; /* Row and column gap */
     margin-top: 1rem;
+    clear: both; /* Clear float from back button */
 }
 
-#agent-detail-content pre {
-    background-color: #e9ecef; /* Light background for code */
-    color: #212529;
+.detail-item {
+    background-color: #f8f9fa;
     padding: 1rem;
-    border-radius: 4px;
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    max-height: 600px; /* Increase max height */
-    overflow-y: auto;
+    border-radius: 5px;
+    border: 1px solid #e9ecef;
+}
+
+.detail-item-full {
+    grid-column: 1 / -1; /* Make item span full width */
+}
+
+.detail-label {
+    display: block;
+    font-weight: 600;
+    color: #495057;
+    margin-bottom: 0.3rem;
+    font-size: 0.9rem;
+}
+
+.detail-value {
+    color: #343a40;
+    font-size: 0.95rem;
+    word-wrap: break-word; /* Wrap long values */
+}
+.detail-value.monospace {
     font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
-    font-size: 0.875rem;
-    border: 1px solid #dee2e6;
+    font-size: 0.9rem;
+    background-color: #e9ecef; /* Slight background for code-like things */
+    padding: 0.1em 0.4em;
+    border-radius: 3px;
+}
+.detail-value a { /* Style links within values */
+    color: #007bff;
+    text-decoration: none;
+}
+.detail-value a:hover {
+    text-decoration: underline;
+}
+.detail-value p { /* Paragraphs within values (like description) */
+    margin: 0;
+}
+
+.detail-subtitle {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #495057;
+    margin-top: 0; /* Reset margin */
+    margin-bottom: 0.8rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid #eee;
+}
+
+.detail-list {
+    list-style: none;
+    padding-left: 0;
+    margin: 0;
+}
+.detail-list li {
+    padding: 0.4rem 0;
+    border-bottom: 1px dashed #eee;
+    font-size: 0.9rem;
+}
+.detail-list li:last-child {
+    border-bottom: none;
+}
+.detail-list strong { /* For Auth scheme name, capability key */
+    color: #343a40;
+    margin-right: 8px;
+}
+
+.detail-tags-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.detail-tags-container .tag {
+    background-color: #e2e3e5;
+    color: #495057;
+    padding: 0.25em 0.6em;
+    border-radius: 10px;
+    font-size: 0.8rem;
 }
 
 #agent-policies {
-    margin-top: 1.5rem;
-    padding-top: 1rem;
-    border-top: 1px solid #eee;
+    margin-top: 0; /* Reset margin as it's inside a detail-item */
+    padding-top: 0;
+    border-top: none;
 }
 
 #agent-policies a {
     display: inline-block;
     margin-right: 15px;
+    margin-top: 5px; /* Add top margin */
     color: #007bff;
     text-decoration: none;
     font-size: 0.9rem;
@@ -253,9 +335,8 @@ button {
     text-decoration: underline;
 }
 
-#back-to-list {
-    margin-bottom: 1.5rem;
-}
+/* --- END ADDED --- */
+
 
 /* Footer */
 footer {
@@ -271,7 +352,7 @@ footer {
 /* Basic Responsiveness */
 @media (max-width: 768px) {
     body {
-        padding-top: 50px; /* Adjust for potentially smaller header */
+        padding-top: 80px; /* Adjust for potentially taller stacked header */
     }
     main {
         margin: 1rem auto;
@@ -279,9 +360,9 @@ footer {
         width: 98%;
     }
     header {
-        padding: 0.5rem 1rem;
         flex-direction: column; /* Stack title and nav on small screens */
         text-align: center;
+        padding: 0.6rem 1rem;
     }
     header h1 {
         margin-bottom: 0.5rem;
@@ -296,4 +377,16 @@ footer {
     #search-section label {
         margin-bottom: 5px;
     }
+    /* --- ADDED: Adjust detail grid for smaller screens --- */
+    .detail-grid {
+        grid-template-columns: 1fr; /* Stack items */
+        gap: 1rem;
+    }
+    #back-to-list {
+        float: none; /* Remove float on small screens */
+        display: block; /* Make it full width */
+        margin-bottom: 1rem;
+        text-align: center;
+    }
+    /* --- END ADDED --- */
 }

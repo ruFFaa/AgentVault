@@ -160,5 +160,8 @@ AgentVaultRequiremntsV6FINAL.md
 AgentVaultPhase1AdditionsV1.md # Added this specific file
 WorkflowA2A.md
 WorkflowA2AV2.md # Added the new workflow file
+submit_card.py
+bootstrap_admin.py
+create_dev.py
 # temp/ # Already covered above, but explicit doesn't hurt
 # --- END ADDED ---

@@ -22,13 +22,6 @@
         <section id="search-section">
             <label for="search-input">Search Agents:</label>
             <input type="search" id="search-input" placeholder="Filter by name or description..." aria-label="Search Agents">
-            <!-- TEE Filter can be added here later if needed -->
-            <!-- <label for="tee-filter">TEE:</label>
-            <select id="tee-filter">
-                <option value="">Any</option>
-                <option value="true">Required</option>
-                <option value="false">Not Required</option>
-            </select> -->
         </section>
 
         <!-- Agent List View -->
@@ -45,15 +38,71 @@
         <!-- Agent Detail View (Initially Hidden) -->
         <section id="agent-detail-section" style="display: none;">
              <button id="back-to-list">&larr; Back to List</button>
-             <h2>Agent Details</h2>
-             <div id="agent-detail-content">
-                 <!-- Agent card JSON will be loaded here -->
-                 <pre>Loading details...</pre>
+             <h2 id="detail-agent-name">Agent Name</h2> <!-- Populated by JS -->
+
+             <!-- ADDED: Structured Detail Fields -->
+             <div class="detail-grid">
+                 <div class="detail-item">
+                     <span class="detail-label">Agent ID:</span>
+                     <span id="detail-agent-id" class="detail-value monospace"></span>
+                 </div>
+                 <div class="detail-item">
+                     <span class="detail-label">Version:</span>
+                     <span id="detail-agent-version" class="detail-value"></span>
+                 </div>
+                 <div class="detail-item">
+                     <span class="detail-label">Provider:</span>
+                     <span id="detail-provider" class="detail-value"></span> <!-- JS will add link if available -->
+                 </div>
+                 <div class="detail-item">
+                     <span class="detail-label">Developer Verified:</span>
+                     <span id="detail-dev-verified" class="detail-value"></span> <!-- JS sets text/style -->
+                 </div>
+                 <div class="detail-item detail-item-full">
+                     <span class="detail-label">Endpoint URL:</span>
+                     <a id="detail-endpoint-url" href="#" target="_blank" rel="noopener noreferrer" class="detail-value monospace"></a>
+                 </div>
+                 <div class="detail-item detail-item-full">
+                     <span class="detail-label">Description:</span>
+                     <p id="detail-description" class="detail-value"></p>
+                 </div>
+
+                 <div class="detail-item detail-item-full">
+                     <h3 class="detail-subtitle">Authentication</h3>
+                     <ul id="detail-auth-schemes" class="detail-list"></ul>
+                 </div>
+
+                 <div class="detail-item detail-item-full">
+                     <h3 class="detail-subtitle">Capabilities</h3>
+                     <ul id="detail-capabilities" class="detail-list"></ul>
+                 </div>
+
+                 <div class="detail-item detail-item-full">
+                     <h3 class="detail-subtitle">Tags</h3>
+                     <div id="detail-tags" class="detail-tags-container"></div>
+                 </div>
+
+                 <div class="detail-item detail-item-full">
+                     <h3 class="detail-subtitle">Policies & Info</h3>
+                     <div id="agent-policies">
+                         <a id="privacy-policy-link" href="#" target="_blank" rel="noopener noreferrer" style="display: none;">Privacy Policy</a>
+                         <a id="terms-link" href="#" target="_blank" rel="noopener noreferrer" style="display: none;">Terms of Service</a>
+                         <a id="provider-link" href="#" target="_blank" rel="noopener noreferrer" style="display: none;">Provider Website</a>
+                         <a id="support-link" href="#" target="_blank" rel="noopener noreferrer" style="display: none;">Support Contact</a>
+                     </div>
+                 </div>
+
+                 <div class="detail-item detail-item-full">
+                     <span class="detail-label">Last Updated:</span>
+                     <span id="detail-last-updated" class="detail-value"></span>
+                 </div>
+
              </div>
-             <div id="agent-policies">
-                 <a id="privacy-policy-link" href="#" target="_blank" rel="noopener noreferrer" style="display: none;">Privacy Policy</a>
-                 <a id="terms-link" href="#" target="_blank" rel="noopener noreferrer" style="display: none;">Terms of Service</a>
-             </div>
+             <!-- END ADDED -->
+
+             <!-- REMOVED: Old pre block -->
+             <!-- <pre id="agent-detail-content"></pre> -->
+
         </section>
     </main>
 

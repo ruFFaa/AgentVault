@@ -1,52 +1,419 @@
 /* Styles specific to the Developer Portal */
 
-#login-section, #dashboard-section {
-    margin-bottom: 20px;
-    padding: 15px;
-    border: 1px solid #eee;
-    background-color: #fdfdfd;
+/* --- ADDED: Developer Header Styles --- */
+header.developer-header {
+    background-color: #495057; /* Slightly different dark shade */
+    /* Or add a border-bottom: 2px solid #007bff; */
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.8rem 1.5rem;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    z-index: 1000;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
+header.developer-header .header-title {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+}
+header.developer-header h1 {
+    color: #ffffff;
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 500;
+}
+header.developer-header .portal-subtitle {
+    color: #adb5bd;
+    font-size: 1rem;
+    font-weight: 300;
+}
+header.developer-header .header-nav {
+    display: flex;
+    align-items: center;
+}
+header.developer-header nav a {
+    color: #dee2e6; /* Brighter link */
+    text-decoration: none;
+    margin-left: 15px;
+    font-size: 0.9rem;
+    transition: color 0.2s ease-in-out;
+}
+header.developer-header nav a:hover {
+    color: #ffffff;
+}
+#logout-button { /* Style logout button */
+    margin-left: 15px;
+    padding: 5px 10px;
+    font-size: 0.85rem;
+    background-color: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+#logout-button:hover {
+    background-color: #c82333;
+}
+/* --- END ADDED --- */
+
+
+#login-section, #dashboard-section {
+    margin-bottom: 2rem; /* Increased spacing */
+    padding: 1.5rem 2rem; /* Increased padding */
+    border: 1px solid #dee2e6;
+    background-color: #ffffff; /* Use white background for dashboard sections */
+    border-radius: 8px; /* Slightly more rounded */
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05); /* Subtle shadow */
+}
+
+#login-section h2 {
+    margin-top: 0;
+    margin-bottom: 1.5rem;
+    font-weight: 500;
+    color: #495057;
+}
+
+#login-section p {
+    margin-top: 0.8rem;
+    font-size: 0.9em;
+    color: #6c757d;
+}
+#login-section hr {
+    border: 0;
+    border-top: 1px solid #eee;
+    margin: 1.5rem 0;
+}
+
 
 #login-section label {
     margin-right: 5px;
+    font-weight: 500;
 }
 
 #login-section input[type="password"] {
     min-width: 300px;
-    padding: 8px;
+    padding: 0.6rem 0.8rem;
     margin-right: 10px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 1rem;
 }
 
-#dashboard-section h2, #dashboard-section h3 {
+#login-section button {
+    padding: 0.6rem 1rem;
+    font-size: 0.95rem;
+    cursor: pointer;
+    background-color: #007bff;
+    color: white;
+    border: 1px solid #007bff;
+    border-radius: 4px;
+}
+#login-section button:hover {
+    background-color: #0056b3;
+    border-color: #004085;
+}
+
+/* Dashboard Sections */
+#dashboard-section h3 {
     margin-top: 0;
-    border-bottom: 1px solid #eee;
-    padding-bottom: 5px;
-    margin-bottom: 15px;
+    border-bottom: 1px solid #dee2e6;
+    padding-bottom: 0.6rem;
+    margin-bottom: 1rem; /* Reduced margin below h3 */
+    color: #343a40; /* Darker heading */
+    font-weight: 600;
+    font-size: 1.3rem;
 }
 
-#my-cards-list .agent-card { /* Reuse some styling */
+/* --- ADDED: Section Header Flex Layout --- */
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem; /* Space below header/filters */
+    flex-wrap: wrap; /* Allow filters to wrap on small screens */
+    gap: 15px;
+}
+.section-header h3 {
+    margin-bottom: 0; /* Remove margin from h3 inside flex */
+    border-bottom: none;
+    padding-bottom: 0;
+}
+.card-filters label {
+    margin-right: 5px;
+    font-size: 0.9em;
+    color: #495057;
+}
+.card-filters select {
+    padding: 0.3rem 0.5rem;
+    border-radius: 4px;
+    border: 1px solid #ced4da;
+    font-size: 0.9em;
+}
+/* --- END ADDED --- */
+
+
+/* Card Styling in Developer List */
+#my-cards-list .agent-card {
     border: 1px solid #e0e0e0;
-    padding: 10px;
-    margin-bottom: 10px;
-    background-color: #fff;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1rem;
+    background-color: #ffffff;
+    border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    position: relative;
+    transition: opacity 0.3s ease-in-out, background-color 0.3s ease-in-out, border-color 0.3s ease-in-out;
+    border-left: 5px solid #007bff; /* Default active border */
 }
 
+/* --- MODIFIED: Stronger inactive style --- */
+#my-cards-list .agent-card.inactive-card {
+    background-color: #f8f9fa;
+    border-color: #dee2e6;
+    border-left: 5px solid #6c757d; /* Grey border for inactive */
+    opacity: 0.8; /* Slightly more opaque than before */
+}
+#my-cards-list .agent-card.inactive-card h4 {
+    color: #6c757d;
+}
+#my-cards-list .agent-card.inactive-card p {
+    color: #adb5bd; /* Lighter description */
+}
+/* --- END MODIFIED --- */
+
+
+#my-cards-list .agent-card h4 {
+    margin-top: 0;
+    margin-bottom: 0.3rem;
+    color: #007bff;
+    font-size: 1.1rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* --- MODIFIED: Status styling - more prominent --- */
+.card-status {
+    font-weight: 600; /* Bolder */
+    padding: 0.25em 0.7em; /* More padding */
+    border-radius: 10px; /* Pill shape */
+    font-size: 0.7rem; /* Smaller text */
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: inline-block; /* Needed for padding/border-radius */
+    line-height: 1.2; /* Adjust line height */
+    vertical-align: middle; /* Align with text */
+    margin-right: 8px; /* Space after status */
+}
+
+.card-status-active {
+    color: #155724;
+    background-color: #d4edda;
+    border: 1px solid #c3e6cb;
+}
+
+.card-status-inactive {
+    color: #721c24;
+    background-color: #f8d7da;
+    border: 1px solid #f5c6cb;
+}
+/* --- END MODIFIED --- */
+
+.verified-badge {
+    font-weight: 500;
+    color: #1e7e34; /* Darker green */
+    background-color: #e2f0e1; /* Lighter green background */
+    padding: 0.2em 0.5em;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    display: inline-block;
+    border: 1px solid #c8e6c9;
+}
+
+#my-cards-list .agent-card .card-id {
+    display: block;
+    font-family: monospace;
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-bottom: 0.8rem;
+    margin-top: 0.2rem;
+}
+
+#my-cards-list .agent-card p {
+    margin-bottom: 1rem;
+    font-size: 0.95rem;
+    color: #495057;
+}
+
+#my-cards-list .card-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 0.5rem;
+}
+
+#my-cards-list .card-actions button {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+    border-radius: 4px;
+    border: 1px solid;
+}
+
+.button-edit {
+    background-color: #6c757d;
+    border-color: #6c757d;
+    color: white;
+}
+.button-edit:hover {
+    background-color: #5a6268;
+    border-color: #545b62;
+}
+
+.button-toggle-status {
+    background-color: #ffc107;
+    border-color: #ffc107;
+    color: #333;
+}
+.button-toggle-status:hover {
+    background-color: #e0a800;
+    border-color: #d39e00;
+}
+.button-toggle-status.activate {
+    background-color: #28a745;
+    border-color: #28a745;
+    color: white;
+}
+.button-toggle-status.activate:hover {
+    background-color: #1e7e34;
+    border-color: #1c7430;
+}
+
+/* Submit Form Styling */
 #submit-card-section textarea {
-    width: 95%;
+    width: 100%;
     margin-bottom: 10px;
     font-family: monospace;
+    padding: 0.8rem; /* More padding */
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    min-height: 250px;
+    font-size: 0.9rem;
 }
+#submit-card-section textarea:focus {
+    border-color: #80bdff;
+    outline: 0;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+/* --- ADDED: Submit Actions container --- */
+.submit-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 0.5rem;
+    margin-bottom: 1rem;
+}
+/* --- END ADDED --- */
 
 #submit-card-section button {
-    margin-right: 10px;
-    padding: 8px 15px;
+    margin-right: 0; /* Remove margin, use gap */
+    padding: 0.6rem 1rem;
+    font-size: 0.95rem;
+    cursor: pointer;
+    border-radius: 4px;
+}
+#submit-card-section #validate-card-button {
+     background-color: #17a2b8;
+     color: white;
+     border: 1px solid #17a2b8;
+}
+#submit-card-section #validate-card-button:hover {
+    background-color: #117a8b;
+    border-color: #10707f;
+}
+#submit-card-section #submit-card-button {
+    background-color: #28a745;
+    color: white;
+    border: 1px solid #28a745;
+}
+#submit-card-section #submit-card-button:hover {
+    background-color: #1e7e34;
+    border-color: #1c7430;
+}
+/* --- ADDED: Cancel Edit Button Style --- */
+#submit-card-section #cancel-edit-button {
+    background-color: #6c757d;
+    color: white;
+    border: 1px solid #6c757d;
+}
+#submit-card-section #cancel-edit-button:hover {
+    background-color: #5a6268;
+    border-color: #545b62;
+}
+/* --- END ADDED --- */
+
+
+#submit-status {
+    margin-top: 1rem;
+    font-weight: 500;
+    min-height: 1.2em; /* Prevent layout shift */
+}
+#validation-errors {
+    margin-top: 0.5rem;
+    color: #721c24; /* Darker red */
+    white-space: pre-wrap;
+    background-color: #f8d7da;
+    border: 1px solid #f5c6cb;
+    padding: 0.8rem; /* More padding */
+    border-radius: 4px;
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+#validation-errors:empty {
+    display: none;
 }
 
-#logout-button {
-    float: right;
-    padding: 5px 10px;
-    background-color: #dc3545;
-    color: white;
-    border: none;
-    cursor: pointer;
+/* Footer (reuse from main style.css if identical) */
+footer {
+    background-color: #e9ecef;
+    color: #6c757d;
+    padding: 1rem 0;
+    text-align: center;
+    margin-top: 2rem;
+    font-size: 0.85rem;
+    border-top: 1px solid #dee2e6;
+}
+
+/* Responsive adjustments for Developer Header */
+@media (max-width: 768px) {
+    header.developer-header {
+        flex-direction: column;
+        padding: 0.6rem 1rem;
+    }
+    header.developer-header .header-title {
+        margin-bottom: 0.5rem;
+    }
+    header.developer-header .header-nav {
+       width: 100%;
+       justify-content: center; /* Center nav items */
+    }
+    #developer-info {
+        display: block; /* Stack developer info */
+        text-align: center;
+        margin-bottom: 5px;
+        width: 100%;
+    }
+    #logout-button {
+        float: none; /* Remove float */
+        display: inline-block; /* Allow margin auto */
+        margin-left: 10px;
+    }
+    .section-header {
+        flex-direction: column;
+        align-items: flex-start; /* Align filters left */
+    }
 }
