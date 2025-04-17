@@ -1,6 +1,8 @@
 import pytest
 import httpx
+# --- MODIFIED: Import respx ---
 import respx
+# --- END MODIFIED ---
 import json
 import pathlib
 from unittest import mock
@@ -198,82 +200,107 @@ def test_load_agent_card_from_file_validation_error(mock_read_text, mock_is_file
 TEST_URL = "https://test.com/agent-card.json"
 
 @pytest.mark.asyncio
-@respx.mock
-async def test_fetch_agent_card_from_url_success(valid_card_data):
+# --- MODIFIED: Add marker, use respx_mock fixture ---
+@pytest.mark.respx(using="httpx")
+async def test_fetch_agent_card_from_url_success(valid_card_data, respx_mock):
+# --- END MODIFIED ---
     """Test successful fetching and parsing from a URL."""
-    respx.get(TEST_URL).mock(return_value=httpx.Response(200, json=valid_card_data))
-
+    # --- MODIFIED: Define route using respx_mock ---
+    route = respx_mock.get(TEST_URL).mock(return_value=httpx.Response(200, json=valid_card_data))
     agent_card = await fetch_agent_card_from_url(TEST_URL)
+    # --- END MODIFIED ---
 
     assert isinstance(agent_card, AgentCard)
     assert agent_card.human_readable_id == "test-org/test-agent"
-    assert len(respx.calls) == 1
+    assert route.called # Check route was called
 
 @pytest.mark.asyncio
-@respx.mock
-async def test_fetch_agent_card_from_url_network_error():
+# --- MODIFIED: Add marker, use respx_mock fixture ---
+@pytest.mark.respx(using="httpx")
+async def test_fetch_agent_card_from_url_network_error(respx_mock):
+# --- END MODIFIED ---
     """Test raising AgentCardFetchError for network errors."""
-    respx.get(TEST_URL).mock(side_effect=httpx.ConnectError("Connection failed"))
-
+    # --- MODIFIED: Define route using respx_mock ---
+    route = respx_mock.get(TEST_URL).mock(side_effect=httpx.ConnectError("Connection failed"))
     with pytest.raises(AgentCardFetchError, match="Network error fetching Agent Card"):
         await fetch_agent_card_from_url(TEST_URL)
+    # --- END MODIFIED ---
+    assert route.called
 
 @pytest.mark.asyncio
-@respx.mock
-async def test_fetch_agent_card_from_url_http_error_404():
+# --- MODIFIED: Add marker, use respx_mock fixture ---
+@pytest.mark.respx(using="httpx")
+async def test_fetch_agent_card_from_url_http_error_404(respx_mock):
+# --- END MODIFIED ---
     """Test raising AgentCardFetchError for 404 status."""
-    respx.get(TEST_URL).mock(return_value=httpx.Response(404, text="Not Found"))
-
+    # --- MODIFIED: Define route using respx_mock ---
+    route = respx_mock.get(TEST_URL).mock(return_value=httpx.Response(404, text="Not Found"))
     with pytest.raises(AgentCardFetchError) as excinfo:
         await fetch_agent_card_from_url(TEST_URL)
-    # --- FIX: Check exception attributes after fixing exception class ---
+    # --- END MODIFIED ---
+    assert route.called
+    # Check exception attributes after fixing exception class
     assert "Status: 404" in str(excinfo.value)
     assert excinfo.value.status_code == 404
     assert excinfo.value.response_body == "Not Found"
 
 @pytest.mark.asyncio
-@respx.mock
-async def test_fetch_agent_card_from_url_http_error_500():
+# --- MODIFIED: Add marker, use respx_mock fixture ---
+@pytest.mark.respx(using="httpx")
+async def test_fetch_agent_card_from_url_http_error_500(respx_mock):
+# --- END MODIFIED ---
     """Test raising AgentCardFetchError for 500 status."""
-    respx.get(TEST_URL).mock(return_value=httpx.Response(500, text="Server Error"))
-
+    # --- MODIFIED: Define route using respx_mock ---
+    route = respx_mock.get(TEST_URL).mock(return_value=httpx.Response(500, text="Server Error"))
     with pytest.raises(AgentCardFetchError) as excinfo:
         await fetch_agent_card_from_url(TEST_URL)
-    # --- FIX: Check exception attributes after fixing exception class ---
+    # --- END MODIFIED ---
+    assert route.called
+    # Check exception attributes after fixing exception class
     assert "Status: 500" in str(excinfo.value)
     assert excinfo.value.status_code == 500
     assert excinfo.value.response_body == "Server Error"
 
 @pytest.mark.asyncio
-@respx.mock
-async def test_fetch_agent_card_from_url_invalid_json():
+# --- MODIFIED: Add marker, use respx_mock fixture ---
+@pytest.mark.respx(using="httpx")
+async def test_fetch_agent_card_from_url_invalid_json(respx_mock):
+# --- END MODIFIED ---
     """Test raising AgentCardFetchError for invalid JSON response."""
-    respx.get(TEST_URL).mock(return_value=httpx.Response(200, text="{not json"))
-
+    # --- MODIFIED: Define route using respx_mock ---
+    route = respx_mock.get(TEST_URL).mock(return_value=httpx.Response(200, text="{not json"))
     with pytest.raises(AgentCardFetchError, match="Failed to decode JSON response"):
         await fetch_agent_card_from_url(TEST_URL)
+    # --- END MODIFIED ---
+    assert route.called
 
 @pytest.mark.asyncio
-@respx.mock
-async def test_fetch_agent_card_from_url_validation_error(invalid_card_data_missing_field):
+# --- MODIFIED: Add marker, use respx_mock fixture ---
+@pytest.mark.respx(using="httpx")
+async def test_fetch_agent_card_from_url_validation_error(invalid_card_data_missing_field, respx_mock):
+# --- END MODIFIED ---
     """Test raising AgentCardValidationError for valid JSON but invalid card structure."""
-    # Use the corrected fixture here
-    respx.get(TEST_URL).mock(return_value=httpx.Response(200, json=invalid_card_data_missing_field))
-
+    # --- MODIFIED: Define route using respx_mock ---
+    route = respx_mock.get(TEST_URL).mock(return_value=httpx.Response(200, json=invalid_card_data_missing_field))
     with pytest.raises(AgentCardValidationError):
         await fetch_agent_card_from_url(TEST_URL)
+    # --- END MODIFIED ---
+    assert route.called
 
 @pytest.mark.asyncio
-@respx.mock
-async def test_fetch_agent_card_from_url_with_existing_client(valid_card_data):
+# --- MODIFIED: Add marker, use respx_mock fixture ---
+@pytest.mark.respx(using="httpx")
+async def test_fetch_agent_card_from_url_with_existing_client(valid_card_data, respx_mock):
+# --- END MODIFIED ---
     """Test passing an existing httpx client."""
-    respx.get(TEST_URL).mock(return_value=httpx.Response(200, json=valid_card_data))
-
+    # --- MODIFIED: Define route using respx_mock ---
+    route = respx_mock.get(TEST_URL).mock(return_value=httpx.Response(200, json=valid_card_data))
     async with httpx.AsyncClient() as client:
         agent_card = await fetch_agent_card_from_url(TEST_URL, http_client=client)
+    # --- END MODIFIED ---
 
     assert isinstance(agent_card, AgentCard)
     assert agent_card.human_readable_id == "test-org/test-agent"
-    assert len(respx.calls) == 1
+    assert route.called
 
 #

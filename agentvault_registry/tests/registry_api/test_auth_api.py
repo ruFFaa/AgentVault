@@ -11,7 +11,8 @@ import logging
 
 
 # --- MODIFIED: Added HTTPException, Depends ---
-from fastapi import status, HTTPException, Depends, Body # Added Body back for register
+from fastapi import status, HTTPException, Depends, Body, Query, Response # Added Response
+from fastapi.responses import RedirectResponse, JSONResponse # Added JSONResponse
 # --- END MODIFIED ---
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
@@ -447,7 +448,7 @@ def test_set_new_password_success(
     original_override = sync_test_client.app.dependency_overrides.get(security.verify_temp_password_token)
     sync_test_client.app.dependency_overrides[security.verify_temp_password_token] = mock_verify_temp_success
 
-    mock_developer.hashed_recovery_key = "some_hash"
+    mock_developer.hashed_recovery_key = "some_hash" # Ensure it exists before being cleared
     mock_crud_get_id.return_value = mock_developer
     mock_hash_pass.return_value = new_hashed_password
 
@@ -469,18 +470,13 @@ def test_set_new_password_success(
     assert response.json() == {"message": "Password updated successfully."}
 
     mock_crud_get_id.assert_awaited_once_with(mock_db_session, developer_id=temp_token_dev_id)
-    # --- MODIFIED ASSERTION ---
-    mock_hash_pass.assert_called_once() # Check it was called once
-    call_args, call_kwargs = mock_hash_pass.call_args
-    assert len(call_args) == 1
-    # Check the *value* inside the SecretStr argument
-    assert isinstance(call_args[0], SecretStr)
-    assert call_args[0].get_secret_value() == new_password
-    # --- END MODIFIED ASSERTION ---
+    # --- REVISED ASSERTION for mock_hash_pass ---
+    mock_hash_pass.assert_called_once_with(new_password) # Check it was called with the plain string
+    # --- END REVISED ASSERTION ---
     mock_db_session.add.assert_called_once_with(mock_developer)
     mock_db_session.commit.assert_awaited_once()
-    assert mock_developer.hashed_password == new_hashed_password
-    assert mock_developer.hashed_recovery_key is None
+    assert mock_developer.hashed_password == new_hashed_password # Check the *mocked* return value was assigned
+    assert mock_developer.hashed_recovery_key is None # Check recovery key was invalidated
 
     # Clean up override
     if original_override: sync_test_client.app.dependency_overrides[security.verify_temp_password_token] = original_override

@@ -31,7 +31,9 @@ class MockServerInfo(NamedTuple):
 
 
 @pytest.fixture
+# --- MODIFIED: Add respx_mock argument back ---
 def mock_a2a_server(respx_mock: respx.mock) -> MockServerInfo:
+# --- END MODIFIED ---
     """
     Pytest fixture that sets up mock A2A and OAuth token endpoints using respx.
     Provides access to in-memory stores for task state and SSE events.
@@ -47,10 +49,9 @@ def mock_a2a_server(respx_mock: respx.mock) -> MockServerInfo:
     sse_event_store: Dict[str, List[A2AEvent]] = {} # Store events to be streamed
     # --- END MODIFIED ---
 
-    # Setup the default routes using the imported function
-    # --- MODIFIED: Pass stores to setup function ---
+    # --- MODIFIED: Call setup_mock_a2a_routes WITHIN fixture ---
     setup_mock_a2a_routes(
-        mock_router=respx_mock,
+        mock_router=respx_mock, # Pass the fixture instance here
         base_url=base_url,
         task_store=task_store,
         sse_event_store=sse_event_store

@@ -108,12 +108,14 @@ async def generate_sse_stream(events: List[A2AEvent]) -> AsyncGenerator[bytes, N
 
             try:
                 if _MODELS_AVAILABLE and hasattr(event, 'model_dump_json'):
-                    data_dict = event.model_dump(mode='json', by_alias=True)
-                    data_str = json.dumps(data_dict)
+                    # Use exclude_none=True to match potential client expectations
+                    data_str = event.model_dump_json(by_alias=True, exclude_none=True)
                 else:
                     data_str = json.dumps(event if isinstance(event, dict) else {"data": str(event)})
 
+                # --- MODIFIED: Ensure correct SSE format (single data line, double newline) ---
                 sse_msg = f"event: {event_type}\ndata: {data_str}\n\n"
+                # --- END MODIFIED ---
                 logger.info(f"Mock SSE stream YIELDING event {i+1}/{len(events)}: {sse_msg.strip()!r}")
                 yield sse_msg.encode('utf-8')
                 event_count += 1
@@ -124,8 +126,6 @@ async def generate_sse_stream(events: List[A2AEvent]) -> AsyncGenerator[bytes, N
                 logger.info(f"Mock SSE stream YIELDING error event: event: error\\ndata: {error_data}\\n\\n")
                 yield f"event: error\ndata: {error_data}\n\n".encode('utf-8')
                 event_count += 1
-        logger.info("Mock SSE stream YIELDING final separator: b'\\n\\n'")
-        yield b'\n\n'
         await asyncio.sleep(0.02)
     except Exception as e:
          logger.error(f"Error in mock SSE generator itself: {e}", exc_info=True)
@@ -150,13 +150,19 @@ def setup_mock_a2a_routes(
     task_store: Optional[Dict[str, Dict]] = None, # Accept task store
     sse_event_store: Optional[Dict[str, List[A2AEvent]]] = None, # Accept event store
     token_endpoint_handler: Optional[Callable[[httpx.Request], httpx.Response]] = None,
+    # --- MODIFIED: Correct type hint for handler ---
     a2a_endpoint_handler: Optional[Callable[[httpx.Request], httpx.Response]] = None,
+    # --- END MODIFIED ---
     default_auth_check: Optional[Callable[[httpx.Request], Optional[httpx.Response]]] = None
 ):
     """ Sets up mock routes for A2A and OAuth, interacting with provided stores. """
     # --- END MODIFIED ---
     a2a_url = f"{base_url.rstrip('/')}{a2a_endpoint}"
     token_url = f"{base_url.rstrip('/')}{token_endpoint}"
+
+    # Ensure stores are initialized if None
+    _task_store = task_store if task_store is not None else {}
+    _sse_event_store = sse_event_store if sse_event_store is not None else {}
 
     # --- Default Token Endpoint Handler (unchanged) ---
     def default_token_handler(request: httpx.Request) -> httpx.Response:
@@ -172,8 +178,9 @@ def setup_mock_a2a_routes(
         except Exception as e:
             logger.error(f"Error in mock token handler: {e}", exc_info=True); return httpx.Response(500, json={"error": "server_error", "error_description": "Mock token server error."})
 
-    # --- MODIFIED: Default A2A Endpoint Handler (interacts with stores) ---
-    def default_a2a_handler(request: httpx.Request) -> httpx.Response:
+    # --- MODIFIED: Restored Default A2A Endpoint Handler ---
+    def _default_a2a_handler_internal(request: httpx.Request) -> httpx.Response:
+        # This internal handler now uses the _task_store and _sse_event_store from the outer scope
         logger.debug(f"Mock A2A Endpoint received request: {request.url} Method: {request.method}")
         req_id: Union[str, int, None] = None; payload: Optional[Dict[str, Any]] = None
 
@@ -200,56 +207,73 @@ def setup_mock_a2a_routes(
                 new_task = task_id is None
                 task_id = task_id or f"mock-task-{uuid.uuid4().hex[:8]}" # Generate if new
 
-                if task_store is not None:
-                    # Add or update task in store
-                    current_state = TaskState.SUBMITTED if _MODELS_AVAILABLE else "SUBMITTED"
-                    if new_task:
-                        task_store[task_id] = {"state": current_state, "received_messages": 1}
-                        logger.debug(f"Mock task store: Added new task '{task_id}' with state {current_state}")
-                    elif task_id in task_store:
-                        task_store[task_id]["received_messages"] = task_store[task_id].get("received_messages", 0) + 1
-                        task_store[task_id]["state"] = current_state # Reset state on new message? Or keep existing? Let's reset for simplicity.
-                        logger.debug(f"Mock task store: Updated task '{task_id}' state to {current_state}")
-                    else:
-                        # Task ID provided but not found in store - treat as error? Or create? Let's create for flexibility.
-                        task_store[task_id] = {"state": current_state, "received_messages": 1}
-                        logger.warning(f"Mock task store: Task ID '{task_id}' provided but not found, creating.")
+                # --- MODIFIED: Use captured store ---
+                current_state = TaskState.SUBMITTED if _MODELS_AVAILABLE else "SUBMITTED"
+                if new_task:
+                    _task_store[task_id] = {"state": current_state, "received_messages": 1}
+                    logger.debug(f"Mock task store: Added new task '{task_id}' with state {current_state}")
+                elif task_id in _task_store:
+                    _task_store[task_id]["received_messages"] = _task_store[task_id].get("received_messages", 0) + 1
+                    _task_store[task_id]["state"] = current_state
+                    logger.debug(f"Mock task store: Updated task '{task_id}' state to {current_state}")
+                else:
+                    _task_store[task_id] = {"state": current_state, "received_messages": 1}
+                    logger.warning(f"Mock task store: Task ID '{task_id}' provided but not found, creating.")
+                # --- END MODIFIED ---
 
                 result = {"id": task_id}; resp_json = create_jsonrpc_success_response(req_id, result); return httpx.Response(200, json=resp_json)
 
             elif method == "tasks/get":
                 task_id = params.get("id")
-                if not task_id or task_store is None or task_id not in task_store:
+                # --- MODIFIED: Use captured store ---
+                if not task_id or task_id not in _task_store:
+                # --- END MODIFIED ---
                     logger.warning(f"Mock A2A tasks/get: Task ID '{task_id}' not found in store.")
                     error_resp = create_jsonrpc_error_response(req_id, JSONRPC_TASK_NOT_FOUND, "Task not found"); return httpx.Response(200, json=error_resp)
 
                 # Retrieve state from store and build response
-                task_state = task_store[task_id].get("state", TaskState.COMPLETED if _MODELS_AVAILABLE else "COMPLETED") # Default if state missing
+                # --- MODIFIED: Use captured store ---
+                task_state = _task_store[task_id].get("state", TaskState.COMPLETED if _MODELS_AVAILABLE else "COMPLETED")
+                # --- END MODIFIED ---
                 task_data_dict = create_default_mock_task(task_id, state=task_state) # Use helper with state
                 resp_json = create_jsonrpc_success_response(req_id, task_data_dict); return httpx.Response(200, json=resp_json)
 
             elif method == "tasks/cancel":
                 task_id = params.get("id")
-                if not task_id or task_store is None or task_id not in task_store:
+                # --- MODIFIED: Use captured store ---
+                if not task_id or task_id not in _task_store:
+                # --- END MODIFIED ---
                     logger.warning(f"Mock A2A tasks/cancel: Task ID '{task_id}' not found in store.")
                     error_resp = create_jsonrpc_error_response(req_id, JSONRPC_TASK_NOT_FOUND, "Task not found"); return httpx.Response(200, json=error_resp)
 
                 # Update state in store
-                task_store[task_id]["state"] = TaskState.CANCELED if _MODELS_AVAILABLE else "CANCELED"
+                # --- MODIFIED: Use captured store ---
+                _task_store[task_id]["state"] = TaskState.CANCELED if _MODELS_AVAILABLE else "CANCELED"
+                # --- END MODIFIED ---
                 logger.debug(f"Mock task store: Updated task '{task_id}' state to CANCELED")
                 result = {"success": True}; resp_json = create_jsonrpc_success_response(req_id, result); return httpx.Response(200, json=resp_json)
 
             elif method == "tasks/sendSubscribe":
                 task_id = params.get("id")
                 # Check task existence first
-                if not task_id or task_store is None or task_id not in task_store:
+                # --- MODIFIED: Use captured store ---
+                if not task_id or task_id not in _task_store:
+                # --- END MODIFIED ---
                     logger.warning(f"Mock A2A tasks/sendSubscribe: Task ID '{task_id}' not found in store.")
                     error_resp = create_jsonrpc_error_response(req_id, JSONRPC_TASK_NOT_FOUND, "Task not found"); return httpx.Response(200, json=error_resp)
 
                 # Get events from store or default empty list
-                events = (sse_event_store or {}).get(task_id, [])
+                # --- MODIFIED: Use captured store ---
+                events = _sse_event_store.get(task_id, [])
+                # --- END MODIFIED ---
                 logger.info(f"Mock A2A sendSubscribe for {task_id}, returning SSE stream (events configured: {len(events)})")
-                return httpx.Response(200, headers={"Content-Type": "text/event-stream", "Cache-Control": "no-cache"}, stream=generate_sse_stream(events))
+                # --- MODIFIED: Return generator directly in 'content' ---
+                return httpx.Response(
+                    200,
+                    headers={"Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive"},
+                    content=generate_sse_stream(events) # Pass the async generator to content
+                )
+                # --- END MODIFIED ---
 
             else:
                 error_resp = create_jsonrpc_error_response(req_id, JSONRPC_METHOD_NOT_FOUND, "Method not found"); return httpx.Response(200, json=error_resp)
@@ -259,9 +283,13 @@ def setup_mock_a2a_routes(
 
     # Register routes
     final_token_handler = token_endpoint_handler or default_token_handler
-    mock_router.post(token_url).mock(side_effect=final_token_handler)
-    logger.info(f"Registered mock token endpoint at POST {token_url}")
+    # --- MODIFIED: Removed token route registration ---
+    # mock_router.post(token_url).mock(side_effect=final_token_handler)
+    # logger.info(f"Skipping mock token endpoint registration.")
+    # --- END MODIFIED ---
 
-    final_a2a_handler = a2a_endpoint_handler or default_a2a_handler
+    # --- MODIFIED: Use the internal handler ---
+    final_a2a_handler = a2a_endpoint_handler or _default_a2a_handler_internal
+    # --- END MODIFIED ---
     mock_router.post(a2a_url).mock(side_effect=final_a2a_handler)
     logger.info(f"Registered mock A2A endpoint at POST {a2a_url}")

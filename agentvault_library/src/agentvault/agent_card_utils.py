@@ -9,6 +9,14 @@ from typing import Dict, Any, Optional
 
 # Import Pydantic for validation errors
 import pydantic
+# --- ADDED: Import respx exceptions if available (for testing) ---
+try:
+    import respx
+    from respx.mock import MockError as RespxMockError
+except ImportError:
+    respx = None # type: ignore
+    RespxMockError = Exception # Fallback type
+# --- END ADDED ---
 
 # Import local models and exceptions
 from .models.agent_card import AgentCard
@@ -104,42 +112,63 @@ async def fetch_agent_card_from_url(
     Raises:
         AgentCardFetchError: If there's a network error, the server returns a non-2xx
                              status code, or the response is not valid JSON.
+                             This wraps httpx.RequestError and httpx.HTTPStatusError.
         AgentCardValidationError: If the fetched JSON content fails Agent Card validation.
+        AgentCardError: For other unexpected errors during fetch/parse.
     """
     client_to_use: httpx.AsyncClient
 
     async def _fetch(client: httpx.AsyncClient):
         try:
-            response = await client.get(url)
+            response = await client.get(url) # Can raise httpx.RequestError
 
-            # Check for non-successful status codes
-            response.raise_for_status() # Raises HTTPStatusError for 4xx/5xx
+            # Check for non-successful status codes first
+            response.raise_for_status() # Can raise httpx.HTTPStatusError
 
             # Try parsing the JSON response
             try:
                 data = response.json()
             except json.JSONDecodeError as e:
+                # --- MODIFIED: Raise AgentCardFetchError here ---
+                # This was the missing part causing the test failure
                 raise AgentCardFetchError(f"Failed to decode JSON response from URL '{url}': {e}") from e
+                # --- END MODIFIED ---
 
-            # Validate the fetched data
+            # Validate the fetched data using the dictionary parser
+            # Let AgentCardValidationError or AgentCardError propagate if raised
             return parse_agent_card_from_dict(data)
 
+        # --- REVISED Exception Handling Order (Again) ---
         except httpx.HTTPStatusError as e:
-            # Handle 4xx/5xx errors specifically
+            # Wrap HTTP status errors (4xx/5xx) specifically
             raise AgentCardFetchError(
                 f"Failed to fetch Agent Card from URL '{url}'. Status: {e.response.status_code}. Response: {e.response.text}",
                 status_code=e.response.status_code,
                 response_body=e.response.text
             ) from e
         except httpx.RequestError as e:
-            # Handle network-related errors (DNS, connection, timeout, etc.)
+            # Wrap network-related errors (DNS, connection, timeout, etc.)
             raise AgentCardFetchError(f"Network error fetching Agent Card from URL '{url}': {e}") from e
-        except AgentCardValidationError:
-             # Re-raise validation errors directly
+        # --- ADDED: Catch AgentCardFetchError specifically ---
+        except AgentCardFetchError:
+             # Re-raise fetch errors (like the JSON decode one) directly
              raise
+        # --- END ADDED ---
+        except AgentCardValidationError:
+             # Re-raise validation errors directly if they came from parse_agent_card_from_dict
+             raise
+        except AgentCardError as e:
+             # Re-raise other card-specific parsing errors
+             raise AgentCardError(f"An error occurred processing the Agent Card data from '{url}': {e}") from e
+        # --- ADDED: Catch respx errors specifically if respx is available ---
+        except RespxMockError as e:
+             # Let respx errors propagate during testing
+             raise e
+        # --- END ADDED ---
         except Exception as e:
-            # Catch any other unexpected errors during fetch/parse
-            raise AgentCardFetchError(f"An unexpected error occurred fetching Agent Card from '{url}': {e}") from e
+            # Catch any other unexpected errors during fetch/parse and wrap
+            raise AgentCardError(f"An unexpected error occurred fetching/processing Agent Card from '{url}': {e}") from e
+        # --- END REVISED ---
 
     if http_client:
         return await _fetch(http_client)

@@ -126,6 +126,59 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
     error_resp = create_jsonrpc_error_response(req_id, JSONRPC_INTERNAL_ERROR, f"Internal server error: {type(exc).__name__}")
     return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=error_resp)
 
+# --- ADDED: Helper to format SSE events ---
+def _format_sse_event_bytes(event: A2AEvent) -> Optional[bytes]:
+    """Helper to format an A2AEvent into SSE message bytes."""
+    event_type: Optional[str] = None
+    if _AGENTVAULT_IMPORTED:
+        if isinstance(event, TaskStatusUpdateEvent): event_type = "task_status"
+        elif isinstance(event, TaskMessageEvent): event_type = "task_message"
+        elif isinstance(event, TaskArtifactUpdateEvent): event_type = "task_artifact"
+    else: # Fallback
+        if "TaskStatusUpdateEvent" in str(type(event)): event_type = "task_status"
+        elif "TaskMessageEvent" in str(type(event)): event_type = "task_message"
+        elif "TaskArtifactUpdateEvent" in str(type(event)): event_type = "task_artifact"
+
+    if event_type is None:
+        logger.warning(f"Cannot format unknown event type: {type(event)}")
+        return None
+
+    try:
+        if _AGENTVAULT_IMPORTED and hasattr(event, 'model_dump_json'):
+             json_data = event.model_dump_json(by_alias=True)
+        else:
+             json_data = json.dumps(event if isinstance(event, dict) else {"data": str(event)})
+        sse_message = f"event: {event_type}\ndata: {json_data}\n\n"
+        return sse_message.encode("utf-8")
+    except Exception as e:
+        logger.error(f"Failed to serialize or format SSE event (type: {event_type}): {e}", exc_info=True)
+        return None
+# --- END ADDED ---
+
+# --- ADDED: SSE Stream Wrapper with Error Handling ---
+async def _sse_stream_wrapper(
+    task_id: str,
+    event_generator: AsyncGenerator[A2AEvent, None]
+) -> AsyncGenerator[bytes, None]:
+    """Wraps the agent's event generator to handle exceptions and yield SSE bytes."""
+    try:
+        async for event in event_generator:
+            formatted_bytes = _format_sse_event_bytes(event)
+            if formatted_bytes:
+                yield formatted_bytes
+            else:
+                logger.warning(f"Skipping unformattable event for task {task_id}: {event!r}")
+    except TaskNotFoundError as e:
+        logger.warning(f"Task {task_id} not found during SSE generation: {e}")
+        error_data = json.dumps({"error": "task_not_found", "message": str(e)})
+        yield f"event: error\ndata: {error_data}\n\n".encode('utf-8')
+    except Exception as e:
+        logger.exception(f"Error during SSE event generation for task {task_id}: {e}")
+        error_data = json.dumps({"error": "stream_error", "message": f"Error generating events: {type(e).__name__}: {str(e)}"})
+        yield f"event: error\ndata: {error_data}\n\n".encode('utf-8')
+    finally:
+        logger.debug(f"SSE stream wrapper finished for task {task_id}")
+# --- END ADDED ---
 
 def create_a2a_router(
     agent: BaseA2AAgent,
@@ -265,17 +318,21 @@ def create_a2a_router(
                 task_id = params.get("id")
                 if not isinstance(task_id, str) or not task_id: raise ValueError("'id' parameter is required.")
 
+                # --- MODIFIED: Check task existence BEFORE calling handler ---
                 task_context = await task_store_dep.get_task(task_id)
-                if task_context is None: raise TaskNotFoundError(task_id=task_id)
+                if task_context is None:
+                    logger.warning(f"Task '{task_id}' not found for subscription.")
+                    raise TaskNotFoundError(task_id=task_id) # Raise specific error
+                # --- END MODIFIED ---
 
-                # --- CORRECTED: Call handler, expect AsyncGenerator[bytes, None] ---
-                # Agent handler should now yield formatted bytes
-                byte_stream_generator = agent_instance.handle_subscribe_request(task_id=task_id)
+                # --- MODIFIED: Call handler, wrap generator, return StreamingResponse ---
+                event_generator = agent_instance.handle_subscribe_request(task_id=task_id)
+                # Wrap the agent's generator to handle errors and format bytes
+                sse_byte_stream = _sse_stream_wrapper(task_id, event_generator)
 
                 logger.info(f"Subscription request successful for task {task_id}. Starting SSE stream.")
-                # Pass the generator directly to StreamingResponse
-                return StreamingResponse(content=byte_stream_generator, media_type="text/event-stream")
-                # --- END CORRECTION ---
+                return StreamingResponse(content=sse_byte_stream, media_type="text/event-stream")
+                # --- END MODIFIED ---
 
             # Final fallback for unknown methods
             else:
