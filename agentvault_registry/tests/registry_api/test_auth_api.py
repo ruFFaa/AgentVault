@@ -11,13 +11,19 @@ import logging
 
 
 # --- MODIFIED: Added HTTPException, Depends ---
-from fastapi import status, HTTPException, Depends # Added Depends
+from fastapi import status, HTTPException, Depends, Body # Added Body back for register
 # --- END MODIFIED ---
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
-from pydantic import EmailStr
+# --- MODIFIED: Added SecretStr ---
+from pydantic import EmailStr, SecretStr # Added SecretStr
+# --- END MODIFIED ---
 # --- ADDED: Import jose ---
 from jose import jwt, JWTError
+# --- END ADDED ---
+# --- ADDED: Import Annotated and OAuth2PasswordRequestForm ---
+from typing import Annotated
+from fastapi.security import OAuth2PasswordRequestForm
 # --- END ADDED ---
 
 
@@ -463,7 +469,14 @@ def test_set_new_password_success(
     assert response.json() == {"message": "Password updated successfully."}
 
     mock_crud_get_id.assert_awaited_once_with(mock_db_session, developer_id=temp_token_dev_id)
-    mock_hash_pass.assert_called_once_with(new_password)
+    # --- MODIFIED ASSERTION ---
+    mock_hash_pass.assert_called_once() # Check it was called once
+    call_args, call_kwargs = mock_hash_pass.call_args
+    assert len(call_args) == 1
+    # Check the *value* inside the SecretStr argument
+    assert isinstance(call_args[0], SecretStr)
+    assert call_args[0].get_secret_value() == new_password
+    # --- END MODIFIED ASSERTION ---
     mock_db_session.add.assert_called_once_with(mock_developer)
     mock_db_session.commit.assert_awaited_once()
     assert mock_developer.hashed_password == new_hashed_password

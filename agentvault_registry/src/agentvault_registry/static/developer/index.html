@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AgentVault Developer Portal</title>
-    <!-- Link to main style and potentially a developer-specific one -->
+    <!-- Link to main style and developer-specific one -->
     <link rel="stylesheet" href="/static/style.css">
     <link rel="stylesheet" href="/static/developer/developer.css">
     <!-- Consider adding Font Awesome for icons -->
@@ -18,7 +18,7 @@
              <span class="portal-subtitle">Developer Portal</span>
         </div>
         <div class="header-nav">
-            <span id="developer-info" style="display: none; margin-right: 20px; color: #e9ecef; font-size: 0.9em;">Logged in as: <strong id="developer-name-display">Developer</strong></span>
+            <span id="developer-info" style="display: none; margin-right: 20px; color: #e9ecef; font-size: 0.9em;">Logged in as: <strong id="developer-name-display">Developer</strong> (<span id="developer-email-display"></span>)</span>
             <nav>
                 <a href="/ui">Public Registry</a>
                 <button id="logout-button" style="display: none;">Logout</button> <!-- Hide initially -->
@@ -28,53 +28,176 @@
     <!-- END MODIFIED -->
 
     <main>
-        <section id="login-section">
-            <h2>Developer Login / Access</h2>
-            <p>To submit or manage agent cards, you need a Developer API Key.</p>
-            <p><strong>Currently, API keys are provided manually.</strong> Please contact the project maintainers at <strong><code>[AgentVault@proton.me]</code></strong> </p>
-            <p><em>(Self-service sign-up is planned for the future).</em></p>
-            <hr style="margin: 15px 0;">
-            <label for="developer-api-key">Enter Your API Key:</label>
-            <input type="password" id="developer-api-key" placeholder="Enter your provided API key">
-            <button id="login-button">Login</button>
-            <p id="login-error" style="color: red; display: none;"></p>
-            <p><small>Your API key will be stored in session storage for this browser session only.</small></p>
+        <!-- Login Section - Replaced with check in JS -->
+        <section id="login-required-message" style="display: none; text-align: center; padding: 2rem; border: 1px solid #dee2e6; background-color: #f8f9fa; border-radius: 8px;">
+            <h2>Authentication Required</h2>
+            <p>Please <a href="/ui/login">login</a> or <a href="/ui/register">register</a> to access the Developer Portal.</p>
         </section>
 
         <section id="dashboard-section" style="display: none;">
-            <!-- Removed h2 My Dashboard, header implies context -->
-
+            <!-- My Agent Cards Section -->
             <section id="my-cards-section">
                 <div class="section-header">
                     <h3>My Agent Cards</h3>
-                    <!-- ADDED: Placeholder for Filters -->
                     <div class="card-filters">
                         <label for="status-filter">Filter by Status:</label>
-                        <select id="status-filter" disabled> <!-- Disabled until JS implements it -->
+                        <select id="status-filter">
                             <option value="all">All</option>
-                            <option value="active">Active Only</option>
+                            <option value="active" selected>Active Only</option>
                             <option value="inactive">Inactive Only</option>
                         </select>
-                        <!-- Add sorting options later if needed -->
                     </div>
-                    <!-- END ADDED -->
                 </div>
                 <div id="my-cards-list">
                     <p>Loading your agents...</p>
-                    <!-- Cards will be loaded here by renderOwnedCards -->
                 </div>
             </section>
 
-            <hr style="margin: 2rem 0;">
+            <hr class="section-divider">
 
+            <!-- API Key Management Section -->
+            <section id="api-keys-section">
+                <h3>Programmatic API Keys</h3>
+                <p>Use these keys for automated scripts or CI/CD pipelines to manage your agents via the Registry API.</p>
+                <div id="api-keys-list-container">
+                    <p>Loading API keys...</p>
+                    <table id="api-keys-table" style="display: none;">
+                        <thead>
+                            <tr>
+                                <th>Prefix</th>
+                                <th>Description</th>
+                                <th>Created</th>
+                                <th>Last Used</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="api-keys-tbody">
+                            <!-- Keys will be loaded here -->
+                        </tbody>
+                    </table>
+                </div>
+                <div id="generate-key-section">
+                    <h4>Generate New API Key</h4>
+                    <div class="form-group">
+                        <label for="new-key-description">Description (Optional):</label>
+                        <input type="text" id="new-key-description" placeholder="E.g., CI/CD Pipeline Key">
+                    </div>
+                    <button id="generate-key-button">Generate Key</button>
+                    <div id="new-key-result" style="display: none; margin-top: 15px; padding: 10px; border: 1px solid #17a2b8; background-color: #d1ecf1; border-radius: 4px;">
+                        <p><strong>New API Key Generated!</strong></p>
+                        <p>Copy this key now. It will **NOT** be shown again:</p>
+                        <pre id="new-plain-key" style="background-color: #e9ecef; padding: 5px; border-radius: 3px; white-space: pre-wrap; word-wrap: break-word;"></pre>
+                        <button id="copy-key-button" style="margin-top: 5px; font-size: 0.8em; padding: 3px 8px;">Copy</button>
+                    </div>
+                    <div id="generate-key-message" class="message-area"></div>
+                </div>
+            </section>
+
+            <hr class="section-divider">
+
+            <!-- Agent Builder Section -->
+            <section id="agent-builder-section">
+                <h3>Agent Builder</h3>
+                <p>Generate boilerplate code for a new AgentVault agent.</p>
+
+                <div class="form-group">
+                    <label>Agent Type:</label>
+                    <div class="radio-group">
+                        <input type="radio" id="builder-type-wrapper" name="agent_builder_type" value="simple_wrapper" checked>
+                        <label for="builder-type-wrapper">Simple LLM Wrapper</label>
+                        <input type="radio" id="builder-type-adk" name="agent_builder_type" value="adk_agent">
+                        <label for="builder-type-adk">ADK Agent (Experimental)</label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="builder-agent-name">Agent Name:</label>
+                    <input type="text" id="builder-agent-name" required placeholder="e.g., My Research Assistant">
+                </div>
+                <div class="form-group">
+                    <label for="builder-agent-desc">Agent Description:</label>
+                    <textarea id="builder-agent-desc" rows="3" required placeholder="Describe what your agent does"></textarea>
+                </div>
+                 <div class="form-group">
+                    <label for="builder-agent-id">Human-Readable ID (Optional):</label>
+                    <input type="text" id="builder-agent-id" placeholder="e.g., your-org/agent-name (auto-generated if blank)">
+                    <small>Format: `org-name/agent-name` (lowercase, hyphens/underscores)</small>
+                </div>
+
+                <!-- Simple Wrapper Config -->
+                <div id="wrapper-agent-config-section">
+                    <h4>Simple Wrapper Configuration</h4>
+                    <div class="form-group">
+                        <label for="builder-wrapper-backend">Backend LLM Type:</label>
+                        <select id="builder-wrapper-backend">
+                            <option value="openai_api" selected>OpenAI API Compatible (incl. Azure)</option>
+                            <option value="anthropic_api">Anthropic API</option>
+                            <option value="local_openai_compatible">Local OpenAI Compatible (e.g., LM Studio, Ollama)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="builder-wrapper-model">Model Name:</label>
+                        <input type="text" id="builder-wrapper-model" required placeholder="e.g., gpt-4o, claude-3-opus-20240229, llama3">
+                    </div>
+                    <div class="form-group">
+                        <label for="builder-wrapper-prompt">System Prompt (Optional):</label>
+                        <textarea id="builder-wrapper-prompt" rows="4" placeholder="e.g., You are a helpful assistant."></textarea>
+                    </div>
+                </div>
+
+                <!-- ADK Agent Config (Initially Hidden) -->
+                <div id="adk-agent-config-section" style="display: none;">
+                    <h4>ADK Agent Configuration</h4>
+                     <div class="form-group">
+                        <label for="builder-adk-model">Google GenAI Model Name:</label>
+                        <input type="text" id="builder-adk-model" placeholder="e.g., gemini-1.5-flash-latest">
+                    </div>
+                    <div class="form-group">
+                        <label for="builder-adk-instruction">Agent Instruction/System Prompt:</label>
+                        <textarea id="builder-adk-instruction" rows="4" placeholder="Instructions for the ADK agent..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Include Tools:</label>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="tool-get-time" value="get_current_time">
+                            <label for="tool-get-time">Get Current Time</label>
+                            <input type="checkbox" id="tool-google-search" value="google_search">
+                            <label for="tool-google-search">Google Search (Requires API Key/CSE ID setup)</label>
+                        </div>
+                    </div>
+                </div>
+
+                 <!-- Generated Agent Auth Config -->
+                 <div class="form-group">
+                    <label for="builder-wrapper-auth">Generated Agent's A2A Auth:</label>
+                    <select id="builder-wrapper-auth">
+                        <option value="none" selected>None (Publicly Accessible)</option>
+                        <option value="apiKey">API Key (Requires WRAPPER_API_KEY in .env)</option>
+                    </select>
+                </div>
+                <div class="form-group" id="builder-wrapper-service-id-group" style="display: none;">
+                    <label for="builder-wrapper-service-id">Service ID for Agent's API Key:</label>
+                    <input type="text" id="builder-wrapper-service-id" placeholder="e.g., my-generated-agent-key">
+                    <small>This is the ID clients will use in their KeyManager to find the key for *this* agent.</small>
+                </div>
+
+                <button id="generate-package-button">Generate Agent Package</button>
+                <div id="generate-package-message" class="message-area"></div>
+
+            </section>
+
+            <hr class="section-divider">
+
+            <!-- Submit/Update Agent Card Section (Existing - Needs Review) -->
             <section id="submit-card-section">
-                <h3>Submit New / Update Existing Agent Card</h3>
+                <h3>Submit New / Update Existing Agent Card (Manual JSON)</h3>
                 <label for="agent-card-json">Agent Card JSON:</label><br>
-                <textarea id="agent-card-json" rows="20" cols="80" placeholder='Paste your agent-card.json content here...'></textarea><br> <!-- Increased rows -->
+                <textarea id="agent-card-json" rows="20" cols="80" placeholder='Paste your agent-card.json content here...'></textarea><br>
                 <div class="submit-actions">
                      <button id="validate-card-button">Validate Card Data</button>
                      <button id="submit-card-button">Submit New Card</button>
-                     <button id="cancel-edit-button" style="display: none; background-color: #6c757d; color: white;">Cancel Edit</button> <!-- Added Cancel Edit button -->
+                     <button id="cancel-edit-button" style="display: none;">Cancel Edit</button>
                 </div>
                 <p id="submit-status"></p>
                 <pre id="validation-errors"></pre>

@@ -1,7 +1,7 @@
 """change_agent_card_data_to_jsonb
 
 Revision ID: 495a40fce45f
-Revises: e163cd45ddf7
+Revises: f001_auth_models
 Create Date: 2025-04-14 20:55:56.382563
 
 """
@@ -16,8 +16,8 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = '495a40fce45f'
-# --- MODIFIED: Point to the migration *before* the original index attempt ---
-down_revision: Union[str, None] = 'e163cd45ddf7'
+# --- MODIFIED: Point to the new auth models migration ---
+down_revision: Union[str, None] = 'f001_auth_models'
 # --- END MODIFIED ---
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

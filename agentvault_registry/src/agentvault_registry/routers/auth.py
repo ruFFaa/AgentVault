@@ -247,9 +247,7 @@ async def recover_account_with_key(
 
 @router.post("/set-new-password", summary="Set New Password After Recovery", response_model=Dict[str, str])
 async def set_new_password_after_recovery(
-    # --- MODIFIED: Use Body(..., embed=False) ---
-    set_in: schemas.PasswordSetNew = Body(..., embed=False),
-    # --- END MODIFIED ---
+    set_in: schemas.PasswordSetNew = Body(...), # Keep embed=True if needed, or remove if not
     # Dependencies last
     db: AsyncSession = Depends(get_db),
     developer_id: int = Depends(security.verify_temp_password_token)
@@ -266,10 +264,9 @@ async def set_new_password_after_recovery(
         logger.error(f"Set new password failed: Developer {developer_id} not found after token verification.")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Developer not found.")
 
-    # Hash the new password
-    # --- MODIFIED FOR DEBUGGING: Access plain string ---
-    new_hashed_password = security.hash_password(set_in.new_password)
-    # --- END MODIFIED ---
+    # --- FIXED: Extract plain string from SecretStr before hashing ---
+    new_hashed_password = security.hash_password(set_in.new_password.get_secret_value())
+    # --- END FIXED ---
 
     # Update password and invalidate recovery key hash
     developer.hashed_password = new_hashed_password

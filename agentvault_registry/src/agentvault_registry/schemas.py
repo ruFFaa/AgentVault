@@ -1,8 +1,8 @@
 import uuid
 import datetime
-# --- MODIFIED: Added EmailStr, SecretStr, Literal ---
+# --- MODIFIED: Added EmailStr, SecretStr, Literal, model_validator ---
 from typing import List, Optional, Dict, Any, Literal
-from pydantic import BaseModel, Field, ConfigDict, EmailStr, SecretStr
+from pydantic import BaseModel, Field, ConfigDict, EmailStr, SecretStr, model_validator
 # --- END MODIFIED ---
 
 # Import local models for type checking
@@ -57,9 +57,7 @@ class PasswordResetRecover(BaseModel):
 
 class PasswordSetNew(BaseModel):
     """Schema for setting a new password after recovery key validation."""
-    # --- MODIFIED FOR DEBUGGING: Use str instead of SecretStr ---
-    new_password: str = Field(..., description="The new password for the account.")
-    # --- END MODIFIED ---
+    new_password: SecretStr = Field(..., description="The new password for the account.")
 # --- END ADDED ---
 
 # --- ADDED: API Key Schemas ---
@@ -176,3 +174,79 @@ class AgentCardValidationResponse(BaseModel):
     is_valid: bool = Field(..., description="Indicates whether the provided card data is valid according to the schema.")
     detail: Optional[str] = Field(None, description="Provides details about validation errors if is_valid is False.")
     validated_card_data: Optional[Dict[str, Any]] = Field(None, description="The validated and potentially normalized card data if is_valid is True (optional).")
+
+# --- ADDED: Agent Builder Config Schema ---
+class AgentBuildConfig(BaseModel):
+    """Schema for receiving configuration for the Agent Builder UI."""
+    agent_name: str = Field(..., min_length=3, max_length=100, description="Display name for the new agent.")
+    agent_description: str = Field(..., max_length=500, description="Description for the new agent.")
+    human_readable_id: Optional[str] = Field(
+        None,
+        pattern=r"^[a-z0-9]+(?:[-_][a-z0-9]+)*\/[a-z0-9]+(?:[-_][a-z0-9]+)*$",
+        description="Optional unique ID (e.g., 'my-org/my-agent'). Auto-generated if omitted."
+    )
+    agent_builder_type: Literal["simple_wrapper", "adk_agent"] = Field(
+        ...,
+        description="Specifies which type of agent structure to generate."
+    )
+
+    # Simple Wrapper Specific Fields (Optional based on agent_builder_type)
+    wrapper_llm_backend_type: Optional[Literal["openai_api", "anthropic_api", "local_openai_compatible"]] = Field(
+        None,
+        description="Required if agent_builder_type is 'simple_wrapper'. The backend LLM API type."
+    )
+    wrapper_model_name: Optional[str] = Field(
+        None,
+        description="Required if agent_builder_type is 'simple_wrapper'. Model name for the backend."
+    )
+    wrapper_system_prompt: Optional[str] = Field(
+        None,
+        description="Optional system prompt for the simple wrapper agent."
+    )
+
+    # ADK Agent Specific Fields (Optional based on agent_builder_type)
+    adk_model_name: Optional[str] = Field(
+        None,
+        description="Required if agent_builder_type is 'adk_agent'. Model name for ADK LlmAgent (e.g., gemini-1.5-flash-latest)."
+    )
+    adk_instruction: Optional[str] = Field(
+        None,
+        description="Required if agent_builder_type is 'adk_agent'. System prompt/instructions for the ADK LlmAgent."
+    )
+    adk_tools: Optional[List[Literal["get_current_time", "google_search"]]] = Field(
+        None,
+        description="Optional list of pre-defined tools for the ADK agent."
+    )
+
+    # Generated Agent's Own Authentication
+    wrapper_auth_type: Literal["none", "apiKey"] = Field(
+        default="none",
+        description="Authentication required for the generated agent's *own* A2A endpoint."
+    )
+    wrapper_service_id: Optional[str] = Field(
+        None,
+        description="Required if wrapper_auth_type is 'apiKey'. Service ID for the generated agent's API key."
+    )
+
+    # --- Validation Logic ---
+    @model_validator(mode='after')
+    def check_conditional_fields(self) -> 'AgentBuildConfig':
+        # Simple Wrapper Checks
+        if self.agent_builder_type == "simple_wrapper":
+            if not self.wrapper_llm_backend_type:
+                raise ValueError("'wrapper_llm_backend_type' is required when agent_builder_type is 'simple_wrapper'")
+            if not self.wrapper_model_name:
+                raise ValueError("'wrapper_model_name' is required when agent_builder_type is 'simple_wrapper'")
+        # ADK Agent Checks
+        elif self.agent_builder_type == "adk_agent":
+            if not self.adk_model_name:
+                raise ValueError("'adk_model_name' is required when agent_builder_type is 'adk_agent'")
+            if not self.adk_instruction:
+                raise ValueError("'adk_instruction' is required when agent_builder_type is 'adk_agent'")
+
+        # Wrapper Auth Check
+        if self.wrapper_auth_type == "apiKey" and not self.wrapper_service_id:
+            raise ValueError("'wrapper_service_id' is required when wrapper_auth_type is 'apiKey'")
+
+        return self
+# --- END ADDED ---

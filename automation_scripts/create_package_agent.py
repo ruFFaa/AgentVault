@@ -31,6 +31,9 @@ EXPECTED_TEMPLATES = [
     "tests/test_agent.py.j2",
     "agent-card.json.j2",
     "requirements.txt.j2",
+    # --- ADDED: .env.example template ---
+    ".env.example.j2",
+    # --- END ADDED ---
 ]
 
 # --- Helper Functions (Refactored Subprocess Calls) ---
@@ -41,8 +44,10 @@ def _run_sdk_packager(
     fastapi_app_variable: str,
     python_version: str,
     agent_port: int,
-    requirements_path: Optional[Path],
-    agent_card_path: Optional[Path]
+    # --- MODIFIED: Removed requirements_path and agent_card_path ---
+    # requirements_path: Optional[Path],
+    # agent_card_path: Optional[Path]
+    # --- END MODIFIED ---
 ) -> bool:
     """Runs the agentvault-sdk package command."""
     typer.echo("\nRunning AgentVault SDK packager...")
@@ -54,10 +59,12 @@ def _run_sdk_packager(
         "--python", python_version,
         "--port", str(agent_port),
     ]
-    if requirements_path:
-        sdk_package_cmd.extend(["--requirements", str(requirements_path)])
-    if agent_card_path:
-        sdk_package_cmd.extend(["--agent-card", str(agent_card_path)])
+    # --- MODIFIED: Removed conditional extend for reqs/card ---
+    # if requirements_path:
+    #     sdk_package_cmd.extend(["--requirements", str(requirements_path)])
+    # if agent_card_path:
+    #     sdk_package_cmd.extend(["--agent-card", str(agent_card_path)])
+    # --- END MODIFIED ---
 
     logger.info(f"Executing SDK packager command: {' '.join(sdk_package_cmd)}")
     try:
@@ -206,6 +213,10 @@ def main(
         "sdk_version_req": sdk_version_req,
         "package_name": package_name,
         "fastapi_app_variable": "app",
+        # --- ADDED: Context for .env.example ---
+        "llm_backend_type": "simple_wrapper", # Default for example, builder would pass correct one
+        "wrapper_auth_type": "none", # Default for example
+        # --- END ADDED ---
     }
     logger.debug(f"Template context prepared: {context}")
 
@@ -226,8 +237,10 @@ def main(
     typer.echo("Generating project files from templates...")
     files_generated = 0
     files_failed = 0
-    generated_card_path: Optional[Path] = None
-    generated_req_path: Optional[Path] = None
+    # --- REMOVED: No longer need to track these paths for packager ---
+    # generated_card_path: Optional[Path] = None
+    # generated_req_path: Optional[Path] = None
+    # --- END REMOVED ---
 
     for template_file in EXPECTED_TEMPLATES:
         try:
@@ -248,10 +261,12 @@ def main(
             logger.info(f"Rendered and wrote: {target_path}")
             files_generated += 1
 
-            if relative_output == "agent-card.json":
-                generated_card_path = target_path
-            if relative_output == "requirements.txt":
-                generated_req_path = target_path
+            # --- REMOVED: No longer need to track these paths for packager ---
+            # if relative_output == "agent-card.json":
+            #     generated_card_path = target_path
+            # if relative_output == "requirements.txt":
+            #     generated_req_path = target_path
+            # --- END REMOVED ---
 
         except jinja2.TemplateNotFound:
             typer.secho(f"Error: Template '{template_file}' not found during rendering.", fg=typer.colors.RED)
@@ -268,15 +283,17 @@ def main(
         typer.echo(f"Successfully generated {files_generated} project files.")
 
     # --- 6. Run SDK Packager (Using Helper) ---
+    # --- MODIFIED: Call helper without reqs/card paths ---
     packager_success = _run_sdk_packager(
         output_dir=output_dir,
         package_name=package_name,
         fastapi_app_variable=context['fastapi_app_variable'],
         python_version=python_version,
-        agent_port=agent_port,
-        requirements_path=generated_req_path,
-        agent_card_path=generated_card_path
+        agent_port=agent_port
+        # requirements_path=None, # Pass None explicitly
+        # agent_card_path=None    # Pass None explicitly
     )
+    # --- END MODIFIED ---
     if not packager_success:
         raise typer.Exit(code=1) # Exit if packager failed
 

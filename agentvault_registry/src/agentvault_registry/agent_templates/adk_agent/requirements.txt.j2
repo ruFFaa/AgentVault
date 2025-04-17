@@ -1,0 +1,24 @@
+# Core FastAPI and Server Dependencies
+fastapi>=0.111,<0.112
+uvicorn[standard]>=0.29,<0.35
+python-dotenv>=1.0.0,<2.0.0
+
+# AgentVault SDK (Version requirement set during generation)
+agentvault-server-sdk{{ sdk_version_req }}
+
+# HTTP Client (Used by SDK and potentially by the agent)
+httpx>=0.27,<0.28
+
+# --- Google ADK and Generative AI Libraries ---
+# Required for the core ADK agent functionality
+google-cloud-aiplatform[reasoning_engines]>=1.40.0,<2.0.0
+google-generativeai>=0.7.0,<0.8.0
+
+# --- Optional Tool Dependencies ---
+{% if 'google_search' in adk_tools %}
+# Required for the Google Search tool
+google-api-python-client>=2.0.0,<3.0.0
+{% endif %}
+
+# Add any other specific Python dependencies your agent requires below
+# e.g., numpy, pandas

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - AgentVault Registry</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>AgentVault Registry</h1>
+        <nav>
+            <a href="/ui">Public Registry</a>
+            <a href="/ui/register">Register</a>
+            <a href="/docs" target="_blank" rel="noopener">API Docs</a>
+        </nav>
+    </header>
+
+    <main>
+        <section id="login-section" class="auth-form-section">
+            <h2>Developer Login</h2>
+
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="login-email">Email:</label>
+                    <input type="email" id="login-email" name="username" required>
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Password:</label>
+                    <input type="password" id="login-password" name="password" required>
+                </div>
+
+                <div id="login-message" class="message-area"></div>
+
+                <button type="submit" id="login-button">Login</button>
+            </form>
+
+            <p style="margin-top: 15px; text-align: center; font-size: 0.9em;">
+                <a href="/ui/forgot-password">Forgot Password?</a> {# Link to future recovery flow #}
+            </p>
+            <p style="margin-top: 10px; text-align: center;">
+                Don't have an account? <a href="/ui/register">Register here</a>.
+            </p>
+
+        </section>
+    </main>
+
+    <footer>
+        <p>AgentVault - Open Source Agent Discovery & Interoperability</p>
+    </footer>
+
+    <script src="/static/login.js"></script>
+</body>
+</html>

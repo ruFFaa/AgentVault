@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "1.0",
+  "humanReadableId": "{{ agent_id }}",
+  "agentVersion": "0.1.0", {# Initial generated version #}
+  "name": "{{ agent_name }}",
+  "description": "{{ agent_description }}",
+  "url": "http://localhost:{{ agent_port }}/a2a", {# IMPORTANT: User must update this URL for deployment #}
+  "provider": {
+    "name": "{{ author_name }}"
+    {# Add optional provider URL or contact if desired #}
+    {# "url": "https://your-website.com", #}
+    {# "support_contact": "support@your-email.com" #}
+  },
+  "capabilities": {
+    "a2aVersion": "1.0", {# Assuming compatibility with this profile version #}
+    "supportedMessageParts": ["text"] {# This wrapper handles basic text #}
+    {# Add other capabilities like TEE details if applicable #}
+  },
+  "authSchemes": [
+    {% if wrapper_auth_type == 'none' -%}
+    {
+      "scheme": "none",
+      "description": "No authentication required for this agent."
+    }
+    {% elif wrapper_auth_type == 'apiKey' -%}
+    {
+      "scheme": "apiKey",
+      "description": "Requires an API key provided in the X-Api-Key header.",
+      {# Use the service ID specified during generation #}
+      "service_identifier": "{{ wrapper_service_id }}"
+    }
+    {% else -%}
+    {# Default or fallback case - should ideally not happen with validation #}
+    {
+      "scheme": "none",
+      "description": "Defaulting to no authentication (Configuration Error?)."
+    }
+    {% endif -%}
+  ],
+  "skills": [
+    {
+      "id": "chat",
+      "name": "LLM Chat Wrapper",
+      "description": "Accepts a text prompt and returns a response from the configured backend LLM ({{ llm_backend_type }})."
+      {# Add input/output schemas if desired #}
+    }
+  ],
+  "tags": ["agentvault", "generated", "wrapper", "{{ llm_backend_type }}"] {# Add more relevant tags #}
+  {# Add optional fields like privacyPolicyUrl, termsOfServiceUrl, iconUrl #}
+}

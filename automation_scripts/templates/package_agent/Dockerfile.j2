@@ -1,0 +1,70 @@
+# Stage 1: Build environment with dependencies
+# Use the specified Python version and suffix (e.g., 3.11-slim-bookworm)
+FROM python:{{ python_version }}-{{ base_image_suffix }} AS builder
+
+# Set working directory for the builder stage
+WORKDIR /opt/builder
+
+# Prevent writing pyc files
+ENV PYTHONDONTWRITEBYTECODE 1
+# Keep python output unbuffered
+ENV PYTHONUNBUFFERED 1
+
+# Install build tools if needed (uncomment if your dependencies require compilation)
+# RUN apt-get update && apt-get install -y --no-install-recommends build-essential gcc
+
+# Copy requirements first to leverage Docker cache
+COPY requirements.txt ./
+
+# Install dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Stage 2: Final application image
+FROM python:{{ python_version }}-{{ base_image_suffix }} AS final
+
+# Set working directory for the final image
+WORKDIR /app
+
+# Prevent writing pyc files
+ENV PYTHONDONTWRITEBYTECODE 1
+# Keep python output unbuffered
+ENV PYTHONUNBUFFERED 1
+
+# Create a non-root user and group for security
+RUN groupadd -r appgroup && useradd --no-log-init -r -g appgroup appuser
+
+# Copy installed dependencies from the builder stage
+# Ensure the python major.minor version matches the base image
+COPY --from=builder /usr/local/lib/python{{ python_version[:3] }}/site-packages /usr/local/lib/python{{ python_version[:3] }}/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# --- MODIFIED: Copy entire src directory ---
+COPY ./src /app/src
+# --- END MODIFIED ---
+COPY agent-card.json /app/agent-card.json
+# --- REMOVED: Do not copy .env.example into the final image ---
+# COPY .env.example /app/.env.example
+# --- END REMOVED ---
+# Add any other files needed at runtime here (e.g., ML models, static assets)
+# COPY ./assets /app/assets
+
+# Change ownership to non-root user
+# --- MODIFIED: Chown both src and other files ---
+RUN chown -R appuser:appgroup /app/src /app/agent-card.json
+# --- END MODIFIED ---
+
+# Switch to the non-root user
+USER appuser
+
+# Expose the application port specified during generation
+EXPOSE {{ agent_port }}
+
+# --- ADDED: Set PYTHONPATH ---
+ENV PYTHONPATH=/app/src
+# --- END ADDED ---
+
+# Command to run the application using Uvicorn
+# --- MODIFIED: Use src. prefix again ---
+CMD ["uvicorn", "src.{{ package_name }}.main:{{ fastapi_app_variable }}", "--host", "0.0.0.0", "--port", "{{ agent_port }}"]
+# --- END MODIFIED ---

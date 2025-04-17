@@ -112,7 +112,9 @@ class AgentVaultClient:
             if webhook_url: request_params_dict['webhookUrl'] = webhook_url; logger.debug(f"Adding webhookUrl='{webhook_url}' to initiate task params.")
             request_payload = {"jsonrpc": "2.0", "method": "tasks/send", "params": request_params_dict, "id": request_id}
             logger.debug(f"Initiate task request payload (id: {request_id})")
+            # --- Use _make_request for non-streaming POST ---
             response_data = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload, stream=False)
+            # --- End Use ---
             try: result_obj = TaskSendResult.model_validate(response_data)
             except pydantic.ValidationError as e: raise A2AMessageError(f"Failed to validate task initiation result structure: {e}") from e
             task_id = result_obj.id
@@ -144,7 +146,9 @@ class AgentVaultClient:
             request_id = f"req-send-{uuid.uuid4()}"; request_params_dict = task_send_params.model_dump(mode='json', exclude_none=True, by_alias=True)
             request_payload = {"jsonrpc": "2.0", "method": "tasks/send", "params": request_params_dict, "id": request_id}
             logger.debug(f"Send message request payload (id: {request_id})")
+            # --- Use _make_request for non-streaming POST ---
             response_data = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload, stream=False)
+            # --- End Use ---
             try: TaskSendResult.model_validate(response_data)
             except pydantic.ValidationError as e: raise A2AMessageError(f"Failed to validate send message result structure: {e}") from e
             logger.info(f"Message successfully sent to task {task_id} on agent {agent_card.human_readable_id}.")
@@ -164,7 +168,9 @@ class AgentVaultClient:
             request_id = f"req-get-{uuid.uuid4()}"; request_params_dict = task_get_params.model_dump(mode='json', by_alias=True)
             request_payload = {"jsonrpc": "2.0", "method": "tasks/get", "params": request_params_dict, "id": request_id}
             logger.debug(f"Get task status request payload (id: {request_id})")
+            # --- Use _make_request for non-streaming POST ---
             response_data = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload, stream=False)
+            # --- End Use ---
             try:
                 task_object = GetTaskResult.model_validate(response_data)
                 logger.info(f"Successfully retrieved status for task {task_id}. State: {task_object.state}")
@@ -186,7 +192,9 @@ class AgentVaultClient:
             request_id = f"req-cancel-{uuid.uuid4()}"; request_params_dict = task_cancel_params.model_dump(mode='json', by_alias=True)
             request_payload = {"jsonrpc": "2.0", "method": "tasks/cancel", "params": request_params_dict, "id": request_id}
             logger.debug(f"Terminate task request payload (id: {request_id})")
+            # --- Use _make_request for non-streaming POST ---
             response_data = await self._make_request('POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload, stream=False)
+            # --- End Use ---
             try:
                 result_obj = TaskCancelResult.model_validate(response_data)
                 if not result_obj.success: logger.warning(f"Agent acknowledged termination request for task {task_id} but indicated failure (success=false). Message: {result_obj.message}")
@@ -206,50 +214,69 @@ class AgentVaultClient:
         if not task_id or not isinstance(task_id, str):
              raise ValueError("Invalid task_id provided for receive_messages.")
 
+        # --- MODIFIED: Use httpx.stream directly and pass response to processor ---
+        url_str = str(agent_card.url)
+        request_id = f"req-sub-{uuid.uuid4()}"
+        request_payload = {
+            "jsonrpc": "2.0",
+            "method": "tasks/sendSubscribe",
+            "params": {"id": task_id},
+            "id": request_id
+        }
+        log_context = f"POST {url_str} (SSE Stream)"
+
         try:
             auth_headers = await self._get_auth_headers(agent_card, key_manager)
             auth_headers["Accept"] = "text/event-stream"
-            # Ensure connection stays open and disable response size limits if needed
             auth_headers["Connection"] = "keep-alive"
-
-            request_id = f"req-sub-{uuid.uuid4()}"
-            request_payload = {
-                "jsonrpc": "2.0",
-                "method": "tasks/sendSubscribe", # Assuming this is the correct method
-                "params": {"id": task_id},
-                "id": request_id
-            }
             logger.debug(f"Subscribe request payload (id: {request_id})")
 
-            # Use _make_request with stream=True
-            async for event_dict in await self._make_request(
-                'POST', str(agent_card.url), headers=auth_headers, json_payload=request_payload, stream=True
-            ):
-                event_type = event_dict.get("event_type")
-                event_data = event_dict.get("data")
+            # Initiate the streaming request
+            async with self._http_client.stream(
+                'POST', url_str, headers=auth_headers, json=request_payload, timeout=None # Use longer/no timeout for streams
+            ) as response:
+                # Check initial response status *before* processing stream
+                if response.status_code // 100 != 2:
+                    await response.aread() # Consume body before raising
+                    logger.error(f"HTTP error on SSE stream request {log_context}: {response.status_code}")
+                    raise httpx.HTTPStatusError(f"Server returned {response.status_code}", request=response.request, response=response)
 
-                if not event_type or not isinstance(event_data, dict):
-                    logger.warning(f"Skipping malformed event from SSE stream: {event_dict}")
-                    continue
+                logger.info(f"SSE stream connection successful ({response.status_code}) for {log_context}. Reading lines...")
 
-                if event_type == "error":
-                    err_msg = event_data.get('message', 'Unknown SSE error from agent')
-                    logger.error(f"Received SSE error event from agent for task {task_id}: {err_msg}")
-                    raise A2ARemoteAgentError(message=f"SSE error event received: {err_msg}", response_body=event_data)
+                # Process the stream line by line using the helper
+                async for event_dict in self._process_sse_stream_lines(response, log_context):
+                    event_type = event_dict.get("event_type")
+                    event_data = event_dict.get("data")
 
-                event_model = SSE_EVENT_TYPE_MAP.get(event_type)
-                if not event_model:
-                    logger.warning(f"Received unknown SSE event type: '{event_type}'. Data: {event_data}")
-                    continue
+                    # (Validation logic remains the same)
+                    if not event_type or not isinstance(event_data, dict):
+                        logger.warning(f"Skipping malformed event from SSE stream: {event_dict}")
+                        continue
 
-                try:
-                    validated_event = event_model.model_validate(event_data)
-                    logger.debug(f"Yielding validated event: {validated_event!r}")
-                    yield validated_event
-                except pydantic.ValidationError as e:
-                    logger.error(f"Failed to validate SSE event type '{event_type}': {e}. Data: {event_data}")
-                    continue
+                    if event_type == "error":
+                        err_msg = event_data.get('message', 'Unknown SSE error from agent')
+                        logger.error(f"Received SSE error event from agent for task {task_id}: {err_msg}")
+                        raise A2ARemoteAgentError(message=f"SSE error event received: {err_msg}", response_body=event_data)
 
+                    event_model = SSE_EVENT_TYPE_MAP.get(event_type)
+                    if not event_model:
+                        logger.warning(f"Received unknown SSE event type: '{event_type}'. Data: {event_data}")
+                        continue
+
+                    try:
+                        validated_event = event_model.model_validate(event_data)
+                        logger.debug(f"Yielding validated event: {validated_event!r}")
+                        yield validated_event
+                    except pydantic.ValidationError as e:
+                        logger.error(f"Failed to validate SSE event type '{event_type}': {e}. Data: {event_data}")
+                        continue
+
+        # --- Exception handling remains largely the same ---
+        except httpx.HTTPStatusError as e: # Catch errors from initial stream connection
+            logger.error(f"HTTP error establishing SSE stream {log_context}: {e.response.status_code}")
+            try: error_body = e.response.json()
+            except json.JSONDecodeError: error_body = e.response.text
+            raise A2ARemoteAgentError(message=f"HTTP error {e.response.status_code} for {log_context}: {e.response.text}", status_code=e.response.status_code, response_body=error_body) from e
         except (A2AAuthenticationError, A2AConnectionError, A2ARemoteAgentError, A2AMessageError, A2ATimeoutError) as e:
             logger.error(f"A2A error during event subscription or processing for task {task_id}: {type(e).__name__}: {e}")
             raise
@@ -262,6 +289,7 @@ class AgentVaultClient:
             else: raise A2AError(f"An unexpected error occurred during event subscription: {e}") from e
         finally:
              logger.debug(f"Finished receiving messages for task {task_id}.")
+        # --- END MODIFIED ---
 
 
     # --- Private Helper Methods ---
@@ -322,115 +350,104 @@ class AgentVaultClient:
         self, method: str, url: str, headers: Optional[Dict[str, str]] = None,
         json_payload: Optional[Dict[str, Any]] = None, stream: bool = False
     ) -> Union[Dict[str, Any], AsyncGenerator[Dict[str, Any], None]]: # Return type hint changed
-        """ Internal helper to make HTTP requests or process SSE streams. """
+        """ Internal helper to make HTTP requests. Stream=True is handled by receive_messages now."""
+        # --- MODIFIED: Removed stream handling from this method ---
+        if stream:
+            # This method should not be called directly with stream=True anymore
+            # The logic is now in receive_messages
+            raise NotImplementedError("_make_request should not be called with stream=True")
+
         url_str = str(url)
         request_kwargs = {"method": method, "url": url_str, "headers": headers or {}, "json": json_payload}
         log_context = f"{method} {url_str}"
 
-        if stream:
-             logger.debug(f"Calling _process_sse_stream_lines for: {log_context}")
-             # This now returns the generator directly
-             return self._process_sse_stream_lines(request_kwargs)
-        else:
-            # Non-stream logic (unchanged)
-            logger.debug(f"Making non-stream request: {log_context}");
-            if json_payload: logger.debug(f"Request payload keys: {list(json_payload.keys())}")
+        logger.debug(f"Making non-stream request: {log_context}");
+        if json_payload: logger.debug(f"Request payload keys: {list(json_payload.keys())}")
+        try:
+            response = await self._http_client.request(**request_kwargs); response.raise_for_status()
             try:
-                response = await self._http_client.request(**request_kwargs); response.raise_for_status()
-                try:
-                    response_data = response.json()
-                    if not isinstance(response_data, dict): raise A2AMessageError(f"Invalid response format from {url_str}: Expected dictionary, got {type(response_data)}. Body: {response.text[:200]}...")
-                    if "error" in response_data:
-                        error_obj = response_data["error"]
-                        if isinstance(error_obj, dict): err_code = error_obj.get("code", -1); err_msg = error_obj.get("message", "Unknown remote agent error"); err_details = error_obj.get("data"); logger.error(f"Agent returned JSON-RPC error for {log_context}: code={err_code}, msg='{err_msg}', data={err_details}"); raise A2ARemoteAgentError(message=err_msg, status_code=err_code, response_body=err_details)
-                        else: raise A2AMessageError(f"Invalid JSON-RPC error format from {url_str}: 'error' field is not a dictionary. Body: {response.text[:200]}...")
-                    elif "result" in response_data:
-                        log_resp_str = f"size={len(response.content)} bytes, keys={list(response_data.get('result').keys())}" if isinstance(response_data.get('result'), dict) else f"size={len(response.content)} bytes"; logger.debug(f"Request successful ({response.status_code}) for {log_context}. Response: {log_resp_str}"); return response_data["result"]
-                    else: raise A2AMessageError(f"Invalid JSON-RPC response from {url_str}: Missing 'result' or 'error' key. Body: {response.text[:200]}...")
-                except json.JSONDecodeError as e: logger.error(f"Failed to decode JSON response from {log_context}. Status: {response.status_code}. Response text: {response.text[:200]}..."); raise A2AMessageError(f"Failed to decode JSON response from {url_str}. Status: {response.status_code}. Body: {response.text[:200]}...") from e
-            except httpx.TimeoutException as e: logger.error(f"Request timeout for {log_context}: {e}"); raise A2ATimeoutError(f"Request timed out for {url_str}: {e}") from e
-            except httpx.ConnectError as e: logger.error(f"Connection error for {log_context}: {e}"); raise A2AConnectionError(f"Connection failed for {url_str}: {e}") from e
-            except httpx.HTTPStatusError as e: logger.error(f"HTTP error on request {log_context}: {e.response.status_code}"); raise A2ARemoteAgentError(message=f"HTTP error {e.response.status_code} for {url_str}: {e.response.text}", status_code=e.response.status_code, response_body=e.response.text) from e
-            except httpx.RequestError as e: logger.error(f"HTTP request error for {log_context}: {e}"); raise A2AConnectionError(f"HTTP request failed for {url_str}: {e}") from e
-            except (A2AMessageError, A2AAuthenticationError, A2ARemoteAgentError) as e: logger.error(f"A2A error during request processing for {log_context}: {e}"); raise
-            except Exception as e: logger.exception(f"Unexpected error during request {log_context}: {e}"); raise A2AError(f"An unexpected error occurred during the request for {url_str}: {e}") from e
+                response_data = response.json()
+                if not isinstance(response_data, dict): raise A2AMessageError(f"Invalid response format from {url_str}: Expected dictionary, got {type(response_data)}. Body: {response.text[:200]}...")
+                if "error" in response_data:
+                    error_obj = response_data["error"]
+                    if isinstance(error_obj, dict): err_code = error_obj.get("code", -1); err_msg = error_obj.get("message", "Unknown remote agent error"); err_details = error_obj.get("data"); logger.error(f"Agent returned JSON-RPC error for {log_context}: code={err_code}, msg='{err_msg}', data={err_details}"); raise A2ARemoteAgentError(message=err_msg, status_code=err_code, response_body=err_details)
+                    else: raise A2AMessageError(f"Invalid JSON-RPC error format from {url_str}: 'error' field is not a dictionary. Body: {response.text[:200]}...")
+                elif "result" in response_data:
+                    log_resp_str = f"size={len(response.content)} bytes, keys={list(response_data.get('result').keys())}" if isinstance(response_data.get('result'), dict) else f"size={len(response.content)} bytes"; logger.debug(f"Request successful ({response.status_code}) for {log_context}. Response: {log_resp_str}"); return response_data["result"]
+                else: raise A2AMessageError(f"Invalid JSON-RPC response from {url_str}: Missing 'result' or 'error' key. Body: {response.text[:200]}...")
+            except json.JSONDecodeError as e: logger.error(f"Failed to decode JSON response from {log_context}. Status: {response.status_code}. Response text: {response.text[:200]}..."); raise A2AMessageError(f"Failed to decode JSON response from {url_str}. Status: {response.status_code}. Body: {response.text[:200]}...") from e
+        except httpx.TimeoutException as e: logger.error(f"Request timeout for {log_context}: {e}"); raise A2ATimeoutError(f"Request timed out for {url_str}: {e}") from e
+        except httpx.ConnectError as e: logger.error(f"Connection error for {log_context}: {e}"); raise A2AConnectionError(f"Connection failed for {url_str}: {e}") from e
+        except httpx.HTTPStatusError as e: logger.error(f"HTTP error on request {log_context}: {e.response.status_code}"); raise A2ARemoteAgentError(message=f"HTTP error {e.response.status_code} for {url_str}: {e.response.text}", status_code=e.response.status_code, response_body=e.response.text) from e
+        except httpx.RequestError as e: logger.error(f"HTTP request error for {log_context}: {e}"); raise A2AConnectionError(f"HTTP request failed for {url_str}: {e}") from e
+        except (A2AMessageError, A2AAuthenticationError, A2ARemoteAgentError) as e: logger.error(f"A2A error during request processing for {log_context}: {e}"); raise
+        except Exception as e: logger.exception(f"Unexpected error during request {log_context}: {e}"); raise A2AError(f"An unexpected error occurred during the request for {url_str}: {e}") from e
+        # --- END MODIFIED ---
 
-    # --- MODIFIED: Line-by-line SSE processing ---
-    async def _process_sse_stream_lines(self, request_kwargs: Dict[str, Any]) -> AsyncGenerator[Dict[str, Any], None]:
-        """ Processes a Server-Sent Event line stream from an HTTP request. """
+    # --- MODIFIED: SSE processing moved here ---
+    async def _process_sse_stream_lines(self, response: httpx.Response, log_context: str) -> AsyncGenerator[Dict[str, Any], None]:
+        """ Processes a Server-Sent Event line stream from an HTTP response. """
         current_event_type = None
         data_lines: List[str] = []
         processed_event_count = 0
-        log_context = f"{request_kwargs.get('method')} {request_kwargs.get('url')} (SSE Stream)"
-        logger.info(f"Starting SSE stream processing for: {log_context}")
+        logger.info(f"Starting SSE stream line processing for: {log_context}")
 
         try:
-            # --- MODIFIED: Use httpx stream context manager ---
-            async with self._http_client.stream(**request_kwargs) as response:
-                # Check initial response status
-                if response.status_code // 100 != 2:
-                    await response.aread() # Consume body before raising
-                    logger.error(f"HTTP error on SSE stream request {log_context}: {response.status_code}")
-                    raise httpx.HTTPStatusError(f"Server returned {response.status_code}", request=response.request, response=response)
+            async for line in response.aiter_lines():
+                logger.debug(f"SSE Line Received: {line!r}")
 
-                logger.info(f"SSE stream connection successful ({response.status_code}) for {log_context}. Reading lines...")
+                if not line: # Empty line signifies end of an event
+                    if data_lines:
+                        event_type = current_event_type or "message"
+                        full_data_str = '\n'.join(data_lines)
+                        logger.debug(f"Dispatching SSE event: type='{event_type}', data_len={len(full_data_str)}")
+                        try:
+                            yield {"event_type": event_type, "data": json.loads(full_data_str)}
+                            processed_event_count += 1
+                        except json.JSONDecodeError as e: logger.error(f"Failed to decode JSON data for SSE event type '{event_type}': {e}. Data: {full_data_str[:200]}...")
 
-                # Iterate over lines
-                async for line in response.aiter_lines():
-                    # --- ADDED: Log every line received ---
-                    logger.debug(f"SSE Line Received: {line!r}")
-                    # --- END ADDED ---
+                    data_lines = []
+                    current_event_type = None
+                    continue
 
-                    if not line: # Empty line signifies end of an event
-                        if data_lines:
-                            event_type = current_event_type or "message"
-                            full_data_str = '\n'.join(data_lines)
-                            logger.debug(f"Dispatching SSE event: type='{event_type}', data_len={len(full_data_str)}")
-                            try:
-                                yield {"event_type": event_type, "data": json.loads(full_data_str)}
-                                processed_event_count += 1
-                            except json.JSONDecodeError as e: logger.error(f"Failed to decode JSON data for SSE event type '{event_type}': {e}. Data: {full_data_str[:200]}...")
+                if line.startswith(':'):
+                    logger.debug("Ignoring SSE comment line.")
+                    continue
 
-                        data_lines = []
-                        current_event_type = None
-                        continue
+                try:
+                    colon_pos = line.find(':')
+                    if colon_pos == -1: logger.warning(f"Ignoring malformed SSE line (no colon): {line!r}"); continue
+                    field = line[:colon_pos].strip()
+                    value_start = colon_pos + 1
+                    if value_start < len(line) and line[value_start] == ' ': value_start += 1
+                    value = line[value_start:]
 
-                    if line.startswith(':'):
-                        logger.debug("Ignoring SSE comment line.")
-                        continue
-
-                    try:
-                        colon_pos = line.find(':')
-                        if colon_pos == -1: logger.warning(f"Ignoring malformed SSE line (no colon): {line!r}"); continue
-                        field = line[:colon_pos].strip()
-                        value_start = colon_pos + 1
-                        if value_start < len(line) and line[value_start] == ' ': value_start += 1
-                        value = line[value_start:]
-
-                        if field == "event": current_event_type = value
-                        elif field == "data": data_lines.append(value)
-                        else: logger.debug(f"Ignoring unknown SSE field: '{field}'")
-                    except Exception as line_err: logger.warning(f"Error processing SSE line '{line!r}': {line_err}")
-            # --- END MODIFIED ---
+                    if field == "event": current_event_type = value
+                    elif field == "data": data_lines.append(value)
+                    else: logger.debug(f"Ignoring unknown SSE field: '{field}'")
+                except Exception as line_err: logger.warning(f"Error processing SSE line '{line!r}': {line_err}")
 
             logger.debug("Finished iterating through SSE lines.")
 
-            if data_lines: # Check for buffered data after loop finishes (shouldn't normally happen with proper SSE)
+            if data_lines: # Check for buffered data after loop finishes
                  logger.warning(f"Stream ended with non-empty data buffer, attempting dispatch: {data_lines}")
                  event_type = current_event_type or "message"; full_data_str = '\n'.join(data_lines)
                  try: yield {"event_type": event_type, "data": json.loads(full_data_str)}; processed_event_count += 1
                  except json.JSONDecodeError as e: logger.error(f"Failed to decode JSON data for final SSE event type '{event_type}': {e}. Data: {full_data_str[:200]}...")
 
-        except httpx.HTTPStatusError as e: # Catch errors from initial response check
-            logger.error(f"HTTP error establishing SSE stream {log_context}: {e.response.status_code}")
-            try: error_body = e.response.json()
-            except json.JSONDecodeError: error_body = e.response.text
-            raise A2ARemoteAgentError(message=f"HTTP error {e.response.status_code} for {log_context}: {e.response.text}", status_code=e.response.status_code, response_body=error_body) from e
-        except httpx.TimeoutException as e: logger.error(f"Request timeout for {log_context}: {e}"); raise A2ATimeoutError(f"Request timed out for {log_context}: {e}") from e
-        except httpx.ConnectError as e: logger.error(f"Connection error for {log_context}: {e}"); raise A2AConnectionError(f"Connection failed for {log_context}: {e}") from e
-        except httpx.RequestError as e: logger.error(f"HTTP request error for {log_context}: {e}"); raise A2AConnectionError(f"HTTP request failed for {log_context}: {e}") from e
+        except httpx.RequestError as e: # Catch errors during stream reading
+            logger.error(f"Network error during SSE stream reading {log_context}: {e}")
+            raise A2AConnectionError(f"Network error during SSE stream: {e}") from e
         except Exception as e:
-            logger.error(f"Unexpected error processing SSE stream {log_context}: {e}", exc_info=True)
+            logger.error(f"Unexpected error processing SSE stream lines {log_context}: {e}", exc_info=True)
+            # Yield an error event if possible
+            try:
+                error_data = {"error": "stream_processing_error", "message": f"Error processing stream: {type(e).__name__}"}
+                yield {"event_type": "error", "data": error_data}
+                processed_event_count += 1
+            except Exception as format_err:
+                 logger.error(f"Failed to yield SSE processing error event: {format_err}")
+            # Re-raise the original error to signal failure to the caller
             if isinstance(e, A2AError): raise e
             else: raise A2AError(f"An unexpected error occurred during SSE stream processing: {e}") from e
         finally:

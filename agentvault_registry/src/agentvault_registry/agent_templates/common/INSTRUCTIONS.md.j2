@@ -1,0 +1,84 @@
+# Instructions for {{ agent_name }}
+
+Congratulations! You've successfully generated the boilerplate code for your AgentVault agent: `{{ agent_name }}`.
+
+This package contains:
+
+*   `src/{{ package_name }}/`: The Python source code for your agent.
+    *   `main.py`: FastAPI application setup.
+    *   `agent.py`: Core agent logic (inherits from `BaseA2AAgent` or wraps ADK).
+    *   {% if agent_builder_type == 'adk_agent' %}`tools.py`: Placeholder for ADK Function Tools.{% endif %}
+*   `tests/`: Basic pytest structure (add your agent-specific tests here!).
+*   `pyproject.toml`: Project metadata and dependencies managed by Poetry.
+*   `requirements.txt`: Pinned dependencies for Docker build (generated from `pyproject.toml`).
+*   `agent-card.json`: Metadata describing your agent for discovery.
+*   `Dockerfile`: For building a container image of your agent.
+*   `.gitignore`: Standard ignore file.
+*   `.env.example`: **IMPORTANT:** Example environment variables needed to run your agent.
+*   `INSTRUCTIONS.md`: This file.
+
+## Next Steps:
+
+**1. Configure Environment Variables:**
+
+*   **Crucial Step:** Your agent needs credentials or configuration to connect to its backend LLM ({{ llm_backend_type }}) and potentially for its own authentication.
+*   Copy the `.env.example` file to a new file named `.env` in the same directory:
+    ```bash
+    cp .env.example .env
+    ```
+*   **Edit the `.env` file:** Open the new `.env` file in a text editor.
+*   **Fill in the required values:** Look for the section corresponding to `{{ llm_backend_type }}` and replace the placeholder values (like `"sk-..."` or `"YOUR_GOOGLE_API_KEY"`) with your **actual API keys or configuration**.
+{% if wrapper_auth_type == 'apiKey' %}*   **Set Wrapper API Key:** Since you chose `apiKey` authentication for this agent, you also need to set `WRAPPER_API_KEY` in the `.env` file. Generate a strong, unique key (e.g., `openssl rand -hex 32`) and prefix it with `avreg_`. This is the key clients will need to use to talk to *your* agent.{% endif %}
+*   **Save the `.env` file.** **NEVER commit your `.env` file (containing secrets) to Git.** The included `.gitignore` should prevent this.
+
+**2. Build the Docker Image:**
+
+*   Make sure you have [Docker](https://docs.docker.com/get-docker/) installed and running.
+*   Open your terminal in this directory (where the `Dockerfile` is).
+*   Run the build command (replace `{{ agent_name|lower|replace(' ', '-') }}` with your preferred image tag):
+    ```bash
+    docker build -t {{ agent_name|lower|replace(' ', '-') }}:latest .
+    ```
+
+**3. Run the Agent Container:**
+
+*   Run the container, making sure to pass the environment variables from your `.env` file and map the correct port:
+    ```bash
+    docker run -d --env-file .env -p {{ agent_port }}:{{ agent_port }} --name {{ agent_name|lower|replace(' ', '-') }} {{ agent_name|lower|replace(' ', '-') }}:latest
+    ```
+    *   `-d`: Run in detached mode (background).
+    *   `--env-file .env`: Securely passes the variables from your `.env` file to the container.
+    *   `-p {{ agent_port }}:{{ agent_port }}`: Maps the port inside the container to the same port on your host machine.
+    *   `--name ...`: Assigns a convenient name to the running container.
+
+**4. Verify the Agent is Running:**
+
+*   Check the container logs: `docker logs {{ agent_name|lower|replace(' ', '-') }}`
+*   Access the root endpoint in your browser or with `curl`: `http://localhost:{{ agent_port }}/`
+*   Access the agent card: `http://localhost:{{ agent_port }}/agent-card.json`
+
+**5. Interact with your Agent:**
+
+*   Use the AgentVault CLI (`agentvault_cli run`) or the AgentVault Client Library (`agentvault`) to interact with your agent's A2A endpoint:
+    *   **A2A Endpoint URL:** `http://localhost:{{ agent_port }}/a2a`
+    *   **Agent Reference:** You can use the URL `http://localhost:{{ agent_port }}/agent-card.json` or the local file path `agent-card.json`.
+    *   **Example CLI command:**
+        ```bash
+        agentvault run --agent http://localhost:{{ agent_port }}/agent-card.json --input "Your prompt here"
+        ```
+{% if wrapper_auth_type == 'apiKey' %}*   **Authentication:** Remember, if you configured `apiKey` authentication for this agent, your *client* (e.g., `agentvault_cli`) will need the `WRAPPER_API_KEY` you set in the `.env` file configured in its own `KeyManager` (using `agentvault config set {{ wrapper_service_id }} --keyring`). The `--key-service {{ wrapper_service_id }}` flag might be needed on the `run` command.{% endif %}
+
+**6. (Optional) Publish to Registry:**
+
+*   If you want others to discover your agent, you can publish its `agent-card.json` to an AgentVault Registry.
+*   **Update the `url` field** in `agent-card.json` to point to the **publicly accessible URL** where your agent will be deployed (e.g., `https://your-deployed-agent.com/a2a`), not `localhost`.
+*   Use the AgentVault Developer Portal UI (if available on the registry) or the registry's API (requires a Developer API Key) to submit your updated `agent-card.json`.
+
+**7. Develop Further:**
+
+*   Modify the agent logic in `src/{{ package_name }}/agent.py`.
+*   Add tests in `tests/`.
+*   Update dependencies in `pyproject.toml` and regenerate `requirements.txt` (`poetry lock && poetry export -f requirements.txt --output requirements.txt --without-hashes`).
+*   Rebuild your Docker image after making changes.
+
+Happy agent building!

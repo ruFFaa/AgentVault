@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - AgentVault Registry</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <!-- Optional: Link to a dedicated auth.css if needed -->
+    <!-- <link rel="stylesheet" href="/static/auth.css"> -->
+</head>
+<body>
+    <header>
+        <h1>AgentVault Registry</h1>
+        <nav>
+            <a href="/ui">Public Registry</a>
+            <a href="/ui/login">Login</a>
+            <a href="/docs" target="_blank" rel="noopener">API Docs</a>
+        </nav>
+    </header>
+
+    <main>
+        <section id="register-section" class="auth-form-section">
+            <h2>Developer Registration</h2>
+            <p>Create an account to manage your agents in the registry.</p>
+
+            <form id="register-form">
+                <div class="form-group">
+                    <label for="register-name">Developer Name:</label>
+                    <input type="text" id="register-name" name="name" required minlength="3" maxlength="100">
+                </div>
+                <div class="form-group">
+                    <label for="register-email">Email:</label>
+                    <input type="email" id="register-email" name="email" required>
+                </div>
+                <div class="form-group">
+                    <label for="register-password">Password:</label>
+                    <input type="password" id="register-password" name="password" required minlength="8">
+                    <small>Minimum 8 characters.</small>
+                </div>
+                <div class="form-group">
+                    <label for="register-confirm-password">Confirm Password:</label>
+                    <input type="password" id="register-confirm-password" name="confirm_password" required minlength="8">
+                </div>
+
+                <div id="register-message" class="message-area"></div>
+
+                <button type="submit" id="register-button">Register</button>
+            </form>
+
+            <div id="recovery-keys-display" style="display: none; margin-top: 20px; padding: 15px; border: 1px solid #ffc107; background-color: #fff3cd; border-radius: 5px;">
+                <h4>IMPORTANT: Recovery Keys</h4>
+                <p><strong>Save these keys somewhere safe and offline!</strong> They are the ONLY way to recover your account if you lose your password. They will **NOT** be shown again.</p>
+                <ul id="recovery-keys-list" style="margin-top: 10px; list-style: disc; padding-left: 20px;">
+                    <!-- Keys will be added here by JS -->
+                </ul>
+            </div>
+
+            <p style="margin-top: 20px;">Already have an account? <a href="/ui/login">Login here</a>.</p>
+
+        </section>
+    </main>
+
+    <footer>
+        <p>AgentVault - Open Source Agent Discovery & Interoperability</p>
+    </footer>
+
+    <script src="/static/register.js"></script>
+</body>
+</html>

@@ -1,0 +1,295 @@
+import logging
+import asyncio
+import datetime
+import uuid
+import os
+from typing import Optional, AsyncGenerator, Dict, Any, List
+
+# --- ADK Imports ---
+try:
+    from google.ai import generativelanguage as glm
+    from google.adk import LlmAgent, FunctionTool, Runner, Event
+    from google.adk.runtime import SessionService, InMemorySessionService
+    import google.generativeai as genai
+    _ADK_AVAILABLE = True
+except ImportError:
+    logging.critical("Failed to import Google ADK or GenerativeAI libraries. Install with 'pip install google-cloud-aiplatform[reasoning_engines]' and 'pip install google-generativeai'")
+    # Define placeholders if needed for basic structure loading
+    class LlmAgent: pass
+    class FunctionTool: pass
+    class Runner: pass
+    class Event: pass
+    class SessionService: pass
+    class InMemorySessionService: pass
+    _ADK_AVAILABLE = False
+
+# --- AgentVault SDK Imports ---
+from agentvault_server_sdk import BaseA2AAgent
+from agentvault_server_sdk.state import BaseTaskStore, TaskContext
+from agentvault_server_sdk.exceptions import TaskNotFoundError, AgentProcessingError, ConfigurationError
+
+# --- AgentVault Core Model Imports ---
+from agentvault.models import (
+    Message, Task, TaskState, TextPart, A2AEvent, Artifact,
+    TaskStatusUpdateEvent, TaskMessageEvent, TaskArtifactUpdateEvent
+)
+
+# --- Tool Function Imports (from generated tools.py) ---
+try:
+    from .tools import {% if 'get_current_time' in adk_tools %}get_current_time, {% endif %}{% if 'google_search' in adk_tools %}google_search{% endif %}
+    _TOOLS_AVAILABLE = True
+except ImportError:
+    logging.warning("Could not import functions from generated tools.py. Tool functionality will be missing.")
+    # Define dummy functions if needed
+    {% if 'get_current_time' in adk_tools %}def get_current_time(): return "Error: Tool not loaded"{% endif %}
+    {% if 'google_search' in adk_tools %}def google_search(query: str): return "Error: Tool not loaded"{% endif %}
+    _TOOLS_AVAILABLE = False
+
+
+logger = logging.getLogger(__name__)
+
+# === Part 1: Define Core ADK Agent Logic ===
+
+if _ADK_AVAILABLE:
+    # --- Configure GenAI (Optional but Recommended) ---
+    # Load API key from environment - user must set this in .env
+    GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+    if GOOGLE_API_KEY:
+        genai.configure(api_key=GOOGLE_API_KEY)
+        logger.info("Configured google.generativeai with GOOGLE_API_KEY.")
+    else:
+        # If no key, ADK might try Application Default Credentials (ADC)
+        logger.warning("GOOGLE_API_KEY not found in environment. ADK will attempt to use Application Default Credentials (ADC).")
+
+    # --- Define Tools ---
+    adk_tool_list = []
+    {% if 'get_current_time' in adk_tools %}
+    if _TOOLS_AVAILABLE:
+        get_current_time_tool = FunctionTool(
+            callable=get_current_time,
+            description="Get the current date and time.",
+        )
+        adk_tool_list.append(get_current_time_tool)
+        logger.debug("Added get_current_time tool to ADK agent.")
+    {% endif %}
+    {% if 'google_search' in adk_tools %}
+    if _TOOLS_AVAILABLE:
+        # Define the schema for the Google Search tool input
+        google_search_schema = glm.Schema(
+            type=glm.Type.OBJECT,
+            properties={
+                'query': glm.Schema(type=glm.Type.STRING, description="The search query.")
+            },
+            required=['query']
+        )
+        google_search_tool = FunctionTool(
+            callable=google_search,
+            description="Perform a Google Search for a given query.",
+            parameters=google_search_schema
+        )
+        adk_tool_list.append(google_search_tool)
+        logger.debug("Added google_search tool to ADK agent.")
+    {% endif %}
+
+    # --- Instantiate ADK Agent ---
+    core_adk_logic_agent = LlmAgent(
+        name="{{ package_name }}_adk_core",
+        description="{{ agent_description }}",
+        model="{{ adk_model_name }}",
+        instruction="{{ adk_instruction }}",
+        tools=adk_tool_list if adk_tool_list else None
+    )
+    logger.info(f"ADK LlmAgent '{{ package_name }}_adk_core' instantiated with model '{{ adk_model_name }}' and {len(adk_tool_list)} tools.")
+
+else:
+    core_adk_logic_agent = None # Placeholder if ADK is not available
+
+
+# === Part 2: AgentVault A2A Wrapper ===
+
+@dataclass
+class ADKTaskContext(TaskContext):
+    """Extends TaskContext to store ADK session ID and potentially history."""
+    adk_session_id: Optional[str] = None
+    # Store AV message history separately if needed, as ADK history is internal
+    av_history: List[Message] = field(default_factory=list)
+    # Event to signal cancellation to the background task
+    cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+class ADKWrapperAgent(BaseA2AAgent):
+    """Wraps the ADK LlmAgent to expose it via the AgentVault A2A protocol."""
+
+    def __init__(self, task_store_ref: BaseTaskStore):
+        super().__init__(agent_metadata={"name": "{{ agent_name }}"})
+        if not _ADK_AVAILABLE or core_adk_logic_agent is None:
+            raise ConfigurationError("Google ADK libraries not available or core agent failed to initialize.")
+
+        self.task_store = task_store_ref
+        self.adk_agent = core_adk_logic_agent
+        # Use default InMemorySessionService for simplicity; replace for persistence
+        self.adk_session_service: SessionService = InMemorySessionService()
+        self.adk_runner = Runner(session_service=self.adk_session_service)
+        self._background_tasks: Dict[str, asyncio.Task] = {}
+        logger.info("ADKWrapperAgent initialized.")
+
+    async def handle_task_send(self, task_id: Optional[str], message: Message) -> str:
+        """Initiates a new ADK session and starts processing."""
+        logger.info(f"ADKWrapperAgent handling task send: task_id={task_id}")
+        if task_id:
+            # ADK LlmAgent typically handles conversation internally within a session.
+            # For simplicity, this wrapper currently only supports initiating a task.
+            # Handling subsequent messages would require mapping them to ADK's run/reply flow.
+            logger.warning(f"Received message for existing task '{task_id}', but this simple ADK wrapper only supports initiating new tasks.")
+            raise AgentProcessingError("Multi-turn conversation not supported in this simple ADK wrapper via tasks/send.")
+
+        # Create AgentVault task context
+        av_task_id = f"adk-task-{uuid.uuid4().hex[:8]}"
+        logger.info(f"Creating new ADK wrapper task: {av_task_id}")
+
+        # Create ADK session
+        try:
+            adk_session_id = self.adk_runner.create_session()
+            logger.info(f"Created ADK session '{adk_session_id}' for AV task '{av_task_id}'")
+        except Exception as e:
+            logger.exception("Failed to create ADK session.")
+            raise AgentProcessingError(f"Failed to initialize ADK session: {e}") from e
+
+        # Create and store the specific context type
+        av_task_context = ADKTaskContext(
+            task_id=av_task_id,
+            current_state=TaskState.SUBMITTED,
+            adk_session_id=adk_session_id,
+            av_history=[message] # Store initial message
+        )
+        await self.task_store.create_task(av_task_id) # Creates basic context
+        self.task_store._tasks[av_task_id] = av_task_context # Overwrite with specific type
+
+        # Start background processing task
+        bg_task = asyncio.create_task(self._process_adk_task(av_task_id, adk_session_id, message))
+        self._background_tasks[av_task_id] = bg_task
+        bg_task.add_done_callback(
+            lambda fut: self._background_tasks.pop(av_task_id, None)
+        )
+
+        return av_task_id
+
+    async def _process_adk_task(self, av_task_id: str, adk_session_id: str, initial_message: Message):
+        """Runs the ADK agent and translates events to AgentVault notifications."""
+        logger.info(f"Starting ADK background processing for AV task {av_task_id} (ADK session: {adk_session_id})")
+        task_context = await self.task_store.get_task(av_task_id)
+        if not isinstance(task_context, ADKTaskContext):
+            logger.error(f"Incorrect context type for task {av_task_id} in ADK processing.")
+            await self.task_store.update_task_state(av_task_id, TaskState.FAILED, message="Internal context error")
+            return
+
+        try:
+            await self.task_store.update_task_state(av_task_id, TaskState.WORKING)
+
+            input_text = ""
+            if initial_message.parts and isinstance(initial_message.parts[0], TextPart):
+                input_text = initial_message.parts[0].content
+            if not input_text:
+                raise ValueError("No text found in initial message for ADK agent.")
+
+            final_adk_response = None
+            async for event in self.adk_runner.run_async(session_id=adk_session_id, agent=self.adk_agent, query=input_text):
+                # Check for cancellation signal between events
+                if task_context.cancel_event.is_set():
+                    logger.info(f"Cancellation signal detected for task {av_task_id}. Stopping ADK processing.")
+                    # ADK Runner doesn't have an explicit cancel, rely on breaking the loop
+                    # State is set to CANCELED by handle_task_cancel
+                    return
+
+                logger.debug(f"ADK Event for {av_task_id}: Type={event.type}, Data Keys={event.data.keys() if event.data else 'None'}")
+
+                # Translate ADK Events to AgentVault Events/Notifications
+                if event.type == Event.Type.LLM_RESPONSE and event.data.get('text'):
+                    response_text = event.data['text']
+                    logger.info(f"ADK Response Chunk for {av_task_id}: '{response_text[:50]}...'")
+                    av_message = Message(role="assistant", parts=[TextPart(content=response_text)])
+                    await self.task_store.notify_message_event(av_task_id, av_message)
+                    final_adk_response = response_text # Store last text response
+                elif event.type == Event.Type.TOOL_CALL:
+                    tool_name = event.data.get('name', 'unknown_tool')
+                    tool_args = event.data.get('args', {})
+                    logger.info(f"ADK Tool Call for {av_task_id}: {tool_name}({tool_args})")
+                    # Create an artifact for the tool call
+                    artifact = Artifact(id=f"tool-call-{uuid.uuid4().hex[:6]}", type="tool_call", content={"name": tool_name, "arguments": tool_args}, media_type="application/json")
+                    await self.task_store.notify_artifact_event(av_task_id, artifact)
+                elif event.type == Event.Type.TOOL_RESPONSE:
+                    tool_name = event.data.get('name', 'unknown_tool')
+                    tool_result = event.data.get('result', {})
+                    logger.info(f"ADK Tool Response for {av_task_id}: {tool_name} -> {str(tool_result)[:100]}...")
+                    # Create an artifact for the tool response
+                    artifact = Artifact(id=f"tool-result-{uuid.uuid4().hex[:6]}", type="tool_result", content={"name": tool_name, "result": tool_result}, media_type="application/json")
+                    await self.task_store.notify_artifact_event(av_task_id, artifact)
+                # Add handling for other ADK event types if needed (e.g., ERROR)
+
+            # ADK run finished successfully
+            logger.info(f"ADK run_async finished successfully for task {av_task_id}.")
+            await self.task_store.update_task_state(av_task_id, TaskState.COMPLETED)
+
+        except asyncio.CancelledError:
+             logger.info(f"ADK background task for {av_task_id} was cancelled externally.")
+             # State should have been set by handle_task_cancel
+        except Exception as e:
+            logger.exception(f"Error during ADK processing for task {av_task_id}")
+            await self.task_store.update_task_state(av_task_id, TaskState.FAILED, message=f"ADK Processing Error: {e}")
+
+    async def handle_task_get(self, task_id: str) -> Task:
+        """Retrieve task status and AgentVault message history."""
+        logger.info(f"ADKWrapperAgent handling task get: task_id={task_id}")
+        task_context = await self.task_store.get_task(task_id)
+        if task_context is None or not isinstance(task_context, ADKTaskContext):
+            raise TaskNotFoundError(task_id=task_id)
+
+        # Note: ADK's internal history isn't easily exposed here without more work.
+        # We return the history stored in our AV context.
+        return Task(
+            id=task_context.task_id,
+            state=task_context.current_state,
+            createdAt=task_context.created_at,
+            updatedAt=task_context.updated_at,
+            messages=task_context.av_history, # Return AV history
+            artifacts=[], # Placeholder - could fetch from ADK session if needed
+            metadata={"agent_type": "adk_wrapper", "adk_session_id": task_context.adk_session_id}
+        )
+
+    async def handle_task_cancel(self, task_id: str) -> bool:
+        """Marks the task as canceled and signals the background ADK task."""
+        logger.info(f"ADKWrapperAgent handling task cancel: task_id={task_id}")
+        task_context = await self.task_store.get_task(task_id)
+        if task_context is None or not isinstance(task_context, ADKTaskContext):
+            raise TaskNotFoundError(task_id=task_id)
+
+        terminal_states = {TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELED}
+        if task_context.current_state not in terminal_states:
+            # Signal the background task via its event
+            task_context.cancel_event.set()
+            # Also cancel the asyncio task directly if possible
+            bg_task = self._background_tasks.get(task_id)
+            if bg_task and not bg_task.done():
+                bg_task.cancel()
+                logger.info(f"Requested cancellation of background task for {task_id}")
+
+            # Update state via store (this also notifies listeners)
+            await self.task_store.update_task_state(task_id, TaskState.CANCELED)
+            return True
+        else:
+            logger.warning(f"Task {task_id} already terminal.")
+            return False
+
+    async def handle_subscribe_request(self, task_id: str) -> AsyncGenerator[A2AEvent, None]:
+        """Handles SSE subscription; relies on store notifications from _process_adk_task."""
+        logger.info(f"ADKWrapperAgent handling subscribe request: task_id={task_id}")
+        task_context = await self.task_store.get_task(task_id)
+        if task_context is None: raise TaskNotFoundError(task_id=task_id)
+
+        terminal_states = {TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELED}
+        while task_context.current_state not in terminal_states:
+            await asyncio.sleep(1)
+            task_context = await self.task_store.get_task(task_id)
+            if task_context is None: break
+        logger.info(f"Subscription stream ending for ADK task {task_id}")
+        if False: yield # pragma: no cover

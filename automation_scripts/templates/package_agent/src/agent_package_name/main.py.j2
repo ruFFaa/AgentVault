@@ -49,28 +49,35 @@ app.add_exception_handler(Exception, generic_exception_handler) # Catch-all
 # --- Root Endpoint ---
 @app.get("/", tags=["Status"])
 async def read_root():
-    return {"message": f"{ { agent_name } } running"}
+    # --- CORRECTED F-STRING SYNTAX ---
+    return {"message": f"{{ agent_name }} running"}
+    # --- END CORRECTED F-STRING SYNTAX ---
 
 # Add other non-A2A endpoints if needed
 
 # --- Optional: Serve Agent Card ---
-# import json
-# from pathlib import Path
-# from fastapi.responses import JSONResponse
-# CARD_PATH = Path(__file__).parent.parent / "agent-card.json" # Adjust path if needed
-# @app.get("/agent-card.json", tags=["Agent Card"])
-# async def get_agent_card():
-#     if not CARD_PATH.is_file():
-#         raise HTTPException(status_code=404, detail="Agent card not found")
-#     try:
-#         with open(CARD_PATH, 'r') as f:
-#             card_data = json.load(f)
-#         return JSONResponse(content=card_data)
-#     except Exception as e:
-#         logger.error(f"Failed to load agent card: {e}")
-#         raise HTTPException(status_code=500, detail="Could not load agent card")
+import json
+from pathlib import Path
+from fastapi.responses import JSONResponse
+# --- MODIFIED: Correct path relative to main.py inside src/package_name ---
+CARD_PATH = Path(__file__).parent.parent.parent / "agent-card.json" # Go up three levels: main.py -> package_name -> src -> project_root
+# --- END MODIFIED ---
+@app.get("/agent-card.json", tags=["Agent Card"])
+async def get_agent_card():
+    if not CARD_PATH.is_file():
+        logger.error(f"Agent card not found at expected location: {CARD_PATH}")
+        raise HTTPException(status_code=404, detail="Agent card not found")
+    try:
+        with open(CARD_PATH, 'r') as f:
+            card_data = json.load(f)
+        return JSONResponse(content=card_data)
+    except Exception as e:
+        logger.error(f"Failed to load agent card: {e}")
+        raise HTTPException(status_code=500, detail="Could not load agent card")
 
-logger.info(f"'{ { agent_name } }' application initialized.")
+# --- CORRECTED F-STRING SYNTAX ---
+logger.info(f"'{{ agent_name }}' application initialized.")
+# --- END CORRECTED F-STRING SYNTAX ---
 
 # --- Uvicorn Runner (for direct execution) ---
 # if __name__ == "__main__":

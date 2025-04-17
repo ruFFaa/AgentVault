@@ -1,0 +1,69 @@
+{
+  "schemaVersion": "1.0",
+  "humanReadableId": "{{ agent_id }}",
+  "agentVersion": "0.1.0", {# Initial generated version #}
+  "name": "{{ agent_name }} (ADK)",
+  "description": "{{ agent_description }}",
+  "url": "http://localhost:{{ agent_port }}/a2a", {# IMPORTANT: User must update this URL for deployment #}
+  "provider": {
+    "name": "{{ author_name }}"
+    {# Add optional provider URL or contact if desired #}
+  },
+  "capabilities": {
+    "a2aVersion": "1.0", {# Assuming compatibility with this profile version #}
+    "supportedMessageParts": ["text"] {# ADK wrapper primarily handles text input/output #}
+    {# Add TEE details here if the hosting environment provides it #}
+  },
+  "authSchemes": [
+    {% if wrapper_auth_type == 'none' -%}
+    {
+      "scheme": "none",
+      "description": "No authentication required for this agent's A2A endpoint."
+    }
+    {% elif wrapper_auth_type == 'apiKey' -%}
+    {
+      "scheme": "apiKey",
+      "description": "Requires an API key provided in the X-Api-Key header.",
+      "service_identifier": "{{ wrapper_service_id }}"
+    }
+    {% else -%}
+    {
+      "scheme": "none",
+      "description": "Defaulting to no authentication (Configuration Error?)."
+    }
+    {% endif -%}
+  ],
+  "skills": [
+    {
+      "id": "core_logic",
+      "name": "Core ADK Logic",
+      "description": "{{ adk_instruction | escape }}" {# Use the main instruction as the core skill desc #}
+      {# Input/Output schemas could be added based on ADK agent capabilities #}
+    }{% if adk_tools %},{% endif %}
+    {# Conditionally add skills for included tools #}
+    {% if 'get_current_time' in adk_tools %}
+    {
+      "id": "get_time",
+      "name": "Get Current Time",
+      "description": "Retrieves the current UTC date and time."
+    }{% if 'google_search' in adk_tools %},{% endif %}
+    {% endif %}
+    {% if 'google_search' in adk_tools %}
+    {
+      "id": "google_search",
+      "name": "Google Search",
+      "description": "Performs a web search using Google."
+      {# Add input schema if desired #}
+    }
+    {% endif %}
+  ],
+  "tags": [
+      "agentvault",
+      "generated",
+      "adk",
+      "google",
+      "{{ adk_model_name | lower | replace(':', '-') }}"
+      {% if adk_tools %}{% for tool in adk_tools %},"{{ tool }}"{% endfor %}{% endif %}
+  ]
+  {# Add optional fields like privacyPolicyUrl, termsOfServiceUrl, iconUrl #}
+}

@@ -61,7 +61,9 @@ header.developer-header nav a:hover {
 /* --- END ADDED --- */
 
 
-#login-section, #dashboard-section {
+/* --- REMOVED: Login Section Styles (handled by auth-form-section) --- */
+/* #login-section, */
+#dashboard-section {
     margin-bottom: 2rem; /* Increased spacing */
     padding: 1.5rem 2rem; /* Increased padding */
     border: 1px solid #dee2e6;
@@ -70,52 +72,20 @@ header.developer-header nav a:hover {
     box-shadow: 0 2px 5px rgba(0,0,0,0.05); /* Subtle shadow */
 }
 
-#login-section h2 {
-    margin-top: 0;
-    margin-bottom: 1.5rem;
-    font-weight: 500;
-    color: #495057;
+/* --- ADDED: Login Required Message Style --- */
+#login-required-message {
+    text-align: center;
+    padding: 2rem;
+    border: 1px solid #dee2e6;
+    background-color: #f8f9fa;
+    border-radius: 8px;
 }
+#login-required-message h2 {
+    border-bottom: none;
+    margin-bottom: 1rem;
+}
+/* --- END ADDED --- */
 
-#login-section p {
-    margin-top: 0.8rem;
-    font-size: 0.9em;
-    color: #6c757d;
-}
-#login-section hr {
-    border: 0;
-    border-top: 1px solid #eee;
-    margin: 1.5rem 0;
-}
-
-
-#login-section label {
-    margin-right: 5px;
-    font-weight: 500;
-}
-
-#login-section input[type="password"] {
-    min-width: 300px;
-    padding: 0.6rem 0.8rem;
-    margin-right: 10px;
-    border: 1px solid #ced4da;
-    border-radius: 4px;
-    font-size: 1rem;
-}
-
-#login-section button {
-    padding: 0.6rem 1rem;
-    font-size: 0.95rem;
-    cursor: pointer;
-    background-color: #007bff;
-    color: white;
-    border: 1px solid #007bff;
-    border-radius: 4px;
-}
-#login-section button:hover {
-    background-color: #0056b3;
-    border-color: #004085;
-}
 
 /* Dashboard Sections */
 #dashboard-section h3 {
@@ -293,6 +263,188 @@ header.developer-header nav a:hover {
     border-color: #1c7430;
 }
 
+/* --- ADDED: API Key Table Styles --- */
+#api-keys-list-container {
+    margin-top: 1rem;
+    margin-bottom: 1.5rem;
+    overflow-x: auto; /* Allow horizontal scroll on small screens */
+}
+#api-keys-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+#api-keys-table th, #api-keys-table td {
+    border: 1px solid #dee2e6;
+    padding: 0.6rem 0.8rem;
+    text-align: left;
+    vertical-align: middle;
+}
+#api-keys-table th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+    white-space: nowrap;
+}
+#api-keys-table td:nth-child(1) { /* Prefix */
+    font-family: monospace;
+    white-space: nowrap;
+}
+#api-keys-table td:nth-child(3), #api-keys-table td:nth-child(4) { /* Dates */
+    white-space: nowrap;
+    font-size: 0.85em;
+    color: #6c757d;
+}
+#api-keys-table td:nth-child(6) { /* Actions */
+    text-align: center;
+}
+.button-delete-key {
+    background-color: #dc3545;
+    border-color: #dc3545;
+    color: white;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.8rem;
+}
+.button-delete-key:hover {
+    background-color: #c82333;
+    border-color: #bd2130;
+}
+/* --- END ADDED --- */
+
+/* --- ADDED: Generate Key Section Styles --- */
+#generate-key-section {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px dashed #dee2e6;
+}
+#generate-key-section h4 {
+    margin-bottom: 1rem;
+    font-weight: 500;
+}
+#generate-key-section .form-group {
+    margin-bottom: 1rem;
+}
+#generate-key-section input[type="text"] {
+    width: 100%;
+    max-width: 400px; /* Limit width */
+    padding: 0.6rem 0.8rem;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 0.95rem;
+}
+#generate-key-section button {
+    padding: 0.6rem 1rem;
+    font-size: 0.95rem;
+    cursor: pointer;
+    border-radius: 4px;
+    background-color: #17a2b8;
+    color: white;
+    border: 1px solid #17a2b8;
+}
+#generate-key-section button:hover {
+    background-color: #117a8b;
+    border-color: #10707f;
+}
+#generate-key-section button:disabled {
+    background-color: #6c757d;
+    border-color: #6c757d;
+    cursor: not-allowed;
+}
+#new-key-result pre {
+    background-color: #e9ecef;
+    padding: 8px 12px;
+    border-radius: 4px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-family: monospace;
+    font-size: 0.9em;
+    margin-bottom: 5px;
+}
+/* --- END ADDED --- */
+
+/* --- ADDED: Agent Builder Styles --- */
+#agent-builder-section {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px dashed #dee2e6;
+}
+#agent-builder-section h3 {
+    border-bottom: 1px solid #dee2e6;
+    padding-bottom: 0.6rem;
+    margin-bottom: 1.5rem; /* More space after heading */
+}
+#agent-builder-section .form-group {
+    margin-bottom: 1.2rem;
+}
+#agent-builder-section label {
+    display: block;
+    margin-bottom: 0.4rem;
+    font-weight: 500;
+    color: #495057;
+}
+#agent-builder-section input[type="text"],
+#agent-builder-section textarea,
+#agent-builder-section select {
+    width: 100%;
+    padding: 0.7rem 0.9rem;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 1rem;
+    transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+#agent-builder-section input[type="text"]:focus,
+#agent-builder-section textarea:focus,
+#agent-builder-section select:focus {
+    border-color: #80bdff;
+    outline: 0;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+#agent-builder-section textarea {
+    min-height: 80px;
+    resize: vertical;
+}
+#agent-builder-section small {
+    display: block;
+    margin-top: 0.3rem;
+    font-size: 0.85rem;
+    color: #6c757d;
+}
+.radio-group label, .checkbox-group label {
+    display: inline-block;
+    margin-right: 15px;
+    margin-left: 3px;
+    font-weight: normal; /* Normal weight for radio/checkbox labels */
+}
+.radio-group input[type="radio"], .checkbox-group input[type="checkbox"] {
+    margin-right: 3px;
+    vertical-align: middle;
+}
+#agent-builder-section h4 { /* Sub-headings for config sections */
+    margin-top: 1.5rem;
+    margin-bottom: 1rem;
+    font-weight: 500;
+    color: #495057;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 0.3rem;
+}
+#generate-package-button {
+    padding: 0.8rem 1.5rem;
+    font-size: 1rem;
+    font-weight: 500;
+    background-color: #28a745;
+    color: white;
+    border: none;
+    margin-top: 1rem;
+}
+#generate-package-button:hover {
+    background-color: #1e7e34;
+}
+#generate-package-button:disabled {
+    background-color: #6c757d;
+    cursor: not-allowed;
+}
+/* --- END ADDED --- */
+
+
 /* Submit Form Styling */
 #submit-card-section textarea {
     width: 100%;
@@ -377,6 +529,15 @@ header.developer-header nav a:hover {
     display: none;
 }
 
+/* --- ADDED: Section Divider --- */
+hr.section-divider {
+    border: 0;
+    border-top: 2px solid #dee2e6; /* Thicker divider */
+    margin: 2.5rem 0;
+}
+/* --- END ADDED --- */
+
+
 /* Footer (reuse from main style.css if identical) */
 footer {
     background-color: #e9ecef;
@@ -416,4 +577,12 @@ footer {
         flex-direction: column;
         align-items: flex-start; /* Align filters left */
     }
+    /* --- ADDED: Stack builder form elements --- */
+    #agent-builder-section .form-group {
+        max-width: none; /* Allow full width on mobile */
+    }
+    #generate-key-section input[type="text"] {
+        max-width: none;
+    }
+    /* --- END ADDED --- */
 }

@@ -6,6 +6,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, RedirectResponse # Added RedirectResponse
 from pathlib import Path
 # --- END ADDED ---
+# --- ADDED: Import json for card serving ---
+import json
+# --- END ADDED ---
 
 
 # --- Rate Limiting Imports ---
@@ -18,8 +21,8 @@ from slowapi.middleware import SlowAPIMiddleware
 # Import settings - this also triggers loading from .env
 from agentvault_registry.config import settings
 # Import the router
-# --- MODIFIED: Import auth and developers routers ---
-from agentvault_registry.routers import agent_cards, utils, auth, developers # Added auth, developers
+# --- MODIFIED: Import auth, developers, and agent_builder routers ---
+from agentvault_registry.routers import agent_cards, utils, auth, developers, agent_builder # Added agent_builder
 # --- END MODIFIED ---
 
 
@@ -85,15 +88,13 @@ app.include_router(
     prefix=settings.API_V1_STR + "/utils",
     tags=["Utilities"]
 )
-# --- ADDED: Include Auth and Developer routers ---
+# --- ADDED: Include Auth, Developer, and Agent Builder routers ---
 app.include_router(auth.router) # Prefix is defined within auth.py
-# --- MODIFIED: Uncomment developers router inclusion ---
 app.include_router(developers.router) # Prefix is defined within developers.py
-logger.info("Included developers router.") # Log inclusion
-# --- END MODIFIED ---
-
-# --- REMOVED: Old placeholder comment ---
-# --- END REMOVED ---
+app.include_router(agent_builder.router) # Prefix is defined within agent_builder.py
+logger.info("Included developers router.")
+logger.info("Included agent_builder router.") # Log inclusion
+# --- END ADDED ---
 
 
 # --- Mount Static Files ---
@@ -143,6 +144,86 @@ async def read_developer_ui():
     except Exception as e:
         logger.exception(f"Error reading developer/index.html: {e}")
         raise HTTPException(status_code=500, detail="Could not load Developer UI.")
+# --- END ADDED ---
+
+# --- ADDED: Specific Routes for Login/Register HTML ---
+@app.get("/ui/register", response_class=HTMLResponse, tags=["UI"], include_in_schema=False)
+async def read_register_ui():
+    """Serves the registration HTML page."""
+    register_path = STATIC_DIR / "register.html"
+    if not register_path.is_file():
+        logger.error(f"register.html not found in static directory: {STATIC_DIR}")
+        raise HTTPException(status_code=404, detail="Registration page file not found.")
+    try:
+        with open(register_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        logger.exception(f"Error reading register.html: {e}")
+        raise HTTPException(status_code=500, detail="Could not load registration page.")
+
+@app.get("/ui/login", response_class=HTMLResponse, tags=["UI"], include_in_schema=False)
+async def read_login_ui():
+    """Serves the login HTML page."""
+    login_path = STATIC_DIR / "login.html"
+    if not login_path.is_file():
+        logger.error(f"login.html not found in static directory: {STATIC_DIR}")
+        raise HTTPException(status_code=404, detail="Login page file not found.")
+    try:
+        with open(login_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        logger.exception(f"Error reading login.html: {e}")
+        raise HTTPException(status_code=500, detail="Could not load login page.")
+
+# --- ADDED: Forgot Password UI Route ---
+@app.get("/ui/forgot-password", response_class=HTMLResponse, tags=["UI"], include_in_schema=False)
+async def read_forgot_password_ui():
+    """Serves the forgot password HTML page."""
+    forgot_path = STATIC_DIR / "forgot-password.html"
+    if not forgot_path.is_file():
+        logger.error(f"forgot-password.html not found in static directory: {STATIC_DIR}")
+        raise HTTPException(status_code=404, detail="Forgot password page file not found.")
+    try:
+        with open(forgot_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        logger.exception(f"Error reading forgot-password.html: {e}")
+        raise HTTPException(status_code=500, detail="Could not load forgot password page.")
+
+# --- ADDED: Recover with Key UI Route ---
+@app.get("/ui/recover-with-key", response_class=HTMLResponse, tags=["UI"], include_in_schema=False)
+async def read_recover_with_key_ui():
+    """Serves the recover account with key HTML page."""
+    recover_path = STATIC_DIR / "recover-with-key.html"
+    if not recover_path.is_file():
+        logger.error(f"recover-with-key.html not found in static directory: {STATIC_DIR}")
+        raise HTTPException(status_code=404, detail="Account recovery page file not found.")
+    try:
+        with open(recover_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        logger.exception(f"Error reading recover-with-key.html: {e}")
+        raise HTTPException(status_code=500, detail="Could not load account recovery page.")
+
+# --- ADDED: Set New Password UI Route ---
+@app.get("/ui/set-new-password", response_class=HTMLResponse, tags=["UI"], include_in_schema=False)
+async def read_set_new_password_ui():
+    """Serves the set new password HTML page (used after recovery)."""
+    set_pass_path = STATIC_DIR / "set-new-password.html"
+    if not set_pass_path.is_file():
+        logger.error(f"set-new-password.html not found in static directory: {STATIC_DIR}")
+        raise HTTPException(status_code=404, detail="Set new password page file not found.")
+    try:
+        with open(set_pass_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        logger.exception(f"Error reading set-new-password.html: {e}")
+        raise HTTPException(status_code=500, detail="Could not load set new password page.")
 # --- END ADDED ---
 
 

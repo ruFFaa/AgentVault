@@ -16,7 +16,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = 'ed219e8077fc'
-# --- MODIFIED: Point down_revision to the column type change migration ---
+# --- MODIFIED: No change needed here, already points to JSONB migration ---
 down_revision: Union[str, None] = '495a40fce45f'
 # --- END MODIFIED ---
 branch_labels: Union[str, Sequence[str], None] = None

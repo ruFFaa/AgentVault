@@ -1,0 +1,145 @@
+import logging
+import os
+import json
+from pathlib import Path
+from typing import Optional, Dict, Any
+
+from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi.responses import JSONResponse
+# --- ADDED: Import APIKeyHeader if needed ---
+{% if wrapper_auth_type == 'apiKey' %}
+from fastapi.security import APIKeyHeader
+{% endif %}
+# --- END ADDED ---
+import uvicorn
+from pydantic import ValidationError as PydanticValidationError
+from dotenv import load_dotenv
+
+# SDK Imports
+from agentvault_server_sdk import create_a2a_router
+from agentvault_server_sdk.exceptions import AgentServerError, TaskNotFoundError, ConfigurationError
+from agentvault_server_sdk.state import InMemoryTaskStore, BaseTaskStore # Use persistent store in production!
+from agentvault_server_sdk.fastapi_integration import (
+    task_not_found_handler, validation_exception_handler,
+    agent_server_error_handler, generic_exception_handler
+)
+
+# Import agent logic
+from .agent import ADKWrapperAgent # Import the ADK wrapper agent
+
+# Load .env file (if exists) - important for local running and backend keys
+load_dotenv()
+
+# Configure logging
+logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper(), format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# --- FastAPI App Setup ---
+app = FastAPI(
+    title="{{ agent_name }} (ADK Wrapper)",
+    description="{{ agent_description }}",
+    version="0.1.0" # Agent specific version
+)
+
+# --- Agent and Router Setup ---
+# Use a persistent store (Redis, DB) in production!
+task_store: BaseTaskStore = InMemoryTaskStore()
+try:
+    agent_instance = ADKWrapperAgent(task_store_ref=task_store)
+except ConfigurationError as e:
+    logger.critical(f"FATAL: Agent configuration error during initialization: {e}", exc_info=True)
+    # Exit or prevent app startup if agent can't initialize
+    raise SystemExit(f"Agent Configuration Error: {e}") from e
+except Exception as e:
+    logger.critical(f"FATAL: Unexpected error initializing agent: {e}", exc_info=True)
+    raise SystemExit(f"Unexpected Agent Initialization Error: {e}") from e
+
+
+# --- Optional Authentication Dependency ---
+{% if wrapper_auth_type == 'apiKey' %}
+API_KEY_NAME = "X-Api-Key" # Standard header name
+api_key_header_scheme = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+EXPECTED_API_KEY = os.environ.get("WRAPPER_API_KEY")
+
+async def verify_wrapper_key(api_key_header: Optional[str] = Depends(api_key_header_scheme)):
+    """Dependency to verify the agent's own API key."""
+    if not EXPECTED_API_KEY:
+        logger.critical("Agent configured for apiKey auth, but WRAPPER_API_KEY is not set in environment!")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Agent authentication is misconfigured."
+        )
+    if not api_key_header:
+        logger.warning("Missing API Key in request header")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Missing API Key in '{API_KEY_NAME}' header",
+        )
+    if api_key_header != EXPECTED_API_KEY:
+        logger.warning("Invalid API Key received")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid API Key",
+        )
+    logger.debug("Wrapper API Key verified successfully.")
+    return True
+
+# Apply the dependency to the A2A router
+a2a_router_dependencies = [Depends(verify_wrapper_key)]
+logger.info("API Key authentication enabled for the /a2a endpoint.")
+{% else %}
+# No authentication dependency needed
+a2a_router_dependencies = []
+logger.info("No authentication configured for the /a2a endpoint.")
+{% endif %}
+# --- End Optional Authentication Dependency ---
+
+
+a2a_router = create_a2a_router(
+    agent=agent_instance,
+    task_store=task_store,
+    prefix="/a2a", # Standard A2A endpoint prefix
+    tags=["A2A"],
+    dependencies=a2a_router_dependencies # Apply auth dependency if configured
+)
+app.include_router(a2a_router)
+
+# --- Exception Handlers (Required for SDK Router) ---
+app.add_exception_handler(TaskNotFoundError, task_not_found_handler)
+app.add_exception_handler(ValueError, validation_exception_handler)
+app.add_exception_handler(TypeError, validation_exception_handler)
+app.add_exception_handler(PydanticValidationError, validation_exception_handler)
+app.add_exception_handler(ConfigurationError, agent_server_error_handler) # Handle config errors
+app.add_exception_handler(AgentServerError, agent_server_error_handler)
+app.add_exception_handler(Exception, generic_exception_handler) # Catch-all
+
+# --- Root Endpoint ---
+@app.get("/", tags=["Status"])
+async def read_root():
+    return {"message": f"{{ agent_name }} (ADK Wrapper) running"}
+
+# --- Serve Agent Card ---
+CARD_PATH = Path(__file__).parent.parent / "agent-card.json" # Assumes card is in project root
+
+@app.get("/agent-card.json", tags=["Agent Card"], response_model=Dict[str, Any])
+async def get_agent_card_json():
+    """Serves the agent-card.json file."""
+    if not CARD_PATH.is_file():
+        logger.error(f"Agent card file not found at expected location: {CARD_PATH}")
+        raise HTTPException(status_code=500, detail="Agent card configuration file not found on server.")
+    try:
+        with open(CARD_PATH, 'r', encoding='utf-8') as f:
+            card_data = json.load(f)
+        return card_data
+    except Exception as e:
+        logger.exception("Failed to load or parse agent-card.json")
+        raise HTTPException(status_code=500, detail=f"Failed to load agent card: {e}")
+
+logger.info(f"'{ { agent_name } }' (ADK Wrapper) application initialized.")
+
+# --- Uvicorn Runner (for direct execution using `python src/{{ package_name }}/main.py`) ---
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", {{ agent_port }}))
+    logger.info(f"Starting Uvicorn server on host 0.0.0.0, port {port}")
+    # Ensure reload is False when running directly, rely on external tools like Docker for production
+    uvicorn.run("{{ package_name }}.main:app", host="0.0.0.0", port=port, reload=False) # Use package name

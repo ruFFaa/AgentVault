@@ -1,0 +1,218 @@
+import logging
+import asyncio
+import datetime
+import uuid
+import os
+import json
+from typing import Optional, AsyncGenerator, Dict, Any, List
+
+import httpx
+
+# SDK Imports
+from agentvault_server_sdk import BaseA2AAgent
+from agentvault_server_sdk.state import BaseTaskStore, TaskContext
+from agentvault_server_sdk.exceptions import TaskNotFoundError, AgentProcessingError
+
+# Core Model Imports
+from agentvault.models import (
+    Message, Task, TaskState, TextPart, A2AEvent,
+    TaskStatusUpdateEvent, TaskMessageEvent
+)
+
+logger = logging.getLogger(__name__)
+
+# --- Configuration Constants (Read from Environment) ---
+# These should match the keys in the .env.example.j2 template
+LLM_BACKEND_TYPE = "{{ llm_backend_type }}" # Injected by Jinja
+LLM_MODEL_NAME = "{{ wrapper_model_name }}" # Injected by Jinja
+SYSTEM_PROMPT = os.environ.get("WRAPPER_SYSTEM_PROMPT", "{{ wrapper_system_prompt or '' }}") # Injected default
+
+# Backend specific config
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+OPENAI_API_BASE_URL = os.environ.get("OPENAI_API_BASE_URL", "https://api.openai.com/v1")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+ANTHROPIC_API_BASE_URL = os.environ.get("ANTHROPIC_API_BASE_URL", "https://api.anthropic.com/v1")
+LOCAL_API_BASE_URL = os.environ.get("LOCAL_API_BASE_URL", "http://localhost:1234/v1") # e.g., LM Studio default
+LOCAL_API_KEY = os.environ.get("LOCAL_API_KEY") # Optional key for local server
+
+# Timeout for backend LLM calls
+LLM_TIMEOUT_SECONDS = 120.0
+
+
+class SimpleWrapperAgent(BaseA2AAgent):
+    """
+    A simple AgentVault agent that wraps a backend LLM API (OpenAI, Anthropic, or local).
+    It takes a single user message and returns the LLM's response.
+    """
+    def __init__(self, task_store_ref: BaseTaskStore):
+        super().__init__(agent_metadata={"name": "{{ agent_name }}"})
+        self.task_store = task_store_ref
+        # Create a persistent httpx client for backend calls
+        self.http_client = httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS + 5.0) # Slightly longer timeout for client
+        self._background_tasks: Dict[str, asyncio.Task] = {}
+        logger.info("{{ agent_name }} (SimpleWrapper) initialized.")
+
+    async def handle_task_send(self, task_id: Optional[str], message: Message) -> str:
+        """Initiates a new task and starts the LLM call."""
+        logger.info(f"WrapperAgent handling task send: task_id={task_id}")
+        if task_id:
+            # This simple wrapper treats every send as a new request
+            logger.warning(f"Received message for existing task '{task_id}', but this wrapper starts a new LLM call.")
+            # Fall through to create new background task, but reuse ID if needed?
+            # For simplicity, let's just raise an error or ignore for now.
+            # Re-initiating might be confusing. Let's require task_id to be None.
+            raise AgentProcessingError(f"This simple wrapper agent does not support multi-turn conversations within the same task ID ('{task_id}'). Please initiate a new task.")
+
+        new_task_id = f"wrap-task-{uuid.uuid4().hex[:8]}"
+        logger.info(f"Creating new wrapper task: {new_task_id}")
+        await self.task_store.create_task(new_task_id) # Creates SUBMITTED state
+
+        # Start background processing
+        bg_task = asyncio.create_task(self._call_llm_backend(new_task_id, message))
+        self._background_tasks[new_task_id] = bg_task
+        bg_task.add_done_callback(
+            lambda fut: self._background_tasks.pop(new_task_id, None)
+        )
+        return new_task_id
+
+    async def _call_llm_backend(self, task_id: str, message: Message):
+        """Makes the actual call to the configured backend LLM."""
+        logger.info(f"Starting LLM backend call for task {task_id}")
+        await self.task_store.update_task_state(task_id, TaskState.WORKING)
+
+        try:
+            # 1. Extract Input Text
+            input_text = ""
+            if message.parts:
+                # Find the first text part
+                text_part = next((part for part in message.parts if isinstance(part, TextPart)), None)
+                if text_part:
+                    input_text = text_part.content
+            if not input_text:
+                raise ValueError("No valid text content found in the input message parts.")
+
+            # 2. Prepare Request based on Backend Type
+            headers: Dict[str, str] = {"Content-Type": "application/json"}
+            payload: Dict[str, Any] = {}
+            target_url: str = ""
+
+            if LLM_BACKEND_TYPE == "openai_api":
+                if not OPENAI_API_KEY: raise ConfigurationError("OPENAI_API_KEY environment variable not set.")
+                target_url = f"{OPENAI_API_BASE_URL.rstrip('/')}/chat/completions"
+                headers["Authorization"] = f"Bearer {OPENAI_API_KEY}"
+                messages = []
+                if SYSTEM_PROMPT: messages.append({"role": "system", "content": SYSTEM_PROMPT})
+                messages.append({"role": "user", "content": input_text})
+                payload = {"model": LLM_MODEL_NAME, "messages": messages, "stream": False}
+
+            elif LLM_BACKEND_TYPE == "anthropic_api":
+                if not ANTHROPIC_API_KEY: raise ConfigurationError("ANTHROPIC_API_KEY environment variable not set.")
+                target_url = f"{ANTHROPIC_API_BASE_URL.rstrip('/')}/messages"
+                headers["x-api-key"] = ANTHROPIC_API_KEY
+                headers["anthropic-version"] = "2023-06-01" # Required header
+                payload = {
+                    "model": LLM_MODEL_NAME,
+                    "messages": [{"role": "user", "content": input_text}],
+                    "max_tokens": 1024, # Example, make configurable if needed
+                }
+                if SYSTEM_PROMPT: payload["system"] = SYSTEM_PROMPT
+
+            elif LLM_BACKEND_TYPE == "local_openai_compatible":
+                target_url = f"{LOCAL_API_BASE_URL.rstrip('/')}/chat/completions"
+                if LOCAL_API_KEY: headers["Authorization"] = f"Bearer {LOCAL_API_KEY}"
+                messages = []
+                if SYSTEM_PROMPT: messages.append({"role": "system", "content": SYSTEM_PROMPT})
+                messages.append({"role": "user", "content": input_text})
+                payload = {"model": LLM_MODEL_NAME, "messages": messages, "stream": False}
+
+            else:
+                raise ConfigurationError(f"Unsupported LLM_BACKEND_TYPE: {LLM_BACKEND_TYPE}")
+
+            # 3. Make HTTP Request
+            logger.info(f"Sending request to backend: {target_url} for task {task_id}")
+            response = await self.http_client.post(target_url, json=payload, headers=headers, timeout=LLM_TIMEOUT_SECONDS)
+            response.raise_for_status() # Raise HTTPStatusError for 4xx/5xx
+
+            # 4. Parse Response
+            response_data = response.json()
+            assistant_reply = ""
+
+            if LLM_BACKEND_TYPE == "openai_api" or LLM_BACKEND_TYPE == "local_openai_compatible":
+                assistant_reply = response_data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            elif LLM_BACKEND_TYPE == "anthropic_api":
+                assistant_reply = response_data.get("content", [{}])[0].get("text", "")
+
+            if not assistant_reply:
+                logger.warning(f"Could not extract assistant reply from backend response for task {task_id}. Response: {response_data}")
+                raise AgentProcessingError("Backend LLM returned an unexpected response structure.")
+
+            # 5. Notify AgentVault and Complete
+            logger.info(f"Received successful response from backend for task {task_id}")
+            response_message = Message(role="assistant", parts=[TextPart(content=assistant_reply)])
+            await self.task_store.notify_message_event(task_id, response_message)
+            await self.task_store.update_task_state(task_id, TaskState.COMPLETED)
+
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text[:500] # Limit body size
+            logger.error(f"HTTP error calling backend for task {task_id}: {e.response.status_code} - {error_body}", exc_info=False)
+            await self.task_store.update_task_state(task_id, TaskState.FAILED, message=f"Backend API Error ({e.response.status_code}): {error_body}")
+        except httpx.RequestError as e:
+            logger.error(f"Network error calling backend for task {task_id}: {e}", exc_info=True)
+            await self.task_store.update_task_state(task_id, TaskState.FAILED, message=f"Network Error: {e}")
+        except (ConfigurationError, ValueError, KeyError, IndexError, json.JSONDecodeError) as e:
+             logger.error(f"Configuration or parsing error for task {task_id}: {e}", exc_info=True)
+             await self.task_store.update_task_state(task_id, TaskState.FAILED, message=f"Processing Error: {e}")
+        except Exception as e:
+            logger.exception(f"Unexpected error processing task {task_id}")
+            await self.task_store.update_task_state(task_id, TaskState.FAILED, message=f"Unexpected Error: {type(e).__name__}")
+
+    async def handle_task_get(self, task_id: str) -> Task:
+        """Retrieve task status from the store."""
+        logger.info(f"WrapperAgent handling task get: task_id={task_id}")
+        task_context = await self.task_store.get_task(task_id)
+        if task_context is None: raise TaskNotFoundError(task_id=task_id)
+        return Task(
+            id=task_context.task_id, state=task_context.current_state,
+            createdAt=task_context.created_at, updatedAt=task_context.updated_at,
+            messages=[], artifacts=[], metadata={"agent_type": "simple_wrapper"}
+        )
+
+    async def handle_task_cancel(self, task_id: str) -> bool:
+        """Cancel task (marks state, attempts to cancel background task)."""
+        logger.info(f"WrapperAgent handling task cancel: task_id={task_id}")
+        task_context = await self.task_store.get_task(task_id)
+        if task_context is None: raise TaskNotFoundError(task_id=task_id)
+
+        terminal_states = {TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELED}
+        if task_context.current_state not in terminal_states:
+            # Cancel background task if it's running
+            bg_task = self._background_tasks.get(task_id)
+            if bg_task and not bg_task.done():
+                bg_task.cancel()
+                logger.info(f"Requested cancellation of background task for {task_id}")
+            # Update state via store
+            await self.task_store.update_task_state(task_id, TaskState.CANCELED)
+            return True
+        else:
+            logger.warning(f"Task {task_id} already terminal.")
+            return False
+
+    async def handle_subscribe_request(self, task_id: str) -> AsyncGenerator[A2AEvent, None]:
+        """Handles SSE subscription request."""
+        logger.info(f"WrapperAgent handling subscribe request: task_id={task_id}")
+        task_context = await self.task_store.get_task(task_id)
+        if task_context is None: raise TaskNotFoundError(task_id=task_id)
+
+        # Standard implementation: rely on store notifications triggered by _call_llm_backend
+        terminal_states = {TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELED}
+        while task_context.current_state not in terminal_states:
+            await asyncio.sleep(1)
+            task_context = await self.task_store.get_task(task_id)
+            if task_context is None: break
+        logger.info(f"Subscription stream ending for wrapper task {task_id}")
+        if False: yield # pragma: no cover
+
+    async def close(self):
+        """Close the httpx client when the agent shuts down."""
+        await self.http_client.aclose()
+        logger.info("Closed internal httpx client for SimpleWrapperAgent.")

@@ -404,7 +404,11 @@ async def run_command(
                          except av_exceptions.A2AError as e: utils.display_error(f"Could not fetch final task status: {e}")
                          except Exception as e: utils.display_error(f"Unexpected error fetching final status: {e}")
                      utils.display_info(f"Final Task State: {final_task_state.value if final_task_state else 'Unknown/Fetch Failed'}")
-                 signal.signal(signal.SIGINT, original_sigint_handler)
+
+                 # --- ADDED await asyncio.sleep(0) before exit ---
+                 await asyncio.sleep(0)
+                 # --- END ADDED ---
+                 signal.signal(signal.SIGINT, original_sigint_handler) # Restore original handler
                  if final_task_state == av_models.TaskState.COMPLETED: utils.display_success("Task completed."); ctx.exit(0)
                  elif final_task_state == av_models.TaskState.FAILED: utils.display_error("Task failed."); ctx.exit(1)
                  elif final_task_state == av_models.TaskState.CANCELED: utils.display_warning("Task canceled."); ctx.exit(2)
@@ -414,4 +418,7 @@ async def run_command(
     except Exception as e:
         utils.display_error(f"Failed to initialize A2A client: {e}")
         logger.exception("Error initializing AgentVaultClient")
+        # --- ADDED await asyncio.sleep(0) before exit ---
+        await asyncio.sleep(0)
+        # --- END ADDED ---
         ctx.exit(1)
