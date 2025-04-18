@@ -1,0 +1,67 @@
+# D:\AgentVault\pyproject.toml
+
+[tool.poetry]
+name = "agentvault-monorepo"
+version = "0.1.0" # Overall project version
+description = "AgentVault Monorepo - Core Libraries, CLI, Registry, SDK, and Testing Utilities"
+authors = ["Raphael Zbigniew Jeziorny <AgentVault@proton.me>"]
+license = "Apache-2.0"
+readme = "README.md"
+package-mode = false # Tell Poetry this root file doesn't define an installable package
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.12" # Consistent Python version
+
+# --- Aggregate CORE dependencies from ALL sub-packages ---
+# Library & CLI Conflict Resolution: Use httpx 0.26.* required by pytest-httpx
+httpx = { version = ">=0.26.0,<0.27.0", extras = ["http2", "brotli"] }
+pydantic = ">=2.0,<3.0"
+python-dotenv = ">=1.0,<2.0"
+keyring = { version = ">=24,<25", optional = true } # Keep optional
+asyncclick = ">=8.0,<9.0"
+rich = ">=13.0,<15.0" # Use broader range compatible with both CLI & Registry
+
+# Registry API
+fastapi = ">=0.111,<0.112"
+uvicorn = { version = ">=0.29,<0.35", extras = ["standard"] }
+sqlalchemy = ">=2.0,<2.1"
+asyncpg = ">=0.29,<0.30"
+alembic = ">=1.13,<1.14"
+pydantic-settings = ">=2.0,<2.4"
+passlib = ">=1.7,<1.8"
+slowapi = ">=0.1.9,<0.2.0"
+psycopg2-binary = ">=2.9.10,<3.0.0" # For Alembic offline
+fastapi-mail = ">=1.4,<2.0"
+python-jose = { version = ">=3.3,<4.0", extras = ["cryptography"] }
+bcrypt = "==4.0.1" # Explicitly pinned due to passlib conflict
+
+# Server SDK
+typer = ">=0.9.0" # Needed for SDK packager script
+
+# --- Path Dependencies for Sub-Packages ---
+# These tell Poetry where to find the local packages
+agentvault = { path = "./agentvault_library", develop = true }
+agentvault-cli = { path = "./agentvault_cli", develop = true }
+agentvault-registry-api = { path = "./agentvault_registry", develop = true }
+agentvault-server-sdk = { path = "./agentvault_server_sdk", develop = true }
+agentvault-testing-utils = { path = "./agentvault_testing_utils", develop = true }
+
+[tool.poetry.group.dev.dependencies]
+# --- Aggregate DEV dependencies from ALL sub-packages ---
+pytest = ">=7.0,<9.0" # Consistent range
+pytest-asyncio = ">=0.23,<0.24" # Needed by library, registry, server-sdk
+pytest-mock = ">=3.12,<4.0" # Needed by library, cli
+respx = ">=0.20,<0.21" # Needed by library, testing-utils
+pytest-httpx = ">=0.28.0,<0.29.0" # Needed by CLI (Requires httpx 0.26.*)
+freezegun = ">=1.1.0" # Needed by server-sdk
+# --- ADDED: Dependency for compile script ---
+pathspec = ">=0.12.1,<0.13.0" # For .gitignore parsing in compile script
+
+# --- Extras (Keep keyring optionality) ---
+[tool.poetry.extras]
+os-keyring = ["keyring"]
+
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

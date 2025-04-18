@@ -1,9 +1,7 @@
 # Using standard PEP 621 [project] table primarily
 [project]
     name = "agentvault"
-    # --- VERSION UPDATED ---
     version = "0.2.1"
-    # --- VERSION UPDATED ---
     description = "Core Python client library for A2A protocol, MCP, and secure local key management."
     authors = [{ name = "Raphael Zbigniew Jeziorny", email = "AgentVault@proton.me" }]
     license = { text = "Apache-2.0" } # Standard license expression
@@ -27,7 +25,9 @@
 
     # Core Dependencies defined directly
     dependencies = [
-        "httpx[http2,brotli]>=0.27,<0.28",
+        # --- MODIFIED: Align httpx strictly with CLI/pytest-httpx ---
+        "httpx[http2,brotli]>=0.26.0,<0.27.0",
+        # --- END MODIFIED ---
         "pydantic>=2.0,<3.0",
         "python-dotenv>=1.0,<2.0",
         # keyring is optional
@@ -38,7 +38,7 @@
     os_keyring = ["keyring>=24,<25"]
     dev = [
         "pytest>=7.0,<9.0",
-        "pytest-asyncio>=0.23,<0.24",
+        "pytest-asyncio>=0.23,<0.24", # Keep this for library tests for now
         "pytest-mock>=3.12,<4.0",
         "respx>=0.20,<0.21",
         "agentvault-testing-utils" # Version/path handled by Poetry below
@@ -51,16 +51,15 @@ build-backend = "poetry.core.masonry.api"
 
 # Poetry Specific Configuration (Minimal - Only what's needed beyond [project])
 [tool.poetry]
-# --- VERSION UPDATED ---
 version = "0.2.1" # Keep consistent with [project] for poetry commands
-# --- VERSION UPDATED ---
-# name, description, authors, license, readme are now primarily in [project]
 packages = [{include = "agentvault", from = "src"}]
 
 # Dependencies defined here are used by Poetry's resolver but [project] is canonical
 [tool.poetry.dependencies]
 python = ">=3.10,<3.12"
-httpx = {version = ">=0.27,<0.28", extras = ["http2", "brotli"]}
+# --- MODIFIED: Align httpx strictly with CLI/pytest-httpx ---
+httpx = {version = ">=0.26.0,<0.27.0", extras = ["http2", "brotli"]}
+# --- END MODIFIED ---
 pydantic = ">=2.0,<3.0"
 python-dotenv = ">=1.0,<2.0"
 keyring = {version = ">=24,<25", optional = true}
@@ -72,7 +71,7 @@ os_keyring = ["keyring"]
 # Dev dependencies defined here are used by Poetry but [project.optional-dependencies] is canonical
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.0,<9.0"
-pytest-asyncio = ">=0.23,<0.24"
+pytest-asyncio = ">=0.23,<0.24" # Keep this for library tests for now
 pytest-mock = ">=3.12,<4.0"
 respx = ">=0.20,<0.21"
 agentvault-testing-utils = {path = "../agentvault_testing_utils", develop = true}

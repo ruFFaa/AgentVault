@@ -1,0 +1,3 @@
+# D:\AgentVault\poetry.toml
+[virtualenvs]
+in-project = true

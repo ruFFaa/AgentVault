@@ -2,15 +2,17 @@ import logging
 import os
 import uuid
 import datetime
-from typing import Annotated # Use Annotated for Depends
+from typing import Annotated, Optional, Dict, Any # <--- Ensure Dict and Any are here
+import json # <--- Ensure json is imported
+from pathlib import Path # <--- Ensure Path is imported
 
-from fastapi import FastAPI, HTTPException, status, Depends, Form
+from fastapi import FastAPI, HTTPException, status, Depends, Form # <--- Ensure HTTPException is here
 from fastapi.security import OAuth2PasswordBearer, HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse # <--- Ensure JSONResponse is imported
 from pydantic import BaseModel, Field
 from pydantic import ValidationError as PydanticValidationError
 from dotenv import load_dotenv
-
+import uvicorn
 # SDK Imports
 from agentvault_server_sdk import create_a2a_router
 from agentvault_server_sdk.exceptions import AgentServerError, TaskNotFoundError
@@ -143,4 +145,5 @@ logger.info(f"OAuth Agent Example application initialized. Expecting Client ID: 
 # --- Uvicorn Runner ---
 if __name__ == "__main__":
     logger.info(f"Starting Uvicorn server on host 0.0.0.0, port {SERVER_PORT}")
-    uvicorn.run("main:app", host="0.0.0.0", port=SERVER_PORT, reload=True)
+    uvicorn.run("src.oauth_agent_example.main:app", host="0.0.0.0", port=SERVER_PORT, reload=True)
+
