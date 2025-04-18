@@ -4,66 +4,54 @@ This document outlines the planned development phases and features for the Agent
 
 *Disclaimer: This roadmap represents our current plans and priorities. It is subject to change based on development progress, community feedback, and the evolution of underlying standards.*
 
-## Current Status (April 2025)
+## Current Status (April 2025 - Phase 2.5 Underway)
 
-The AgentVault project has established a functional baseline across its core components:
+The AgentVault project has established a functional baseline across its core components and is actively refining the ecosystem based on initial implementation and usability testing.
 
-*   **`agentvault` Library:** Core client implemented for A2A JSON-RPC/SSE interactions, API Key/None/OAuth2 (Client Creds) auth, secure local KeyManager (env, file, keyring), Agent Card parsing/validation, basic MCP utilities. Published on PyPI.
-*   **`agentvault_registry` API:** FastAPI backend operational, supporting Agent Card submission/management (developer key auth), validation, list/search/get (including basic TEE/tag filtering), developer verification status. Uses PostgreSQL/Alembic. Basic rate limiting and CORS in place. Basic Web UI for discovery and developer portal implemented. *(Note: Developer registration is currently manual/admin-driven).*
-*   **`agentvault_cli`:** Functional CLI for local key config (`config`), registry discovery (`discover`), and task execution (`run`) using the library. Includes `rich` output formatting and artifact saving.
-*   **`agentvault_server_sdk`:** Foundational SDK available with `BaseA2AAgent`, FastAPI integration (`create_a2a_router`, `@a2a_method`), `InMemoryTaskStore` with listener/notification support, and packaging tool (`agentvault-sdk package`). Published on PyPI.
-*   **`agentvault_testing_utils`:** Shared utilities including `MockAgentVaultClient`, `mock_a2a_server` fixture, `create_test_agent_card` factory, `EchoAgent`, and assertion helpers.
-*   **Documentation:** Foundational documentation structure created with MkDocs, core concepts/architecture/security outlined, component guides drafted, A2A profile documented, examples added. Deployed via GitHub Pages.
-*   **CI/CD:** Workflows for dependency audit and documentation deployment are functional.
+*   **`agentvault` Library:** Core client implemented (A2A JSON-RPC/SSE, Auth Schemes, KeyManager, Models, Utils). Published.
+*   **`agentvault_registry` API & UI:** Operational API (Card CRUD, Validation, Discovery Filters incl. TEE/Tags). **New:** Developer authentication via email/password (JWT), email verification, recovery keys, programmatic API key management (`/developers/me/apikeys`), Agent Builder endpoint (`/agent-builder/generate`). Web UI for public discovery (`/ui`) and developer portal (`/ui/developer`) with login/register/recovery flows implemented. Uses PostgreSQL/Alembic. Rate limiting/CORS active. *(Note: Email sending depends on deployment configuration).*
+*   **`agentvault_cli`:** Functional CLI (`config`, `discover`, `run`). Supports KeyManager (keyring, oauth config), SSE streaming, artifact saving.
+*   **`agentvault_server_sdk`:** Foundational SDK (`BaseA2AAgent`, FastAPI integration, `@a2a_method`, `InMemoryTaskStore` with notifications), packaging tool (`agentvault-sdk package`). Published.
+*   **`agentvault_testing_utils`:** Shared utilities (`MockAgentVaultClient`, `mock_a2a_server` fixture, factory, `EchoAgent`, assertions).
+*   **Examples:** Basic Server, LangChain Tool, OAuth Agent, Stateful Agent, Library Usage examples available.
+*   **Documentation:** Structure established, core concepts/architecture/security documented, component guides drafted, A2A/TEE profiles documented, examples included. Deployed via GitHub Pages.
+*   **CI/CD:** Dependency audit and docs deployment workflows functional.
 
-## Next Steps: Phase 2.5 - Ecosystem Enablement & Refinement
+## Next Steps: Phase 2.6 - Automation, Robustness & Polish
 
-**Objective:** Solidify the existing components, improve developer/user experience through better documentation and examples, and prepare for broader adoption.
+**Objective:** Complete automation scripts, improve robustness (testing, error handling, scalability), and polish the developer/user experience.
 
 **Key Tasks:**
 
-1.  **Documentation Overhaul (Largely Complete - Minor Polish Remaining):**
-    *   Enhance Component Guides (Done).
-    *   Improve Core Concepts (Done).
-    *   Finalize Policies (Placeholders updated).
-    *   Installation Guide (Enhanced).
-    *   Examples Overview (Updated).
-    *   Vision Document (Added).
-    *   Use Cases Document (Added).
-2.  **Example Implementations (Complete):**
-    *   Basic A2A Server (Done).
-    *   LangChain Integration (Done).
-    *   OAuth Agent Example (Done).
-    *   Stateful Agent Example (Done).
-    *   Direct Library Usage Example (Done).
-3.  **Registry UI/UX Improvements:**
-    *   **TODO:** Enhance the developer portal UI (`/ui/developer`) for easier card management (editing, viewing status).
-    *   **TODO:** Improve filtering/search capabilities on the public UI (`/ui`).
-    *   **TODO:** Display developer verification status clearly.
-4.  **SDK & Testing Refinements:**
-    *   **TODO:** Improve Server SDK state management abstractions (consider adding basic persistent store examples or interfaces).
-    *   **TODO:** Expand `agentvault-testing-utils` with more assertion helpers or complex mocks as needed.
-    *   **TODO:** Increase test coverage across all components.
-5.  **TEE Feature Polish:**
-    *   **TODO:** Test and verify TEE filtering in the registry API and UI works reliably.
-    *   **TODO:** Ensure TEE support limitations (declarative only) are clearly documented (`tee_profile.md`).
+1.  **Automation Scripts:**
+    *   **TODO:** Finalize and test `automation_scripts/` (`av_create_package_agent`, `av_deploy_register_agent`, `av_find_run_task`). Ensure they work reliably with the latest components.
+    *   **TODO:** Refine agent template generation (e.g., better `.env` setup based on selected options).
+2.  **Testing & Coverage:**
+    *   **TODO:** Implement CI workflow for running `pytest` across all components.
+    *   **TODO:** Integrate `pytest-cov` and add coverage reporting/thresholds to CI.
+    *   **TODO:** Increase test coverage, focusing on complex logic (client state machine, registry auth flows, SDK router edge cases, CLI interactions).
+    *   **TODO:** Add basic end-to-end tests (e.g., CLI -> Registry -> Mock Agent).
+3.  **Registry Enhancements:**
+    *   **TODO:** Investigate and potentially optimize developer programmatic API key lookup performance if needed for scale.
+    *   **TODO:** Implement email-based password reset flow (currently placeholder).
+    *   **TODO:** Further UI/UX improvements for the Developer Portal (e.g., easier card editing interface, clearer API key management).
+4.  **SDK & Error Handling:**
+    *   **TODO:** Provide examples or interfaces for persistent `BaseTaskStore` implementations (e.g., Redis, SQL).
+    *   **TODO:** Review and standardize error handling and logging across all components for consistency.
+5.  **Documentation Polish:**
+    *   **TODO:** Fill in remaining placeholders in policy documents (Contact emails).
+    *   **TODO:** Add more diagrams where helpful (e.g., auth flows).
+    *   **TODO:** Review all guides for clarity and accuracy against latest code.
 
-## Future Considerations (Beyond Phase 2.5 / Ideas)
+## Future Considerations (Phase 3 & Beyond)
 
-*   **Phase 2.6: Automation & Robustness:**
-    *   Implement the `automation_scripts/` (`av_create_package_agent`, `av_deploy_register_agent`, `av_find_run_task`).
-    *   Address scalability concerns (e.g., registry developer key lookup).
-    *   Enhance Server SDK state management (persistent stores like DB/Redis).
-    *   Improve error handling depth across all components.
-*   **Phase 3: Advanced Features & Ecosystem Growth:**
-    *   **Developer Self-Registration:** Implement a secure self-service workflow for developers to register and obtain API keys via the Registry API/UI (including email verification).
-    *   **Multimodality (WebRTC):** Integrate `aiortc` for optional real-time audio/video streaming support within the A2A protocol.
-    *   **Deeper MCP Integration:** Align with finalized MCP specifications, provide SDK helpers for context manipulation.
-    *   **TEE Attestation Verification:** Implement client-side verification of TEE attestations based on `attestationEndpoint` in Agent Cards.
-    *   **Registry Enhancements:** Community reviews/ratings, usage analytics (opt-in), more advanced search/filtering, improved developer portal features (key rotation, etc.).
-    *   **Other Language SDKs/Libraries:** Explore SDKs for Node.js, Go, etc.
-    *   **Security Audits:** Formal third-party security reviews.
+*   **Multimodality (WebRTC):** Integrate `aiortc` for optional real-time audio/video streaming.
+*   **Deeper MCP Integration:** Align with finalized MCP specifications, provide SDK helpers.
+*   **TEE Attestation Verification:** Implement client-side verification of TEE attestations.
+*   **Registry Features:** Community reviews/ratings, usage analytics (opt-in), advanced search, key rotation.
+*   **Other Language SDKs/Libraries:** Explore SDKs for Node.js, Go, etc.
+*   **Security Audits:** Formal third-party security reviews.
 
 ## Contributing
 
-We welcome community contributions! Please see our [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on reporting issues, suggesting features, and submitting pull requests. You can also join discussions on our GitHub repository.
+We welcome community contributions! Please see our [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.

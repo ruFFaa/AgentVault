@@ -42,8 +42,7 @@ If you want to use the AgentVault CLI to interact with agents or use the `agentv
 After installing the CLI, check that the command is available:
 
 ```bash
-agentvault_cli --version
-```
+agentvault_cli --version```
 
 **Connecting to the Public Registry:**
 
@@ -54,6 +53,7 @@ You can use the installed CLI or library with the publicly hosted registry:
     *   Set the environment variable: `export AGENTVAULT_REGISTRY_URL=https://agentvault-registry-api.onrender.com` (Linux/macOS) or `set AGENTVAULT_REGISTRY_URL=https://agentvault-registry-api.onrender.com` (Windows Cmd) or `$env:AGENTVAULT_REGISTRY_URL='https://agentvault-registry-api.onrender.com'` (PowerShell).
     *   Or use the `--registry` flag with CLI commands: `agentvault_cli discover --registry https://agentvault-registry-api.onrender.com`
 *   **Note (Cold Start):** This instance runs on Render's free tier. If it hasn't received traffic recently, it might take **up to 60 seconds** to respond to the first request while it "wakes up". Subsequent requests will be faster. You can send a simple request like `curl https://agentvault-registry-api.onrender.com/health` to wake it up before running commands if needed.
+*   **Developer Registration:** You can register for a developer account on the public registry via the UI at [`https://agentvault-registry-api.onrender.com/ui/register`](https://agentvault-registry-api.onrender.com/ui/register). Follow the email verification steps.
 
 ## 2. Setting up for Development (Contributing or Running from Source)
 
@@ -65,6 +65,7 @@ If you want to contribute to AgentVault, run components locally from the source 
 *   Python 3.10 or 3.11
 *   [Poetry](https://python-poetry.org/docs/#installation) (Python dependency management and packaging tool)
 *   **PostgreSQL Server** (Required *only* if running the `agentvault_registry` locally).
+*   **(Optional) SMTP Server/Service:** Required *only* if running the `agentvault_registry` locally *and* you want email verification/password reset emails to be sent. Configure credentials in the registry's `.env` file.
 
 **Steps:**
 
@@ -120,10 +121,11 @@ To run the `agentvault_registry` API locally (e.g., for testing agents or the CL
     ```bash
     cd agentvault_registry
     ```
-3.  **Configure Database & Secrets:**
+3.  **Configure Database, Secrets & Email:**
     *   Copy `.env.example` to `.env` (if it exists) or create a `.env` file in the `agentvault_registry/` directory.
     *   Set the `DATABASE_URL` environment variable in the `.env` file to point to your local PostgreSQL instance (ensure it uses the `asyncpg` driver, e.g., `postgresql+asyncpg://user:pass@host:port/dbname`).
-    *   Set the `API_KEY_SECRET` environment variable in the `.env` file (generate a strong secret, e.g., `openssl rand -hex 32`).
+    *   Set the `API_KEY_SECRET` environment variable in the `.env` file (generate a strong secret, e.g., `openssl rand -hex 32`). This is used for signing JWTs.
+    *   **(Optional) Configure Email Settings:** If you want email verification and password reset to work, configure the `MAIL_...` variables in your `.env` file (e.g., `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_SERVER`, `MAIL_PORT`, `MAIL_FROM`). If these are not set, registration will still work, but verification/reset emails will not be sent. You can use a local SMTP debugging server (like `python -m smtpd -c DebuggingServer -n localhost:1025`) and configure the `.env` accordingly for testing email content without actually sending.
 4.  **Database Setup:**
     *   Ensure your PostgreSQL server is running and the specified database exists.
     *   Run database migrations using Alembic (make sure your virtual environment is activated):
@@ -140,4 +142,4 @@ To run the `agentvault_registry` API locally (e.g., for testing agents or the CL
     *   `--host 0.0.0.0`: Makes the server accessible from other devices on your network (use `127.0.0.1` for localhost only).
     *   `--port 8000`: The default port.
 
-The registry API should now be running at `http://localhost:8000`. You can access the API docs at `http://localhost:8000/docs`.
+The registry API should now be running at `http://localhost:8000`. You can access the API docs at `http://localhost:8000/docs` and the Developer Portal UI at `http://localhost:8000/ui/developer`. You can register a local developer account via `http://localhost:8000/ui/register`.

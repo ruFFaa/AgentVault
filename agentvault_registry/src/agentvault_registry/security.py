@@ -206,7 +206,7 @@ async def verify_access_token_required(token: str = Depends(oauth2_scheme_requir
     logger.debug(f"Required JWT verified successfully for developer ID: {developer_id}")
     return developer_id
 
-# --- CORRECTED FINAL TIME (AGAIN): verify_access_token_optional ---
+# --- CORRECTED verify_access_token_optional ---
 async def verify_access_token_optional(authorization: Optional[str] = Header(None)) -> Optional[int]:
     """
     FastAPI dependency to optionally verify JWT token from Authorization header.
@@ -218,13 +218,13 @@ async def verify_access_token_optional(authorization: Optional[str] = Header(Non
 
     parts = authorization.split()
     # Check format: exactly two parts, first part is "Bearer" (case-insensitive)
-    # --- THE ACTUAL FIX IS HERE: parts.lower() ---
     if len(parts) != 2 or parts[0].lower() != "bearer": # Check the FIRST part
         logger.debug(f"Optional JWT verification failed: Invalid Authorization header format. Header: {authorization[:20]}...")
         return None # Invalid scheme or format
 
-    token = parts # The actual token string is the SECOND part
-    # --- END ACTUAL FIX ---
+    # --- FIX: Extract the token string (second part) ---
+    token = parts[1]
+    # --- END FIX ---
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         developer_id_str: Optional[str] = payload.get("sub")
@@ -251,7 +251,7 @@ async def verify_access_token_optional(authorization: Optional[str] = Header(Non
     except Exception as e:
          logger.error(f"Unexpected error during optional JWT decode/validation: {e}", exc_info=True)
          return None # Treat unexpected errors as invalid token
-# --- END CORRECTED FINAL TIME (AGAIN) ---
+# --- END CORRECTED verify_access_token_optional ---
 
 async def verify_temp_password_token(token: str = Depends(oauth2_scheme_required)) -> int: # Use required scheme here
     """
