@@ -10,24 +10,50 @@ from .config import settings # Import configured settings
 logger = logging.getLogger(__name__)
 
 # --- fastapi-mail Configuration ---
-# Ensure required settings are present
-if not all([settings.MAIL_USERNAME, settings.MAIL_PASSWORD, settings.MAIL_FROM, settings.MAIL_SERVER]):
-    logger.warning("Email settings incomplete. Email sending disabled.")
-    conf = None # Disable if not configured
-else:
+# Check if essential server settings are present for basic connection
+if settings.MAIL_SERVER and settings.MAIL_FROM:
+    # --- MODIFIED: Conditional Credentials/TLS ---
+    use_credentials = bool(settings.MAIL_USERNAME and settings.MAIL_PASSWORD)
+    # Only enable STARTTLS if credentials are used AND MAIL_STARTTLS is True
+    # Disable STARTTLS if SSL_TLS is True (they are mutually exclusive)
+    use_starttls = use_credentials and settings.MAIL_STARTTLS and not settings.MAIL_SSL_TLS
+    use_ssl_tls = use_credentials and settings.MAIL_SSL_TLS # Only enable SSL if creds are used
+
+    logger.info(f"Configuring FastAPI-Mail:")
+    logger.info(f"  Server: {settings.MAIL_SERVER}:{settings.MAIL_PORT}")
+    logger.info(f"  Use Credentials: {use_credentials}")
+    logger.info(f"  Use STARTTLS: {use_starttls}")
+    logger.info(f"  Use SSL/TLS: {use_ssl_tls}")
+
+    # --- ADDED: Debug log for ConnectionConfig values ---
+    logger.debug(f"DEBUG EMAIL_UTILS: ConnectionConfig params - "
+                 f"MAIL_USERNAME='{settings.MAIL_USERNAME or ''}', "
+                 f"MAIL_PASSWORD='*****' (hidden), " # Hide password in logs
+                 f"MAIL_FROM='{settings.MAIL_FROM}', "
+                 f"MAIL_PORT={settings.MAIL_PORT}, "
+                 f"MAIL_SERVER='{settings.MAIL_SERVER}', "
+                 f"MAIL_STARTTLS={use_starttls}, "
+                 f"MAIL_SSL_TLS={use_ssl_tls}, "
+                 f"USE_CREDENTIALS={use_credentials}")
+    # --- END ADDED ---
+
     conf = ConnectionConfig(
-        MAIL_USERNAME=settings.MAIL_USERNAME,
-        MAIL_PASSWORD=settings.MAIL_PASSWORD,
+        MAIL_USERNAME=settings.MAIL_USERNAME or "", # Provide empty string if None
+        MAIL_PASSWORD=settings.MAIL_PASSWORD or "", # Provide empty string if None
         MAIL_FROM=settings.MAIL_FROM,
         MAIL_PORT=settings.MAIL_PORT,
         MAIL_SERVER=settings.MAIL_SERVER,
-        MAIL_STARTTLS=settings.MAIL_STARTTLS,
-        MAIL_SSL_TLS=settings.MAIL_SSL_TLS,
-        USE_CREDENTIALS=True,
-        VALIDATE_CERTS=True, # Recommended for production
+        MAIL_STARTTLS=use_starttls,
+        MAIL_SSL_TLS=use_ssl_tls,
+        USE_CREDENTIALS=use_credentials,
+        VALIDATE_CERTS=True, # Keep True for real servers
         TEMPLATE_FOLDER=Path(__file__).parent / 'templates' / 'email' # Path to templates
     )
-    logger.info(f"FastAPI-Mail configured for server: {settings.MAIL_SERVER}:{settings.MAIL_PORT}")
+    # --- END MODIFIED ---
+else:
+    logger.warning("Email settings (MAIL_SERVER, MAIL_FROM) are incomplete. Email sending disabled.")
+    conf = None # Disable if not configured
+
 
 fm = FastMail(conf) if conf else None
 

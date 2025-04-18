@@ -6,8 +6,8 @@ from typing import List, Optional, Annotated, Dict
 # --- END MODIFIED ---
 
 
-# --- MODIFIED: Added Query, RedirectResponse, Response, JSONResponse ---
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Body, Query, Response # Added Response
+# --- MODIFIED: Added BackgroundTasks, Query, Response, JSONResponse ---
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Body, Query, Response # Added Response, BackgroundTasks
 from fastapi.responses import RedirectResponse, JSONResponse # Added JSONResponse
 # --- END MODIFIED ---
 from fastapi.security import OAuth2PasswordRequestForm
@@ -18,8 +18,8 @@ from sqlalchemy.exc import IntegrityError
 from agentvault_registry import schemas, models, security
 from agentvault_registry.database import get_db
 from agentvault_registry.crud import developer as developer_crud # Use alias
-# --- MODIFIED: Import both email functions ---
-from agentvault_registry.email_utils import send_verification_email, send_password_reset_email # Added send_password_reset_email
+# --- MODIFIED: Import send_verification_email ---
+from agentvault_registry.email_utils import send_verification_email, send_password_reset_email # Added send_verification_email
 # --- END MODIFIED ---
 # --- ADDED: Import settings ---
 from agentvault_registry.config import settings
@@ -40,7 +40,9 @@ router = APIRouter(
     summary="Register a new developer account"
 )
 async def register_developer(
+    # --- MODIFIED: Inject BackgroundTasks ---
     background_tasks: BackgroundTasks,
+    # --- END MODIFIED ---
     developer_in: schemas.DeveloperCreate = Body(...),
     db: AsyncSession = Depends(get_db)
 ):
@@ -67,13 +69,17 @@ async def register_developer(
 
     # Generate and hash recovery keys
     plain_recovery_keys = security.generate_recovery_keys()
-    # Store hash of only one key for verification (adjust strategy if needed)
-    hashed_recovery = security.hash_recovery_key(plain_recovery_keys[0])
+    # --- CORRECTED LINE (Ensure this is applied) ---
+    print(f"DEBUG auth.py: Type before hash: {type(plain_recovery_keys[0])}, Value: {plain_recovery_keys[0]!r}")
+    hashed_recovery = security.hash_recovery_key(plain_recovery_keys[0]) # Hash only the first key
+    # --- END CORRECTED LINE ---
 
     # Generate verification token and expiry
     verification_token = secrets.token_urlsafe(32)
-    # Use setting for expiry calculation consistency
+    # --- MODIFIED: Use setting for expiry ---
+    
     expiry_time = datetime.now(timezone.utc) + timedelta(hours=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS)
+    # --- END MODIFIED ---
 
     # Prepare developer data for CRUD
     developer_data = models.Developer(
@@ -104,7 +110,7 @@ async def register_developer(
         logger.exception(f"Unexpected error during developer creation for email {developer_in.email}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error during registration.")
 
-    # Send verification email in background
+    # --- MODIFIED: Send verification email in background ---
     try:
         background_tasks.add_task(
             send_verification_email,
@@ -116,6 +122,7 @@ async def register_developer(
     except Exception as e:
         # Log error but don't fail registration if email sending fails initially
         logger.error(f"Failed to add verification email task for {created_developer.email}: {e}", exc_info=True)
+    # --- END MODIFIED ---
 
 
     return schemas.RegistrationResponse(
@@ -178,18 +185,26 @@ async def verify_email(token: str = Query(...), db: AsyncSession = Depends(get_d
     error_msg = "Invalid or expired verification token."
     if not developer:
         logger.warning(f"Verification failed: Token not found.")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+        # --- MODIFIED: Redirect on failure ---
+        # raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+        return RedirectResponse(url="/ui/verify-failed", status_code=status.HTTP_303_SEE_OTHER)
+        # --- END MODIFIED ---
 
     if developer.is_verified:
         logger.info(f"Email '{developer.email}' already verified.")
-        # Return JSON instead of Redirect for testing
-        return JSONResponse(content={"status": "already_verified"})
+        # --- MODIFIED: Redirect on success (already verified) ---
+        # return JSONResponse(content={"status": "already_verified"})
+        return RedirectResponse(url="/ui/verify-success?status=already_verified", status_code=status.HTTP_303_SEE_OTHER)
+        # --- END MODIFIED ---
 
 
     if developer.verification_token_expires is None or developer.verification_token_expires < datetime.now(timezone.utc):
         logger.warning(f"Verification failed: Token expired for email {developer.email}.")
         # Optionally allow resending verification?
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+        # --- MODIFIED: Redirect on failure ---
+        # raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+        return RedirectResponse(url="/ui/verify-failed?reason=expired", status_code=status.HTTP_303_SEE_OTHER)
+        # --- END MODIFIED ---
 
     # Token is valid, mark as verified
     developer.is_verified = True
@@ -199,12 +214,17 @@ async def verify_email(token: str = Query(...), db: AsyncSession = Depends(get_d
         db.add(developer)
         await db.commit()
         logger.info(f"Email successfully verified for developer: {developer.email} (ID: {developer.id})")
-        # Return JSON instead of Redirect for testing
-        return JSONResponse(content={"status": "verified"})
+        # --- MODIFIED: Redirect on success ---
+        # return JSONResponse(content={"status": "verified"})
+        return RedirectResponse(url="/ui/verify-success", status_code=status.HTTP_303_SEE_OTHER)
+        # --- END MODIFIED ---
     except Exception as e:
         await db.rollback()
         logger.exception(f"Database error during email verification for {developer.email}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update verification status.")
+        # --- MODIFIED: Redirect on failure ---
+        # raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update verification status.")
+        return RedirectResponse(url="/ui/verify-failed?reason=dberror", status_code=status.HTTP_303_SEE_OTHER)
+        # --- END MODIFIED ---
 
 # --- Recovery Key Flow Endpoints ---
 @router.post("/recover-account", response_model=schemas.Token, summary="Recover Account via Recovery Key")

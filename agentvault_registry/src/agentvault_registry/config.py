@@ -1,10 +1,10 @@
 import os
 import sys # Import sys
-# --- ADDED: Import List, Union, Optional ---
+# --- MODIFIED: Added List, Union, Optional, EmailStr ---
 from typing import List, Union, Optional
-# --- END ADDED ---
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import AnyHttpUrl, EmailStr # Added EmailStr
+# --- END MODIFIED ---
+from pydantic_settings import BaseSettings, SettingsConfigDict
 import logging
 from pathlib import Path # Import Path
 
@@ -41,9 +41,9 @@ class Settings(BaseSettings):
     # --- Security Settings ---
     API_KEY_SECRET: str # Used for JWT signing now
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30 # Default JWT expiry
-    # --- ADDED: Verification Token Expiry ---
+    # --- MODIFIED: Added Verification Token Expiry ---
     EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS: int = 24 # Default: 24 hours
-    # --- END ADDED ---
+    # --- END MODIFIED ---
 
 
     # --- CORS Settings ---
@@ -87,8 +87,10 @@ try:
         logger_config.info(f"Pydantic settings loaded env_file: {loaded_env_files}")
     except Exception:
         pass
+    # --- MODIFIED: Check email settings ---
     if not settings.MAIL_SERVER or not settings.MAIL_USERNAME or not settings.MAIL_FROM:
         logger_config.warning("Email settings (MAIL_SERVER, MAIL_USERNAME, MAIL_FROM) are not fully configured. Email sending will likely fail.")
+    # --- END MODIFIED ---
 
 
 except Exception as e:
@@ -98,12 +100,14 @@ except Exception as e:
         settings = Settings(
             DATABASE_URL="postgresql+asyncpg://test:test@localhost:5432/test_db",
             API_KEY_SECRET="test_secret_key_for_testing_only_fallback_1234567890abcdef",
-            # --- ADDED: Default for testing ---
+            # --- MODIFIED: Added default for testing ---
             EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS=1,
-            # --- END ADDED ---
+            # --- END MODIFIED ---
+            # --- ADDED: Placeholder email settings for tests ---
             MAIL_SERVER="smtp.example.com",
             MAIL_USERNAME="test@example.com",
             MAIL_FROM="test@example.com",
+            # --- END ADDED ---
             BASE_URL="http://testserver"
         )
         logger_config.warning("Using test settings for DATABASE_URL, API_KEY_SECRET, BASE_URL and placeholder EMAIL settings.")

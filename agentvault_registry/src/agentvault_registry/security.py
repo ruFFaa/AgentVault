@@ -8,6 +8,9 @@ from typing import Optional, Any, List
 from jose import JWTError, jwt
 # --- END ADDED ---
 from passlib.context import CryptContext
+# --- ADDED: Import bcrypt directly ---
+import bcrypt
+# --- END ADDED ---
 from typing import Optional # Added Optional
 
 # --- FastAPI Imports ---
@@ -40,7 +43,7 @@ from agentvault_registry.config import settings
 
 logger = logging.getLogger(__name__)
 
-# --- Password Hashing Context ---
+# --- Password Hashing Context (Keep for passwords) ---
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # --- JWT Configuration ---
@@ -52,6 +55,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
 def verify_api_key(plain_api_key: str, hashed_api_key: str) -> bool:
     """Verifies a plain API key against its stored hash using passlib context."""
     try:
+        # Use passlib for verifying keys hashed by passlib
         return pwd_context.verify(plain_api_key, hashed_api_key)
     except Exception as e:
         logger.error(f"Error verifying API key hash: {e}", exc_info=True)
@@ -60,6 +64,7 @@ def verify_api_key(plain_api_key: str, hashed_api_key: str) -> bool:
 # --- API Key Hashing (for programmatic keys) ---
 def hash_api_key(api_key: str) -> str:
     """Hashes an API key using the configured context (bcrypt)."""
+    # Use passlib for hashing programmatic keys for consistency
     return pwd_context.hash(api_key)
 
 # --- Password Verification ---
@@ -92,22 +97,48 @@ def generate_recovery_keys(count: int = 3) -> List[str]:
     """Generates a list of secure, user-friendly recovery keys."""
     keys = []
     for _ in range(count):
+        # Generate more entropy if needed
         key = f"avrec-{secrets.token_hex(4)}-{secrets.token_hex(4)}-{secrets.token_hex(4)}"
         keys.append(key)
     logger.info(f"Generated {count} recovery keys.")
     return keys
 
+# --- MODIFIED: hash_recovery_key uses bcrypt directly ---
 def hash_recovery_key(recovery_key: str) -> str:
-    """Hashes a single recovery key."""
-    return pwd_context.hash(recovery_key)
-
-def verify_recovery_key(plain_recovery_key: str, stored_hash: str) -> bool:
-    """Verifies a plain recovery key against its stored hash."""
+    """Hashes a single recovery key using bcrypt directly."""
+    logger.debug(f"Hashing recovery key directly with bcrypt. Input type: {type(recovery_key)}")
+    if not isinstance(recovery_key, str):
+         # Add explicit check here before encoding
+         logger.error(f"hash_recovery_key received non-string input: type={type(recovery_key)}")
+         raise TypeError("Recovery key must be a string")
     try:
-        return pwd_context.verify(plain_recovery_key, stored_hash)
+        key_bytes = recovery_key.encode('utf-8')
+        salt = bcrypt.gensalt()
+        hashed_bytes = bcrypt.hashpw(key_bytes, salt)
+        return hashed_bytes.decode('utf-8')
     except Exception as e:
-        logger.error(f"Error verifying recovery key hash: {e}", exc_info=True)
+        logger.exception(f"Error hashing recovery key directly with bcrypt: {e}")
+        raise # Re-raise to indicate failure
+
+# --- MODIFIED: verify_recovery_key uses bcrypt directly ---
+def verify_recovery_key(plain_recovery_key: str, stored_hash: str) -> bool:
+    """Verifies a plain recovery key against its stored hash using bcrypt directly."""
+    logger.debug(f"Verifying recovery key directly with bcrypt.")
+    if not isinstance(plain_recovery_key, str) or not isinstance(stored_hash, str):
+        logger.warning("Invalid types received for recovery key verification.")
         return False
+    try:
+        key_bytes = plain_recovery_key.encode('utf-8')
+        stored_hash_bytes = stored_hash.encode('utf-8')
+        return bcrypt.checkpw(key_bytes, stored_hash_bytes)
+    except ValueError:
+        # bcrypt.checkpw can raise ValueError for invalid hash format
+        logger.warning(f"Invalid hash format encountered during recovery key verification.")
+        return False
+    except Exception as e:
+        logger.error(f"Error verifying recovery key directly with bcrypt: {e}", exc_info=True)
+        return False
+# --- END MODIFIED ---
 
 # --- JWT Creation ---
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -186,11 +217,11 @@ async def verify_access_token_optional(authorization: Optional[str] = Header(Non
         return None # No header, no user
 
     parts = authorization.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
+    if len(parts) != 2 or parts.lower() != "bearer":
         logger.debug(f"Optional JWT verification failed: Invalid Authorization header format (Scheme is not Bearer or wrong parts). Header: {authorization[:20]}...")
         return None # Invalid scheme or format
 
-    token = parts[1]
+    token = parts
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         developer_id_str: Optional[str] = payload.get("sub")
