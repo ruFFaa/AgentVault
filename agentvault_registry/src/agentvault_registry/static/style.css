@@ -358,6 +358,7 @@ button {
     text-align: center;
     margin-bottom: 1rem;
     color: #6c757d;
+    font-size: 0.9em; /* Slightly smaller text */
 }
 
 .form-group {
@@ -415,6 +416,7 @@ button {
 
 .message-area {
     padding: 0.8rem;
+    margin-top: 1rem; /* Added margin top */
     margin-bottom: 1rem;
     border-radius: 4px;
     display: none; /* Hidden by default */

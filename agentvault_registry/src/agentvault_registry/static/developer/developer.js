@@ -951,8 +951,8 @@ async function handleGenerateAgentPackage() {
             let filename = `${buildConfig.agent_name.toLowerCase().replace(/[^a-z0-9]/gi, '_') || 'agent'}.zip`; // Default filename
             if (contentDisposition) {
                 const filenameMatch = contentDisposition.match(/filename\*?=['"]?([^'";]+)['"]?/);
-                if (filenameMatch && filenameMatch[1]) {
-                    filename = decodeURIComponent(filenameMatch[1]);
+                if (filenameMatch && filenameMatch) {
+                    filename = decodeURIComponent(filenameMatch);
                 }
             }
 

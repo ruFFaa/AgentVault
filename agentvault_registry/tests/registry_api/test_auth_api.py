@@ -171,7 +171,9 @@ def test_register_developer_name_conflict(
 
     # --- Assert ---
     assert response.status_code == status.HTTP_409_CONFLICT
+    # --- FIXED: Update expected error message ---
     assert "Username or email already exists" in response.json()["detail"]
+    # --- END FIXED ---
     mock_crud_get_email.assert_awaited_once()
     mock_crud_create.assert_awaited_once()
 
@@ -280,6 +282,7 @@ def test_login_incorrect_password(
     mock_verify_pass.assert_called_once_with("wrongpassword", mock_developer.hashed_password)
 
 # --- Tests for /auth/verify-email ---
+# --- MODIFIED: Update tests to check for redirects ---
 @patch("agentvault_registry.crud.developer.get_developer_by_verification_token", new_callable=AsyncMock)
 def test_verify_email_success(
     mock_crud_get_token: AsyncMock,
@@ -287,20 +290,18 @@ def test_verify_email_success(
     mock_db_session: MagicMock,
     mock_developer: models.Developer
 ):
-    """Test successful email verification."""
-    # --- Arrange ---
+    """Test successful email verification redirects to success page."""
     test_token = "valid_verify_token"
     mock_developer.is_verified = False
     mock_developer.email_verification_token = test_token
     mock_developer.verification_token_expires = datetime.now(timezone.utc) + timedelta(hours=1)
     mock_crud_get_token.return_value = mock_developer
 
-    # --- Act ---
-    response = sync_test_client.get(f"{AUTH_URL}/verify-email", params={"token": test_token})
+    # Make request but DO NOT follow redirects
+    response = sync_test_client.get(f"{AUTH_URL}/verify-email", params={"token": test_token}, allow_redirects=False)
 
-    # --- Assert ---
-    assert response.status_code == status.HTTP_200_OK
-    assert response.json() == {"status": "verified"}
+    assert response.status_code == status.HTTP_303_SEE_OTHER
+    assert response.headers["location"] == "/ui/verify-success"
     mock_crud_get_token.assert_awaited_once_with(mock_db_session, token=test_token)
     mock_db_session.add.assert_called_once_with(mock_developer)
     mock_db_session.commit.assert_awaited_once()
@@ -310,38 +311,42 @@ def test_verify_email_success(
 
 @patch("agentvault_registry.crud.developer.get_developer_by_verification_token", new_callable=AsyncMock)
 def test_verify_email_invalid_token(mock_crud_get_token: AsyncMock, sync_test_client: TestClient, mock_db_session: MagicMock):
-    """Test verification with an invalid/unknown token."""
+    """Test verification with an invalid token redirects to failed page."""
     mock_crud_get_token.return_value = None
-    response = sync_test_client.get(f"{AUTH_URL}/verify-email", params={"token": "invalid_token"})
-    assert response.status_code == status.HTTP_400_BAD_REQUEST
-    assert "Invalid or expired verification token" in response.json()["detail"]
+    response = sync_test_client.get(f"{AUTH_URL}/verify-email", params={"token": "invalid_token"}, allow_redirects=False)
+    assert response.status_code == status.HTTP_303_SEE_OTHER
+    assert response.headers["location"] == "/ui/verify-failed"
 
 @patch("agentvault_registry.crud.developer.get_developer_by_verification_token", new_callable=AsyncMock)
 def test_verify_email_expired_token(mock_crud_get_token: AsyncMock, sync_test_client: TestClient, mock_db_session: MagicMock, mock_developer: models.Developer):
-    """Test verification with an expired token."""
+    """Test verification with an expired token redirects to failed page."""
     test_token = "expired_token"
     mock_developer.is_verified = False
     mock_developer.email_verification_token = test_token
     mock_developer.verification_token_expires = datetime.now(timezone.utc) - timedelta(hours=1) # Expired
     mock_crud_get_token.return_value = mock_developer
 
-    response = sync_test_client.get(f"{AUTH_URL}/verify-email", params={"token": test_token})
-    assert response.status_code == status.HTTP_400_BAD_REQUEST
-    assert "Invalid or expired verification token" in response.json()["detail"]
+    response = sync_test_client.get(f"{AUTH_URL}/verify-email", params={"token": test_token}, allow_redirects=False)
+    assert response.status_code == status.HTTP_303_SEE_OTHER
+    assert "/ui/verify-failed" in response.headers["location"] # Check base path
+    assert "reason=expired" in response.headers["location"] # Check query param
 
 @patch("agentvault_registry.crud.developer.get_developer_by_verification_token", new_callable=AsyncMock)
 def test_verify_email_already_verified(mock_crud_get_token: AsyncMock, sync_test_client: TestClient, mock_db_session: MagicMock, mock_developer: models.Developer):
-    """Test verification when the developer is already verified."""
+    """Test verification when already verified redirects to success page."""
     test_token = "valid_token_but_verified"
     mock_developer.is_verified = True # Already verified
     mock_developer.email_verification_token = test_token
     mock_developer.verification_token_expires = datetime.now(timezone.utc) + timedelta(hours=1)
     mock_crud_get_token.return_value = mock_developer
 
-    response = sync_test_client.get(f"{AUTH_URL}/verify-email", params={"token": test_token})
-    assert response.status_code == status.HTTP_200_OK
-    assert response.json() == {"status": "already_verified"}
+    response = sync_test_client.get(f"{AUTH_URL}/verify-email", params={"token": test_token}, allow_redirects=False)
+    assert response.status_code == status.HTTP_303_SEE_OTHER
+    assert "/ui/verify-success" in response.headers["location"]
+    assert "status=already_verified" in response.headers["location"]
     mock_db_session.commit.assert_not_awaited() # Should not commit changes
+# --- END MODIFIED ---
+
 
 # --- Tests for Recovery Key Flow ---
 @patch("agentvault_registry.routers.auth.developer_crud.get_developer_by_email", new_callable=AsyncMock)

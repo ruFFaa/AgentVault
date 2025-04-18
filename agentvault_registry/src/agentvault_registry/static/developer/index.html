@@ -28,10 +28,11 @@
     <!-- END MODIFIED -->
 
     <main>
-        <!-- Login Section - Replaced with check in JS -->
-        <section id="login-required-message" style="display: none; text-align: center; padding: 2rem; border: 1px solid #dee2e6; background-color: #f8f9fa; border-radius: 8px;">
+        <!-- Login Required Message -->
+        <section id="login-required-message" style="display: none;">
             <h2>Authentication Required</h2>
             <p>Please <a href="/ui/login">login</a> or <a href="/ui/register">register</a> to access the Developer Portal.</p>
+            <p>Lost your password? <a href="/ui/forgot-password">Request a reset</a> or <a href="/ui/recover-with-key">recover with key</a>.</p>
         </section>
 
         <section id="dashboard-section" style="display: none;">
@@ -49,7 +50,7 @@
                     </div>
                 </div>
                 <div id="my-cards-list">
-                    <p>Loading your agents...</p>
+                    <p>Fetching your agent cards...</p>
                 </div>
             </section>
 

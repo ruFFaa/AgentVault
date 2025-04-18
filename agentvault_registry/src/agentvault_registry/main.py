@@ -226,6 +226,43 @@ async def read_set_new_password_ui():
         raise HTTPException(status_code=500, detail="Could not load set new password page.")
 # --- END ADDED ---
 
+# --- ADDED: Routes for Verification/Reset Status Pages ---
+@app.get("/ui/verify-success", response_class=HTMLResponse, tags=["UI"], include_in_schema=False)
+async def read_verify_success_ui():
+    """Serves the email verification success page."""
+    path = STATIC_DIR / "verify-success.html"
+    if not path.is_file(): raise HTTPException(status_code=404, detail="Verification success page not found.")
+    return HTMLResponse(content=path.read_text(encoding="utf-8"))
+
+@app.get("/ui/verify-failed", response_class=HTMLResponse, tags=["UI"], include_in_schema=False)
+async def read_verify_failed_ui():
+    """Serves the email verification failed page."""
+    path = STATIC_DIR / "verify-failed.html"
+    if not path.is_file(): raise HTTPException(status_code=404, detail="Verification failed page not found.")
+    return HTMLResponse(content=path.read_text(encoding="utf-8"))
+
+@app.get("/ui/reset-requested", response_class=HTMLResponse, tags=["UI"], include_in_schema=False)
+async def read_reset_requested_ui():
+    """Serves the password reset requested confirmation page."""
+    path = STATIC_DIR / "reset-requested.html"
+    if not path.is_file(): raise HTTPException(status_code=404, detail="Reset requested page not found.")
+    return HTMLResponse(content=path.read_text(encoding="utf-8"))
+
+@app.get("/ui/reset-success", response_class=HTMLResponse, tags=["UI"], include_in_schema=False)
+async def read_reset_success_ui():
+    """Serves the password reset success page."""
+    path = STATIC_DIR / "reset-success.html"
+    if not path.is_file(): raise HTTPException(status_code=404, detail="Reset success page not found.")
+    return HTMLResponse(content=path.read_text(encoding="utf-8"))
+
+@app.get("/ui/reset-failed", response_class=HTMLResponse, tags=["UI"], include_in_schema=False)
+async def read_reset_failed_ui():
+    """Serves the password reset failed page."""
+    path = STATIC_DIR / "reset-failed.html"
+    if not path.is_file(): raise HTTPException(status_code=404, detail="Reset failed page not found.")
+    return HTMLResponse(content=path.read_text(encoding="utf-8"))
+# --- END ADDED ---
+
 
 # --- Health Check Endpoint ---
 @app.get("/health", tags=["Status"])

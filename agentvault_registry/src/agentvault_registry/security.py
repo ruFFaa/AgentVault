@@ -206,7 +206,7 @@ async def verify_access_token_required(token: str = Depends(oauth2_scheme_requir
     logger.debug(f"Required JWT verified successfully for developer ID: {developer_id}")
     return developer_id
 
-# --- MODIFIED: verify_access_token_optional uses Header directly ---
+# --- CORRECTED FINAL TIME (AGAIN): verify_access_token_optional ---
 async def verify_access_token_optional(authorization: Optional[str] = Header(None)) -> Optional[int]:
     """
     FastAPI dependency to optionally verify JWT token from Authorization header.
@@ -217,11 +217,14 @@ async def verify_access_token_optional(authorization: Optional[str] = Header(Non
         return None # No header, no user
 
     parts = authorization.split()
-    if len(parts) != 2 or parts.lower() != "bearer":
-        logger.debug(f"Optional JWT verification failed: Invalid Authorization header format (Scheme is not Bearer or wrong parts). Header: {authorization[:20]}...")
+    # Check format: exactly two parts, first part is "Bearer" (case-insensitive)
+    # --- THE ACTUAL FIX IS HERE: parts.lower() ---
+    if len(parts) != 2 or parts[0].lower() != "bearer": # Check the FIRST part
+        logger.debug(f"Optional JWT verification failed: Invalid Authorization header format. Header: {authorization[:20]}...")
         return None # Invalid scheme or format
 
-    token = parts
+    token = parts # The actual token string is the SECOND part
+    # --- END ACTUAL FIX ---
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         developer_id_str: Optional[str] = payload.get("sub")
@@ -248,7 +251,7 @@ async def verify_access_token_optional(authorization: Optional[str] = Header(Non
     except Exception as e:
          logger.error(f"Unexpected error during optional JWT decode/validation: {e}", exc_info=True)
          return None # Treat unexpected errors as invalid token
-# --- END MODIFIED ---
+# --- END CORRECTED FINAL TIME (AGAIN) ---
 
 async def verify_temp_password_token(token: str = Depends(oauth2_scheme_required)) -> int: # Use required scheme here
     """
