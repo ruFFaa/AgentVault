@@ -1,0 +1,67 @@
+name: Run Project Tests # The name displayed on GitHub Actions tab
+
+# When should this workflow run?
+on:
+  push:
+    branches: [ "main" ] # Run on pushes to the main branch
+  pull_request:
+    branches: [ "main" ] # Run on pull requests targeting the main branch
+  # Optional: Allow manual trigger from Actions tab
+  workflow_dispatch:
+
+jobs: # Define one or more jobs to run
+  test: # Name of the job (can be anything descriptive)
+    runs-on: ubuntu-latest # Specify the runner environment (Linux is common for Python)
+    # Optional: Define a strategy matrix to run on multiple Python versions
+    # strategy:
+    #   matrix:
+    #     python-version: ['3.10', '3.11'] # Test against supported Python versions
+
+    name: Run Pytest # Display name for this specific job run
+    steps: # Sequence of tasks to execute
+      # Step 1: Get the code from the repository
+      - name: Checkout repository
+        uses: actions/checkout@v4 # Use the standard checkout action
+
+      # Step 2: Set up the specified Python version
+      - name: Set up Python ${{ matrix.python-version || '3.11' }} # Use matrix version or default to 3.11
+        id: setup-python # Give this step an ID for later reference
+        uses: actions/setup-python@v5
+        with:
+          # Use the Python version from the matrix, or default to 3.11 if matrix isn't used
+          python-version: ${{ matrix.python-version || '3.11' }}
+
+      # Step 3: Install Poetry (using exact version)
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: '1.8.3' # Specify an exact, known stable version
+          virtualenvs-create: true
+          virtualenvs-in-project: false # Keep false for CI caching
+          installer-parallel: true
+
+      # Step 4: Display Poetry version (for debugging)
+      - name: Display Poetry version
+        run: poetry --version
+
+      # Step 5: Load cached Poetry cache
+      - name: Load cached Poetry cache # Cache Poetry's package cache
+        id: cached-poetry-dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry # Standard cache location on Linux runners
+          key: poetry-cache-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: |
+            poetry-cache-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-
+
+      # Step 6: Install dependencies using Poetry
+      - name: Install dependencies
+        run: poetry install --no-interaction --no-root --with dev
+        # --no-interaction: Don't ask questions
+        # --no-root: Don't install the root monorepo package itself (it's not a package)
+        # --with dev: Install development dependencies (like pytest)
+
+      # Step 7: Run Pytest
+      - name: Run tests with pytest
+        run: poetry run pytest -v # Use '-v' for verbose output
+        # Optional: Add coverage later: poetry run pytest --cov=. --cov-report=xml
