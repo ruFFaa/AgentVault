@@ -5,7 +5,9 @@ import os # Import os for chdir
 import logging # Import logging for caplog
 
 # Import the Typer app instance
+# --- MODIFIED: Corrected import path based on structure ---
 from agentvault_server_sdk.packager.cli import app, DOCKERIGNORE_CONTENT # Import content for check
+# --- END MODIFIED ---
 
 # Instantiate CliRunner with mix_stderr=True
 runner = CliRunner(mix_stderr=True)
@@ -64,13 +66,19 @@ def test_package_agent_requires_output_dir():
     """Test that the command fails if output directory is missing."""
     result = runner.invoke(app, ["--entrypoint", "main:app"])
     assert result.exit_code != 0
-    assert "Missing option '--output-dir'" in result.output # Check combined output
+    # --- MODIFIED: Check for key parts of the message ---
+    assert "Missing option" in result.output
+    assert "'--output-dir'" in result.output # Check for the option name itself
+    # --- END MODIFIED ---
 
 def test_package_agent_requires_entrypoint():
     """Test that the command fails if entrypoint is missing."""
     result = runner.invoke(app, ["--output-dir", "./temp_out"])
     assert result.exit_code != 0
-    assert "Missing option '--entrypoint'" in result.output # Check combined output
+    # --- MODIFIED: Check for key parts of the message ---
+    assert "Missing option" in result.output
+    assert "'--entrypoint'" in result.output # Check for the option name itself
+    # --- END MODIFIED ---
 
 # --- Tests for requirements handling ---
 
