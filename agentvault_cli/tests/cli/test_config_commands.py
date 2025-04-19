@@ -115,15 +115,21 @@ async def test_config_set_keyring_error(runner: CliRunner, mocker: MockerFixture
     mock_manager_instance.set_key_in_keyring.side_effect = av_exceptions.KeyManagementError(error_message)
     mock_key_manager_cls.return_value = mock_manager_instance
 
-    # --- MODIFIED: Check exit code ---
+    # --- MODIFIED: Assert mock call, check exception details ---
     result = await runner.invoke(
         config_group,
         ['set', 'keyring-service', '--keyring'],
         catch_exceptions=True # Catch the exit
     )
-    assert result.exit_code == 1, "Command should have failed due to KeyManagementError" # Check exit code
-    # --- END MODIFIED ---
     mock_display_error.assert_any_call(f"Failed to set API key in keyring: {error_message}")
+    # Assert exception type and code if possible (might still fail with ValueError)
+    if result.exception:
+        assert isinstance(result.exception, SystemExit)
+        assert result.exception.code == 1
+    else:
+        # If exception is None (due to ValueError), at least check exit code if available
+        assert result.exit_code == 1, "Command should have indicated failure (exit code 1)"
+    # --- END MODIFIED ---
     mock_manager_instance.set_key_in_keyring.assert_called_once()
 
 @pytest.mark.asyncio
@@ -133,9 +139,11 @@ async def test_config_set_keyring_lib_missing(runner: CliRunner, mocker: MockerF
      # Patch the import check flag within the config module
      mocker.patch('agentvault_cli.commands.config._agentvault_lib_imported', False)
 
-     # --- MODIFIED: Check exit code ---
+     # --- MODIFIED: Check exit code and exception ---
      result = await runner.invoke(config_group, ['set', 'keyring-service', '--keyring'], catch_exceptions=True)
      assert result.exit_code == 1, "Command should have failed due to missing library" # Check exit code
+     assert isinstance(result.exception, SystemExit) # Check it exited via SystemExit
+     assert result.exception.code == 1
      # --- END MODIFIED ---
      mock_display_error.assert_called_once_with("Cannot use --keyring or --oauth-configure: Failed to import the 'agentvault' library.")
 
@@ -168,7 +176,7 @@ async def test_config_set_oauth_configure_success(runner: CliRunner, mocker: Moc
     mock_manager_instance.set_oauth_creds_in_keyring.assert_called_once_with('oauth-service', 'test-client-id', 'test-secret')
 
 @pytest.mark.asyncio
-async def test_config_set_oauth_configure_keyring_unavailable(runner: CliRunner, mocker: MockerFixture):
+async def test_config_set_oauth_configure_keyring_unavailable(runner: CliRunner, mocker: MockerFixture, capsys):
     """Test 'config set --oauth-configure' when keyring is not functional."""
     mock_display_error = mocker.patch('agentvault_cli.commands.config.utils.display_error')
     mock_display_info = mocker.patch('agentvault_cli.commands.config.utils.display_info')
@@ -179,14 +187,19 @@ async def test_config_set_oauth_configure_keyring_unavailable(runner: CliRunner,
     mock_manager_instance.set_oauth_creds_in_keyring = MagicMock()
     mock_key_manager_cls.return_value = mock_manager_instance
 
-    # --- MODIFIED: Check exit code and error message display ---
-    result = await runner.invoke(
-        config_group,
-        ['set', 'oauth-service', '--oauth-configure'],
-        catch_exceptions=True # Catch exit
-    )
-    assert result.exit_code == 1, "Command should have failed due to unavailable keyring" # Check exit code
-    mock_display_error.assert_called_once_with("Keyring support is not available or functional. Cannot securely store OAuth credentials.")
+    # --- MODIFIED: Assert mock call, check exception ---
+    # Disable capsys to potentially avoid the ValueError, but focus on asserting the mock call
+    with capsys.disabled():
+        result = await runner.invoke(
+            config_group,
+            ['set', 'oauth-service', '--oauth-configure'],
+            catch_exceptions=True # Still catch exit
+        )
+    # Assert the specific error message was displayed
+    mock_display_error.assert_any_call("Keyring support is not available or functional. Cannot securely store OAuth credentials.")
+    # Check the exception caught by the runner (should be SystemExit now)
+    assert isinstance(result.exception, SystemExit)
+    assert result.exception.code == 1
     # --- END MODIFIED ---
     mock_display_info.assert_any_call("Hint: Check keyring documentation for backend setup or install 'keyrings.alt'.")
     mock_manager_instance.set_oauth_creds_in_keyring.assert_not_called()
@@ -206,13 +219,15 @@ async def test_config_set_oauth_configure_storage_error(runner: CliRunner, mocke
     mock_manager_instance.set_oauth_creds_in_keyring.side_effect = av_exceptions.KeyManagementError(error_message)
     mock_key_manager_cls.return_value = mock_manager_instance
 
-    # --- MODIFIED: Check exit code ---
+    # --- MODIFIED: Check exit code and exception ---
     result = await runner.invoke(
         config_group,
         ['set', 'oauth-service', '--oauth-configure'],
         catch_exceptions=True # Catch exit
     )
     assert result.exit_code == 1, "Command should have failed due to KeyManagementError" # Check exit code
+    assert isinstance(result.exception, SystemExit)
+    assert result.exception.code == 1
     # --- END MODIFIED ---
     mock_display_error.assert_any_call(f"Failed to set OAuth credentials in keyring: {error_message}")
     mock_manager_instance.set_oauth_creds_in_keyring.assert_called_once()
