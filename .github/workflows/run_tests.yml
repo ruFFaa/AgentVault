@@ -1,0 +1,91 @@
+# .github/workflows/run_tests.yml
+
+name: Run Project Tests # The name displayed on GitHub Actions tab
+
+# When should this workflow run?
+on:
+  push:
+    branches: [ "main" ] # Run on pushes to the main branch
+  pull_request:
+    branches: [ "main" ] # Run on pull requests targeting the main branch
+  # Optional: Allow manual trigger from Actions tab
+  workflow_dispatch:
+
+jobs: # Define one or more jobs to run
+  test: # Name of the job (can be anything descriptive)
+    runs-on: ubuntu-latest # Specify the runner environment (Linux is common for Python)
+    # Optional: Define a strategy matrix to run on multiple Python versions
+    # strategy:
+    #   matrix:
+    #     python-version: ['3.10', '3.11'] # Test against supported Python versions
+
+    name: Run Pytest # Display name for this specific job run
+    steps: # Sequence of tasks to execute
+      # Step 1: Get the code from the repository
+      - name: Checkout repository
+        uses: actions/checkout@v4 # Use the standard checkout action
+
+      # Step 2: Set up the specified Python version
+      - name: Set up Python ${{ matrix.python-version || '3.11' }} # Use matrix version or default to 3.11
+        id: setup-python # Give this step an ID for later reference
+        uses: actions/setup-python@v5
+        with:
+          # Use the Python version from the matrix, or default to 3.11 if matrix isn't used
+          python-version: ${{ matrix.python-version || '3.11' }}
+
+      # Step 3: Install Poetry
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          # Version constraint if needed, otherwise uses latest stable
+          # version: '^1.8'
+          virtualenvs-create: true # Instruct Poetry to create a virtual environment
+          # IMPORTANT: Set virtualenvs-in-project to false for CI.
+          # This places the venv outside the project dir, making caching cleaner.
+          virtualenvs-in-project: false
+          # Optional: Use Poetry's modern installer
+          installer-parallel: true
+
+      # Step 4: Load cached venv if available
+      # Cache based on OS, Python version, and the lock file hash
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v4
+        with:
+          # Path to cache: Poetry creates venvs in a standard cache dir when
+          # virtualenvs-in-project is false. We need to find this path.
+          # Poetry's default cache location depends on the OS.
+          # A common approach is to cache ~/.cache/pypoetry/virtualenvs
+          # Or let Poetry manage it within the runner's tool cache (might be simpler)
+          # Let's try caching the venv created by setup-python/poetry:
+          # The path depends on the runner OS and Poetry version.
+          # A more robust way is often to cache pip/poetry caches directly.
+          # Let's cache Poetry's package cache instead for simplicity first.
+          # path: ~/.cache/pypoetry
+          # For now, let's cache based on the lock file hash directly for installed packages.
+          # We will cache the virtual environment directory managed by Poetry.
+          # The exact path might vary slightly, but let's target the standard location.
+          # On Linux runners, it's typically ~/.cache/pypoetry/virtualenvs
+          # We need a reliable way to get this path. Let's refine this later if needed.
+          # For now, let's assume Poetry installs into a predictable location or we use the cache key correctly.
+          # A simpler approach: Cache the installed packages via pip cache if Poetry uses pip internally.
+          # Let's stick to caching the venv based on the lock file for now.
+          # The path needs to point to where Poetry creates the venv. Since virtualenvs-in-project=false,
+          # it's outside the project. Let's rely on the cache action finding it based on the key.
+          # **Correction:** A better way is to cache Poetry's package cache itself.
+          path: ~/.cache/pypoetry # Cache poetry's global cache directory
+          key: poetry-cache-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: |
+            poetry-cache-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-
+
+      # Step 5: Install dependencies using Poetry
+      - name: Install dependencies
+        run: poetry install --no-interaction --no-root --with dev
+        # --no-interaction: Don't ask questions
+        # --no-root: Don't install the root monorepo package itself (it's not a package)
+        # --with dev: Install development dependencies (like pytest)
+
+      # Step 6: Run Pytest
+      - name: Run tests with pytest
+        run: poetry run pytest -v # Use '-v' for verbose output
+        # Optional: Add coverage later: poetry run pytest --cov=. --cov-report=xml
