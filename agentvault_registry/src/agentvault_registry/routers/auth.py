@@ -1,7 +1,7 @@
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
-# --- MODIFIED: Added Annotated, Dict ---
+# --- MODIFIED: Added Dict ---
 from typing import List, Optional, Annotated, Dict
 # --- END MODIFIED ---
 
@@ -35,100 +35,39 @@ router = APIRouter(
 
 @router.post(
     "/register",
-    response_model=schemas.RegistrationResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Register a new developer account"
+    # --- MODIFIED: Changed response model for error, added 503 response ---
+    # response_model=schemas.RegistrationResponse, # Original success model
+    status_code=status.HTTP_503_SERVICE_UNAVAILABLE, # Return 503
+    summary="Register a new developer account (Temporarily Disabled)",
+    responses={
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Registration temporarily disabled"}
+    }
+    # --- END MODIFIED ---
 )
 async def register_developer(
-    # --- MODIFIED: Inject BackgroundTasks ---
+    # --- MODIFIED: Keep params for signature, but don't use them yet ---
     background_tasks: BackgroundTasks,
-    # --- END MODIFIED ---
     developer_in: schemas.DeveloperCreate = Body(...),
     db: AsyncSession = Depends(get_db)
+    # --- END MODIFIED ---
 ):
     """
     Handles new developer registration.
-    - Checks if email already exists.
-    - Hashes password and recovery key.
-    - Generates verification token.
-    - Creates developer record in DB.
-    - Sends verification email in the background.
-    - Returns success message and **plain text recovery keys**.
+    **NOTE: This endpoint is temporarily disabled pending email service activation.**
     """
-    logger.info(f"Registration attempt for email: {developer_in.email}")
-    existing_developer = await developer_crud.get_developer_by_email(db, email=developer_in.email)
-    if existing_developer:
-        logger.warning(f"Registration failed: Email '{developer_in.email}' already registered.")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered.",
-        )
-
-    # Hash password
-    hashed_password = security.hash_password(developer_in.password.get_secret_value())
-
-    # Generate and hash recovery keys
-    plain_recovery_keys = security.generate_recovery_keys()
-    # --- CORRECTED LINE (Ensure this is applied) ---
-    print(f"DEBUG auth.py: Type before hash: {type(plain_recovery_keys[0])}, Value: {plain_recovery_keys[0]!r}")
-    hashed_recovery = security.hash_recovery_key(plain_recovery_keys[0]) # Hash only the first key
-    # --- END CORRECTED LINE ---
-
-    # Generate verification token and expiry
-    verification_token = secrets.token_urlsafe(32)
-    # --- MODIFIED: Use setting for expiry ---
-    
-    expiry_time = datetime.now(timezone.utc) + timedelta(hours=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS)
+    # --- MODIFIED: Raise HTTPException immediately ---
+    logger.warning("Registration endpoint called while temporarily disabled.")
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Registration is temporarily disabled pending email service activation. Please check back later."
+    )
     # --- END MODIFIED ---
 
-    # Prepare developer data for CRUD
-    developer_data = models.Developer(
-        name=developer_in.name,
-        email=developer_in.email,
-        hashed_password=hashed_password,
-        hashed_recovery_key=hashed_recovery,
-        is_verified=False,
-        email_verification_token=verification_token,
-        verification_token_expires=expiry_time
-    )
-
-    try:
-        # Create developer in DB (assuming CRUD function exists)
-        created_developer = await developer_crud.create_developer_with_hashed_details(
-            db=db, developer_data=developer_data
-        )
-        if not created_developer: # Should not happen if no exception, but check
-             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create developer record.")
-
-    except IntegrityError: # Catch potential race condition or unique constraint violation (e.g., name)
-        logger.warning(f"Registration conflict for name '{developer_in.name}' or email '{developer_in.email}'.")
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Username or email already exists.",
-        )
-    except Exception as e:
-        logger.exception(f"Unexpected error during developer creation for email {developer_in.email}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error during registration.")
-
-    # --- MODIFIED: Send verification email in background ---
-    try:
-        background_tasks.add_task(
-            send_verification_email,
-            to_email=created_developer.email,
-            username=created_developer.name,
-            token=verification_token
-        )
-        logger.info(f"Verification email task added for {created_developer.email}")
-    except Exception as e:
-        # Log error but don't fail registration if email sending fails initially
-        logger.error(f"Failed to add verification email task for {created_developer.email}: {e}", exc_info=True)
-    # --- END MODIFIED ---
-
-
-    return schemas.RegistrationResponse(
-        message="Registration successful. Please check your email to verify your account.",
-        recovery_keys=plain_recovery_keys # Return plain keys ONCE
-    )
+    # --- Original Logic (Commented out or removed for disabling) ---
+    # logger.info(f"Registration attempt for email: {developer_in.email}")
+    # existing_developer = await developer_crud.get_developer_by_email(db, email=developer_in.email)
+    # ... rest of the original registration logic ...
+    # --- End Original Logic ---
 
 
 @router.post("/login", response_model=schemas.Token, summary="Developer Login")
@@ -153,14 +92,18 @@ async def login_for_access_token(
         logger.warning(f"Login failed: Developer not found for email {form_data.username}")
         raise credentials_exception
 
-    if not developer.is_verified:
-         logger.warning(f"Login failed: Developer email {form_data.username} not verified.")
-         # Provide slightly different message for unverified user for better UX, but still 401
-         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, # Still 401, but different detail
-            detail="Email address not verified. Please check your inbox.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    # --- MODIFIED: Allow login even if not verified, but maybe add warning? ---
+    # We need login to work so users can potentially resend verification later if needed.
+    # Let's remove the strict verification check *during login* for now.
+    # if not developer.is_verified:
+    #      logger.warning(f"Login failed: Developer email {form_data.username} not verified.")
+    #      # Provide slightly different message for unverified user for better UX, but still 401
+    #      raise HTTPException(
+    #         status_code=status.HTTP_401_UNAUTHORIZED, # Still 401, but different detail
+    #         detail="Email address not verified. Please check your inbox.",
+    #         headers={"WWW-Authenticate": "Bearer"},
+    #     )
+    # --- END MODIFIED ---
 
 
     if not security.verify_password(form_data.password, developer.hashed_password):

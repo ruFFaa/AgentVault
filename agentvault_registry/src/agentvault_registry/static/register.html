@@ -21,30 +21,48 @@
     <main>
         <section id="register-section" class="auth-form-section">
             <h2>Developer Registration</h2>
+
+            <!-- ===== ADDED: Disabled Message Banner ===== -->
+            <div id="registration-disabled-message" class="message-area error" style="display: block; text-align: center; margin-bottom: 1.5rem;">
+                <strong>Registration Temporarily Disabled</strong><br>
+                We are currently activating the email verification service. Registration will be re-enabled shortly. Please check back later.
+            </div>
+            <!-- ===== END ADDED ===== -->
+
             <p>Create an account to manage your agents in the registry.</p>
 
             <form id="register-form">
                 <div class="form-group">
                     <label for="register-name">Developer Name:</label>
-                    <input type="text" id="register-name" name="name" required minlength="3" maxlength="100">
+                    <!-- ===== MODIFIED: Added disabled attribute ===== -->
+                    <input type="text" id="register-name" name="name" required minlength="3" maxlength="100" disabled>
+                    <!-- ===== END MODIFIED ===== -->
                 </div>
                 <div class="form-group">
                     <label for="register-email">Email:</label>
-                    <input type="email" id="register-email" name="email" required>
+                    <!-- ===== MODIFIED: Added disabled attribute ===== -->
+                    <input type="email" id="register-email" name="email" required disabled>
+                    <!-- ===== END MODIFIED ===== -->
                 </div>
                 <div class="form-group">
                     <label for="register-password">Password:</label>
-                    <input type="password" id="register-password" name="password" required minlength="8">
+                    <!-- ===== MODIFIED: Added disabled attribute ===== -->
+                    <input type="password" id="register-password" name="password" required minlength="8" disabled>
+                    <!-- ===== END MODIFIED ===== -->
                     <small>Minimum 8 characters.</small>
                 </div>
                 <div class="form-group">
                     <label for="register-confirm-password">Confirm Password:</label>
-                    <input type="password" id="register-confirm-password" name="confirm_password" required minlength="8">
+                    <!-- ===== MODIFIED: Added disabled attribute ===== -->
+                    <input type="password" id="register-confirm-password" name="confirm_password" required minlength="8" disabled>
+                    <!-- ===== END MODIFIED ===== -->
                 </div>
 
                 <div id="register-message" class="message-area"></div>
 
-                <button type="submit" id="register-button">Register</button>
+                <!-- ===== MODIFIED: Added disabled attribute ===== -->
+                <button type="submit" id="register-button" disabled>Register</button>
+                <!-- ===== END MODIFIED ===== -->
             </form>
 
             <div id="recovery-keys-display" style="display: none; margin-top: 20px; padding: 15px; border: 1px solid #ffc107; background-color: #fff3cd; border-radius: 5px;">
