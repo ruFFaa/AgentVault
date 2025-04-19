@@ -54,16 +54,26 @@ jobs: # Define one or more jobs to run
           restore-keys: |
             poetry-cache-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-
 
-      # Step 6: Install dependencies using Poetry
-      # --- MODIFIED: Add pytest-cov ---
-      - name: Install dependencies including pytest-cov
+      # Step 6: Install main dependencies using Poetry
+      - name: Install dependencies
         run: poetry install --no-interaction --no-root --with dev
         # --no-interaction: Don't ask questions
         # --no-root: Don't install the root monorepo package itself (it's not a package)
-        # --with dev: Install development dependencies (like pytest, pytest-cov)
-      # --- END MODIFIED ---
+        # --with dev: Install development dependencies (like pytest)
 
-      # --- MODIFIED: Run Pytest with Coverage ---
+      # --- ADDED: Explicitly install pytest-cov ---
+      # Step 6.1: Ensure pytest-cov is installed
+      # Sometimes necessary even if in dev dependencies for pytest to pick it up reliably in CI
+      - name: Install pytest-cov
+        run: poetry run pip install pytest-cov
+      # --- END ADDED ---
+
+      # --- ADDED: Debug step to list packages ---
+      # Step 6.2: List installed packages (for debugging)
+      - name: List installed packages
+        run: poetry run pip list
+      # --- END ADDED ---
+
       # Step 7: Run Pytest with Coverage
       - name: Run tests with pytest and generate coverage report
         run: |
@@ -85,7 +95,6 @@ jobs: # Define one or more jobs to run
             agentvault_testing_utils/tests
       # --- END MODIFIED ---
 
-      # --- ADDED: Upload Coverage Report ---
       # Step 8: Upload coverage report artifact
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
@@ -93,4 +102,3 @@ jobs: # Define one or more jobs to run
           name: coverage-report-${{ matrix.python-version || '3.11' }}
           path: coverage.xml
           if-no-files-found: error # Error if coverage.xml wasn't generated
-      # --- END ADDED ---
