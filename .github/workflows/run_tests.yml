@@ -1,4 +1,4 @@
-name: Run Project Tests # The name displayed on GitHub Actions tab
+name: Run Project Tests & Coverage # Updated name
 
 # When should this workflow run?
 on:
@@ -17,7 +17,7 @@ jobs: # Define one or more jobs to run
     #   matrix:
     #     python-version: ['3.10', '3.11'] # Test against supported Python versions
 
-    name: Run Pytest # Display name for this specific job run
+    name: Run Pytest with Coverage # Updated display name
     steps: # Sequence of tasks to execute
       # Step 1: Get the code from the repository
       - name: Checkout repository
@@ -55,21 +55,42 @@ jobs: # Define one or more jobs to run
             poetry-cache-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-
 
       # Step 6: Install dependencies using Poetry
-      - name: Install dependencies
+      # --- MODIFIED: Add pytest-cov ---
+      - name: Install dependencies including pytest-cov
         run: poetry install --no-interaction --no-root --with dev
         # --no-interaction: Don't ask questions
         # --no-root: Don't install the root monorepo package itself (it's not a package)
-        # --with dev: Install development dependencies (like pytest)
+        # --with dev: Install development dependencies (like pytest, pytest-cov)
+      # --- END MODIFIED ---
 
-      # --- MODIFIED: Added --import-mode=importlib ---
-      # Step 7: Run Pytest
-      - name: Run tests with pytest
+      # --- MODIFIED: Run Pytest with Coverage ---
+      # Step 7: Run Pytest with Coverage
+      - name: Run tests with pytest and generate coverage report
         run: |
-          poetry run pytest -v --import-mode=importlib \
+          # Run pytest with coverage for all relevant source directories
+          # Generate terminal report and XML report
+          poetry run pytest \
+            --cov=agentvault_cli/src \
+            --cov=agentvault_library/src \
+            --cov=agentvault_registry/src \
+            --cov=agentvault_server_sdk/src \
+            --cov=agentvault_testing_utils/src \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            -v --import-mode=importlib \
             agentvault_cli/tests \
             agentvault_library/tests \
             agentvault_registry/tests \
             agentvault_server_sdk/tests \
             agentvault_testing_utils/tests
-        # Optional: Add coverage later: poetry run pytest --cov=. --cov-report=xml
       # --- END MODIFIED ---
+
+      # --- ADDED: Upload Coverage Report ---
+      # Step 8: Upload coverage report artifact
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-${{ matrix.python-version || '3.11' }}
+          path: coverage.xml
+          if-no-files-found: error # Error if coverage.xml wasn't generated
+      # --- END ADDED ---
