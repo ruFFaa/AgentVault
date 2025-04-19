@@ -42,9 +42,11 @@ jobs:
           restore-keys: |
             venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-
 
-      - name: Update root lock file # Run in root
-        run: poetry lock --no-update # Use --no-update if you only want consistency check, or remove if updates are okay
+      # --- MODIFIED: Use --check instead of --no-update ---
+      - name: Check lock file consistency # Run in root
+        run: poetry lock --check # Use --check to verify lock file is up-to-date
         # No working-directory needed, runs in root
+      # --- END MODIFIED ---
 
       - name: Synchronize dependencies # Run in root
         run: |
