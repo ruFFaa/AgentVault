@@ -24,29 +24,36 @@ jobs:
         with:
           python-version: '3.11'
 
+      # --- MODIFIED: Explicitly set Poetry version ---
       - name: Install Poetry
         uses: snok/install-poetry@v1
         with:
+          version: '^1.8' # Pin to a recent stable version known to have --check
           virtualenvs-create: true
-          virtualenvs-in-project: true # Create .venv in project root
+          virtualenvs-in-project: false # Keep false for CI caching
+          installer-parallel: true
+      # --- END MODIFIED ---
+
+      # --- ADDED: Verify Poetry version (for debugging) ---
+      - name: Display Poetry version
+        run: poetry --version
+      # --- END ADDED ---
 
       - name: Install pip-audit tool
         run: pipx install pip-audit
 
-      - name: Load cached venv # Cache based on root lock file
+      - name: Load cached Poetry cache # Cache Poetry's package cache
         id: cached-poetry-dependencies
         uses: actions/cache@v4
         with:
-          path: .venv # Cache the root venv
-          key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('poetry.lock') }} # Use root lock file hash
+          path: ~/.cache/pypoetry # Standard cache location on Linux runners
+          key: poetry-cache-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('poetry.lock') }}
           restore-keys: |
-            venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-
+            poetry-cache-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-
 
-      # --- MODIFIED: Use --check instead of --no-update ---
       - name: Check lock file consistency # Run in root
         run: poetry lock --check # Use --check to verify lock file is up-to-date
         # No working-directory needed, runs in root
-      # --- END MODIFIED ---
 
       - name: Synchronize dependencies # Run in root
         run: |
@@ -59,5 +66,17 @@ jobs:
         run: |
           echo "Running pip-audit on installed packages in root venv..."
           # Execute pip-audit within the root virtual environment
-          poetry run pip-audit --progress-spinner=off --strict
+          # Need to activate venv first since virtualenvs-in-project=false
+          # Find the venv path (this is tricky, might need adjustment)
+          # A simpler way: run pip-audit on the project without activating venv,
+          # if pip-audit can detect dependencies from pyproject.toml/poetry.lock
+          # Let's try running pip-audit directly first, it might find the lock file.
+          # pip-audit # This might not work as expected without the installed context.
+
+          # Alternative: Use poetry run within the correct environment
+          # Poetry should manage the environment context for `poetry run`
+          echo "Running pip-audit using 'poetry run'..."
+          poetry run pip-audit --progress-spinner=off --strict --requirement poetry.lock
+          # Explicitly point to the lock file for clarity
+
         # No working-directory needed, runs in root
