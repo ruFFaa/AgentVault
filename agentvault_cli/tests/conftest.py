@@ -1,7 +1,4 @@
-import os
-import sys
+# (Remove all content related to sys.path modification)
 
-# Add the src directory to the Python path
-src_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src'))
-if src_path not in sys.path:
-    sys.path.insert(0, src_path)
+# You can add shared fixtures specific to cli tests here later if needed.
+pass
