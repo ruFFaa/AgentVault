@@ -61,11 +61,11 @@ jobs: # Define one or more jobs to run
         # --no-root: Don't install the root monorepo package itself (it's not a package)
         # --with dev: Install development dependencies (like pytest)
 
-      # --- MODIFIED: Explicitly list test directories ---
+      # --- MODIFIED: Added --import-mode=importlib ---
       # Step 7: Run Pytest
       - name: Run tests with pytest
         run: |
-          poetry run pytest -v \
+          poetry run pytest -v --import-mode=importlib \
             agentvault_cli/tests \
             agentvault_library/tests \
             agentvault_registry/tests \
