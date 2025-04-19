@@ -1,406 +1,656 @@
 import asyncclick as click
-import httpx
-import pathlib
-import logging
 import asyncio
+import uuid
 import json
-import signal # For Ctrl+C handling
-import os
-import uuid # Import uuid
-from typing import Optional, Dict, Any, AsyncGenerator
+import pathlib
+import datetime
+import logging
+import signal
+import sys
+import re
+from typing import Optional, Dict, Any, Union, Tuple, AsyncGenerator, List
 
-# Import local utilities
+# Import core library components
+from agentvault.models import (
+    AgentCard, Message, TextPart, Task, TaskState, TaskStatus,
+    TaskStatusUpdateEvent, TaskMessageEvent, TaskArtifactUpdateEvent, Artifact
+)
+from agentvault.exceptions import (
+    AgentCardValidationError, AgentCardFetchError, A2AConnectionError, A2AMessageError,
+    A2AAuthenticationError, A2ARemoteAgentError, A2ATimeoutError, KeyManagementError, A2AError
+)
+from agentvault import agent_card_utils, key_manager, client as av_client
+
+# Import CLI utilities
 from .. import utils
+from ..config import AgentVaultConfig
 
-# Import AgentVault library components
-try:
-    from agentvault import agent_card_utils
-    from agentvault import exceptions as av_exceptions
-    from agentvault import models as av_models
-    from agentvault import key_manager # Import the module
-    from agentvault import client as av_client # Import the module
-    _agentvault_lib_imported = True
-except ImportError as e:
-    import logging as stdlib_logging
-    stdlib_logging.critical(f"FATAL: Failed to import core 'agentvault' library: {e}")
-    stdlib_logging.critical("Please ensure 'agentvault_library' is installed correctly (e.g., `poetry install` in root).")
-    agent_card_utils = None # type: ignore
-    av_exceptions = None # type: ignore
-    av_models = None # type: ignore
-    key_manager = None # type: ignore
-    av_client = None # type: ignore
-    _agentvault_lib_imported = False
-
-# Import default registry URL from discover command
-try:
-    from .discover import DEFAULT_REGISTRY_URL
-except ImportError:
-    DEFAULT_REGISTRY_URL = "http://localhost:8000" # Fallback
-
-# Rich imports
+# --- ADDED: Import _RICH_AVAILABLE ---
 try:
     from rich.panel import Panel
     from rich.syntax import Syntax
+    from rich.markdown import Markdown
+    from rich.live import Live
+    from rich.spinner import Spinner
+    from rich.text import Text
     _RICH_AVAILABLE = True
 except ImportError:
-    Panel = None # type: ignore
-    Syntax = None # type: ignore
     _RICH_AVAILABLE = False
-
+# --- END ADDED ---
 
 logger = logging.getLogger(__name__)
 
-# Artifact Saving Threshold
-ARTIFACT_SAVE_THRESHOLD_BYTES = 1024
+# --- Global variable to track interruption ---
+_interrupted = False
 
-# Flag for Ctrl+C Handling
-terminate_requested = False
-
-def handle_interrupt(sig, frame):
-    """Signal handler to request termination."""
-    global terminate_requested
-    if not terminate_requested:
-        utils.display_warning("\nTermination requested (Ctrl+C). Attempting to cancel task...")
-        terminate_requested = True
+def _signal_handler(sig, frame):
+    global _interrupted
+    if not _interrupted:
+        _interrupted = True
+        utils.display_warning("\n🛑 Interrupt received. Attempting graceful shutdown...")
+        # Suppress further signals of the same type to avoid multiple messages
+        signal.signal(sig, signal.SIG_IGN)
     else:
-        utils.display_warning("Termination already in progress...")
+        utils.display_warning("\n🛑 Second interrupt received. Forcing exit.")
+        sys.exit(1) # Force exit on second interrupt
 
 
-# Helper for Agent Card Loading
 async def _load_agent_card(
-    agent_ref: str,
-    registry_url: str,
-    ctx: click.Context,
-    # --- ADDED: Optional http client for testing ---
-    _http_client: Optional[httpx.AsyncClient] = None
-    # --- END ADDED ---
-) -> Optional[av_models.AgentCard]:
-    """Loads agent card, displaying errors and returning None on failure."""
-    if not _agentvault_lib_imported or agent_card_utils is None or av_exceptions is None or av_models is None:
-         utils.display_error("AgentVault library not available for loading agent card.")
-         return None
-
-    utils.display_info(f"Attempting to load agent card from reference: {agent_ref}")
-    agent_card: Optional[av_models.AgentCard] = None
-
-    # --- ADDED: Use provided client or create default ---
-    client_manager = _http_client if _http_client else httpx.AsyncClient()
-    # --- END ADDED ---
-
+    agent_ref: str, registry_url: Optional[str], config: AgentVaultConfig
+) -> Optional[AgentCard]:
+    """Helper to load agent card, handling errors and displaying messages."""
+    utils.display_info(f"Attempting to load agent card for: {agent_ref}")
     try:
-        if agent_ref.startswith("http://") or agent_ref.startswith("https://"):
-            utils.display_info("Reference looks like a URL, fetching...")
-            # --- MODIFIED: Pass client_manager ---
-            agent_card = await agent_card_utils.fetch_agent_card_from_url(agent_ref, http_client=client_manager)
-            # --- END MODIFIED ---
-        else:
-            agent_path = pathlib.Path(agent_ref)
-            is_file = False
-            try:
-                if agent_path.is_file():
-                    is_file = True
-            except OSError:
-                 pass
-
-            if is_file:
-                if agent_path.suffix.lower() == ".json":
-                     utils.display_info(f"Reference looks like a local JSON file, loading: {agent_path.resolve()}")
-                else:
-                     utils.display_warning(f"Reference is a file but not '.json'. Attempting to load anyway: {agent_path.resolve()}")
-                agent_card = agent_card_utils.load_agent_card_from_file(agent_path)
-            else:
-                utils.display_info(f"Reference is not a URL or local file, assuming Agent ID. Querying registry: {registry_url}")
-                lookup_url = f"{registry_url.rstrip('/')}/api/v1/agent-cards/id/{agent_ref}"
-                utils.display_info(f"Attempting direct lookup: {lookup_url}")
-
-                # --- MODIFIED: Use client_manager ---
-                async with client_manager as client_cm: # Use async with on the manager
-                    response = await client_cm.get(lookup_url, timeout=15.0, follow_redirects=True)
-                # --- END MODIFIED ---
-
-                if response.status_code == 200:
-                    card_full_data = response.json()
-                    card_data_dict = card_full_data.get("card_data")
-                    if not card_data_dict or not isinstance(card_data_dict, dict):
-                         raise av_exceptions.AgentCardError("Registry returned success but 'card_data' was missing or invalid in response.")
-                    agent_card = agent_card_utils.parse_agent_card_from_dict(card_data_dict)
-                elif response.status_code == 404:
-                     raise av_exceptions.AgentCardFetchError(f"Agent ID '{agent_ref}' not found in registry at {registry_url}.", status_code=404)
-                else:
-                     raise av_exceptions.AgentCardFetchError(f"Registry API error looking up agent ID '{agent_ref}' (Status {response.status_code})", status_code=response.status_code, response_body=response.text)
-
-    except av_exceptions.AgentCardValidationError as e: utils.display_error(f"Failed to load agent card: Agent Card validation failed: {e}"); return None
-    except av_exceptions.AgentCardFetchError as e: utils.display_error(f"Failed to load agent card: {e}"); return None
-    except av_exceptions.AgentCardError as e: utils.display_error(f"Failed to load agent card: {e}"); return None
-    except httpx.RequestError as e: utils.display_error(f"Network error while loading agent card: {e}"); return None
-    except Exception as e: utils.display_error(f"An unexpected error occurred loading agent card: {e}"); logger.exception("Unexpected error in _load_agent_card"); return None
-    # --- ADDED: Ensure client is closed if created internally ---
-    finally:
-        if _http_client is None and not client_manager.is_closed: # If we created it, close it
-            await client_manager.aclose()
-    # --- END ADDED ---
-
-    if agent_card is None: utils.display_error("Failed to load agent card for unknown reason."); return None
-    return agent_card
-
-
-# Helper for Artifact Filename (Remains unchanged)
-def _get_artifact_filename(artifact: av_models.Artifact, content_is_structured: bool = False) -> str:
-    base_name = artifact.id or f"artifact_{uuid.uuid4().hex[:8]}"
-    ext = ".bin"
-    media_type_original = artifact.media_type
-    logger.info(f"[_get_artifact_filename] Artifact ID: '{base_name}', Original Media Type: '{media_type_original}', Content is structured: {content_is_structured}")
-    if media_type_original:
-        mime_lower = media_type_original.lower().strip()
-        logger.info(f"[_get_artifact_filename] Normalized Media Type: '{mime_lower}'")
-        type_map = { "application/json": ".json", "text/plain": ".txt", "text/markdown": ".md", "application/python": ".py", "text/html": ".html", "text/css": ".css", "application/yaml": ".yaml", "image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/svg+xml": ".svg", "application/pdf": ".pdf", "application/zip": ".zip", "application/octet-stream": ".bin" }
-        if mime_lower in type_map: ext = type_map[mime_lower]; logger.info(f"[_get_artifact_filename] Matched '{mime_lower}' in type_map. Extension set to: '{ext}'")
-        else:
-            logger.info(f"[_get_artifact_filename] No exact match in type_map. Trying subtype split for '{mime_lower}'.")
-            parts = mime_lower.split('/')
-            if len(parts) == 2 and parts[1]:
-                subtype_parts = parts[1].split('+'); subtype = subtype_parts[0].strip(); suffix = subtype_parts[1].strip() if len(subtype_parts) > 1 else None
-                if suffix == "json": ext = ".json"
-                elif suffix == "xml": ext = ".xml"
-                elif suffix == "yaml": ext = ".yaml"
-                elif subtype.isalnum() and len(subtype) < 6: ext = f".{subtype}"; logger.info(f"[_get_artifact_filename] Using extension from subtype: '{ext}'")
-                else: logger.info(f"[_get_artifact_filename] Could not determine simple extension from subtype: '{subtype}' or suffix: '{suffix}'")
-            else: logger.info(f"[_get_artifact_filename] Could not determine simple extension from media type: {media_type_original}")
-    elif content_is_structured: ext = ".json"; logger.info(f"[_get_artifact_filename] No media type provided, but content is structured. Assuming JSON. Extension set to: '{ext}'")
-    else: logger.info(f"[_get_artifact_filename] No media type provided and content not structured. Using default extension: '{ext}'")
-    safe_base_name = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in base_name); safe_base_name = safe_base_name[:100]
-    final_filename = f"{safe_base_name}{ext}"; logger.info(f"[_get_artifact_filename] Final filename: '{final_filename}'")
-    return final_filename
-
-
-# Main Run Command
-@click.command("run")
-@click.option("--agent", "-a", "agent_ref", required=True, help="Agent identifier: ID (e.g., 'org/agent'), URL (https://...), or local file path.")
-@click.option("--input", "-i", "input_data", required=True, help="Input text for the agent, or '@filepath' to read from a file.")
-@click.option("--context-file", type=click.Path(exists=True, dir_okay=False, readable=True, path_type=pathlib.Path), help="Path to a JSON file containing MCP context.")
-@click.option("--registry", "registry_url", default=DEFAULT_REGISTRY_URL, help="URL of the AgentVault Registry API (used if agent ID is provided).", show_default=True, envvar="AGENTVAULT_REGISTRY_URL")
-@click.option("--key-service", "key_service_override", help="Override the service ID used for key lookup (if agent card doesn't specify or is ambiguous).")
-@click.option("--auth-key", "auth_key_override", help="Directly provide the API key (INSECURE - for testing only).")
-@click.option(
-    "--output-artifacts",
-    type=click.Path(file_okay=False, dir_okay=True, writable=True, resolve_path=True, path_type=pathlib.Path),
-    default=None,
-    help="Directory to save artifact content larger than 1KB."
-)
-# --- ADDED: Optional http client for testing ---
-@click.option("--_http_client", hidden=True, default=None, help="Internal use for testing with mock client.")
-# --- END ADDED ---
-@click.pass_context
-async def run_command(
-    ctx: click.Context,
-    agent_ref: str,
-    input_data: str,
-    context_file: Optional[pathlib.Path],
-    registry_url: str,
-    key_service_override: Optional[str],
-    auth_key_override: Optional[str],
-    output_artifacts: Optional[pathlib.Path],
-    # --- ADDED: Optional http client parameter ---
-    _http_client: Optional[httpx.AsyncClient] = None
-    # --- END ADDED ---
-) -> int:
-    """
-    Runs a task on a specified remote agent using the A2A protocol.
-    Returns an integer exit code (0 for success, 1 for error, 2 for cancel).
-    """
-    global terminate_requested
-    terminate_requested = False
-
-    if not _agentvault_lib_imported: utils.display_error("Cannot run task: Core 'agentvault' library failed to import."); return 1
-    if not _RICH_AVAILABLE: utils.display_warning("Optional 'rich' library not found. Output formatting will be basic.")
-    if not all([agent_card_utils, av_exceptions, av_models, key_manager, av_client]): utils.display_error("Cannot run task: Core 'agentvault' library components missing."); return 1
-
-    # --- MODIFIED: Pass http client to helper ---
-    agent_card = await _load_agent_card(agent_ref, registry_url, ctx, _http_client=_http_client)
-    # --- END MODIFIED ---
-    if agent_card is None: return 1
-
-    utils.display_success(f"Successfully loaded agent: {agent_card.name} ({agent_card.human_readable_id})")
-    utils.display_info(f"Agent A2A Endpoint: {agent_card.url}")
-
-    # Process Input Data (unchanged)
-    processed_input_text: str;
-    if input_data.startswith('@'):
-        input_file_path = pathlib.Path(input_data[1:])
-        if not input_file_path.is_file(): utils.display_error(f"Input file specified via '@' not found or not a file: {input_file_path}"); return 1
-        try: processed_input_text = input_file_path.read_text(encoding='utf-8'); utils.display_info(f"Read input from file: {input_file_path}")
-        except (IOError, OSError) as e: utils.display_error(f"Failed to read input file {input_file_path}: {e}"); return 1
-        except Exception as e: utils.display_error(f"An unexpected error occurred reading input file {input_file_path}: {e}"); logger.exception(f"Unexpected error reading input file {input_file_path}"); return 1
-    else: processed_input_text = input_data
-
-    # Load MCP Context (unchanged)
-    mcp_context_data: Optional[Dict[str, Any]] = None;
-    if context_file:
-        utils.display_info(f"Loading MCP context from: {context_file}")
-        try:
-            mcp_context_data = json.loads(context_file.read_text(encoding='utf-8'))
-            if not isinstance(mcp_context_data, dict): utils.display_error(f"Context file {context_file} does not contain a valid JSON object."); return 1
-            utils.display_info("MCP context loaded successfully.")
-        except json.JSONDecodeError as e: utils.display_error(f"Failed to parse JSON context file {context_file}: {e}"); return 1
-        except (IOError, OSError) as e: utils.display_error(f"Failed to read context file {context_file}: {e}"); return 1
-        except Exception as e: utils.display_error(f"An unexpected error occurred loading context file {context_file}: {e}"); logger.exception(f"Unexpected error loading context file {context_file}"); return 1
-
-    # Load Keys / Prepare KeyManager (unchanged)
-    manager: Optional[key_manager.KeyManager] = None;
-    try:
-        manager = key_manager.KeyManager(use_keyring=True); auth_needed = True; service_id_to_use: Optional[str] = None
-        if agent_card.auth_schemes:
-            first_scheme = agent_card.auth_schemes[0]
-            if first_scheme.scheme == 'none': auth_needed = False; utils.display_info("Agent supports 'none' authentication scheme. No credentials needed.")
-            elif key_service_override: service_id_to_use = key_service_override; utils.display_info(f"Using overridden service ID for credential lookup: '{service_id_to_use}'")
-            elif first_scheme.service_identifier: service_id_to_use = first_scheme.service_identifier; utils.display_info(f"Using service ID from agent card ('{first_scheme.scheme}' scheme): '{service_id_to_use}'")
-            else: service_id_to_use = agent_card.human_readable_id; utils.display_warning(f"No service_identifier in agent card's '{first_scheme.scheme}' scheme. Defaulting to humanReadableId for credential lookup: '{service_id_to_use}'. Use --key-service if needed.")
-        else: utils.display_warning("Agent card has no authentication schemes defined. Assuming 'none'."); auth_needed = False
-        if auth_needed:
-            if auth_key_override:
-                 if any(s.scheme == 'apiKey' for s in agent_card.auth_schemes): utils.display_warning("Using API key provided directly via --auth-key (INSECURE).")
-                 else: utils.display_error("--auth-key override is only supported for agents requiring the 'apiKey' scheme."); return 1
-            elif service_id_to_use:
-                key_found = manager.get_key(service_id_to_use) is not None; oauth_found = (manager.get_oauth_client_id(service_id_to_use) is not None and manager.get_oauth_client_secret(service_id_to_use) is not None)
-                if not key_found and not oauth_found: utils.display_error(f"Credentials required for service '{service_id_to_use}' but none found (checked Env, File, Keyring)."); utils.display_info("Use 'agentvault config set' to configure the key/credentials using --keyring or --oauth-configure."); return 1
-                else: source = manager.get_key_source(service_id_to_use) or manager._oauth_sources.get(service_id_to_use); utils.display_info(f"Found credentials for service '{service_id_to_use}' (Source: {source.upper() if source else 'Unknown'}).")
-            else: utils.display_error("Authentication is required, but could not determine the service ID for credential lookup."); return 1
-    except av_exceptions.KeyManagementError as e: utils.display_error(f"Key management error during setup: {e}"); return 1
-    except Exception as e: utils.display_error(f"An unexpected error occurred during key/credential loading: {e}"); logger.exception("Unexpected error in key loading section"); return 1
-    if manager is None: manager = key_manager.KeyManager(use_keyring=True)
-
-    # Prepare Initial Message (unchanged)
-    try: initial_message = av_models.Message(role="user", parts=[av_models.TextPart(content=processed_input_text)])
-    except Exception as e: utils.display_error(f"Failed to create initial message structure: {e}"); return 1
-
-    # Instantiate Client and Run Task
-    task_id: Optional[str] = None; final_task_state: Optional[av_models.TaskState] = None
-    original_sigint_handler = signal.getsignal(signal.SIGINT)
-    signal.signal(signal.SIGINT, handle_interrupt)
-    exit_code = 1
-
-    try:
-        # --- MODIFIED: Pass injected http client to AgentVaultClient ---
-        async with av_client.AgentVaultClient(http_client=_http_client) as client:
-        # --- END MODIFIED ---
-            try:
-                utils.display_info("Initiating task with agent...")
-                task_id = await client.initiate_task(
-                    agent_card=agent_card, initial_message=initial_message, key_manager=manager,
-                    mcp_context=mcp_context_data, webhook_url=None, auth_key_override=auth_key_override
-                )
-                utils.display_success(f"Task initiated successfully. Task ID: {task_id}")
-
-                # --- MODIFIED: Use simple print if Rich unavailable ---
-                status_context = utils.console.status("[bold green]Waiting for events... (Press Ctrl+C to request cancellation)", spinner="dots") if _RICH_AVAILABLE else None
-                status_obj = status_context.__enter__() if status_context else None
-                if not status_obj: print("Waiting for events... (Press Ctrl+C to request cancellation)", flush=True)
-                # --- END MODIFIED ---
-
-                try:
-                    async for event in client.receive_messages(
-                        agent_card=agent_card, task_id=task_id, key_manager=manager
-                    ):
-                        # ... (Event processing logic remains the same) ...
-                        if terminate_requested:
-                            if status_obj: status_obj.update("[bold yellow]Attempting to terminate task...")
-                            else: print("Attempting to terminate task...", flush=True)
-                            try: await client.terminate_task(agent_card, task_id, manager); utils.display_success(f"Termination request acknowledged for task {task_id}.")
-                            except av_exceptions.A2AError as term_err: utils.display_error(f"Failed to send termination request: {term_err}")
-                            final_task_state = av_models.TaskState.CANCELED; break
-
-                        if isinstance(event, av_models.TaskStatusUpdateEvent):
-                            final_task_state = event.state; status_msg = f"Task Status: {event.state.value}";
-                            if event.message: status_msg += f" - {event.message}"
-                            if status_obj: status_obj.update(f"[bold green]Status: {event.state.value}...")
-                            utils.display_info(status_msg) # Also print info line
-                            if event.state in [av_models.TaskState.COMPLETED, av_models.TaskState.FAILED, av_models.TaskState.CANCELED]: utils.display_info("Task reached terminal state."); break
-
-                        elif isinstance(event, av_models.TaskMessageEvent):
-                            role = event.message.role; content_parts = []
-                            for part in event.message.parts:
-                                if isinstance(part, av_models.TextPart): content_parts.append(part.content)
-                                elif isinstance(part, av_models.FilePart): content_parts.append(f"[File: {part.filename or part.url} ({part.media_type or 'unknown'})]")
-                                elif isinstance(part, av_models.DataPart):
-                                    try: content_parts.append(f"[Data ({part.media_type}):\n{json.dumps(part.content, indent=2)}]")
-                                    except Exception: content_parts.append(f"[Data ({part.media_type}): {part.content}]")
-                                else: content_parts.append("[Unknown message part type]")
-                            full_content = "\n".join(content_parts); title = f"Message from {role.capitalize()}"
-                            if _RICH_AVAILABLE: border_style = "dim";
-                                if role == "assistant": border_style = "blue"
-                                elif role == "tool": border_style = "yellow"
-                                utils.console.print(Panel(full_content, title=title, border_style=border_style, expand=False))
-                            else: utils.display_info(f"\n--- {title} ---\n{full_content}\n--- End Message ---")
-
-                        elif isinstance(event, av_models.TaskArtifactUpdateEvent):
-                            # ... (Artifact display/saving logic unchanged) ...
-                            artifact = event.artifact; logger.info(f"[run_command] Processing artifact event for ID: {artifact.id}, Type: {artifact.type}, Media Type: {artifact.media_type}")
-                            artifact_title = f"Artifact Update: ID={artifact.id}, Type={artifact.type}"; utils.display_info(artifact_title)
-                            if artifact.url: utils.display_info(f"  URL: {artifact.url}")
-                            if artifact.metadata: utils.display_info(f"  Metadata: {artifact.metadata}")
-                            content_panel = None; content_bytes = None; content_str = None; save_to_file = False; file_path = None; content_is_structured_data = False
-                            if artifact.content is not None:
-                                try:
-                                    if isinstance(artifact.content, str): content_str = artifact.content; content_bytes = content_str.encode('utf-8')
-                                    elif isinstance(artifact.content, bytes): content_bytes = artifact.content; try: content_str = content_bytes.decode('utf-8'); except UnicodeDecodeError: content_str = None
-                                    elif isinstance(artifact.content, (dict, list)): content_is_structured_data = True; content_str = json.dumps(artifact.content, indent=2); content_bytes = content_str.encode('utf-8')
-                                    else: content_str = str(artifact.content); content_bytes = content_str.encode('utf-8')
-                                except Exception as e: logger.warning(f"Could not serialize artifact content for saving/display: {e}"); content_bytes = None; content_str = f"[Error processing content: {e}]"
-                                if output_artifacts and content_bytes and len(content_bytes) > ARTIFACT_SAVE_THRESHOLD_BYTES:
-                                    save_to_file = True
-                                    try: filename = _get_artifact_filename(artifact, content_is_structured=content_is_structured_data); file_path = output_artifacts / filename; output_artifacts.mkdir(parents=True, exist_ok=True); with open(file_path, 'wb') as f: f.write(content_bytes); utils.display_info(f"  Content saved to: {file_path}")
-                                    except (IOError, OSError) as e: utils.display_error(f"  Error saving artifact content to {file_path}: {e}"); save_to_file = False
-                                    except Exception as e: utils.display_error(f"  Unexpected error saving artifact {file_path}: {e}"); save_to_file = False
-                            if not save_to_file:
-                                if content_str is not None:
-                                    display_content = content_str[:1000] + ('...' if len(content_str) > 1000 else '')
-                                    if _RICH_AVAILABLE: lang = "text";
-                                        if content_is_structured_data: lang = "json"
-                                        elif artifact.media_type: mime_lower = artifact.media_type.lower();
-                                            if "python" in mime_lower: lang = "python"; elif "javascript" in mime_lower: lang = "javascript"; elif "json" in mime_lower: lang = "json"; elif "yaml" in mime_lower: lang = "yaml"; elif "html" in mime_lower: lang = "html"; elif "css" in mime_lower: lang = "css"; elif "markdown" in mime_lower: lang = "markdown"
-                                        if lang != "text": syntax = Syntax(display_content, lang, theme="default", line_numbers=True); content_panel = Panel(syntax, title=f"Artifact Content ({artifact.id})", border_style="magenta")
-                                        else: content_panel = Panel(display_content, title=f"Artifact Content ({artifact.id})", border_style="magenta")
-                                    else: utils.display_info(f"  Content ({artifact.media_type or 'unknown'}):\n{display_content}")
-                                elif content_bytes is not None: content_panel = Panel(f"[Binary data: {len(content_bytes)} bytes]", title=f"Artifact Content ({artifact.id})", border_style="magenta") if _RICH_AVAILABLE else None;
-                                    if not content_panel: utils.display_info(f"  Content: [Binary data: {len(content_bytes)} bytes]")
-                                if content_panel and _RICH_AVAILABLE: utils.console.print(content_panel)
-                                elif not _RICH_AVAILABLE and content_str is None and content_bytes is None: utils.display_info("  Content: [Not available or error processing]")
-                        else: utils.display_warning(f"Received unknown event type: {type(event)}")
-                finally:
-                    if status_context: status_context.__exit__(None, None, None)
-
-            # Catch specific A2A errors
-            except av_exceptions.A2AAuthenticationError as e: utils.display_error(f"A2A Authentication Error: {e}"); logger.error(f"Auth failed: {e}", exc_info=True); exit_code = 1
-            except av_exceptions.A2AConnectionError as e: utils.display_error(f"A2A Connection Error: {e}"); logger.error(f"Connection failed: {e}", exc_info=True); exit_code = 1
-            except av_exceptions.A2ARemoteAgentError as e: utils.display_error(f"A2A Remote Agent Error: {e}"); logger.error(f"Remote agent error: Status={e.status_code}, Body={e.response_body}", exc_info=False); exit_code = 1
-            except av_exceptions.A2AMessageError as e: utils.display_error(f"A2A Message Error: {e}"); logger.error(f"Invalid message: {e}", exc_info=True); exit_code = 1
-            except av_exceptions.A2ATimeoutError as e: utils.display_error(f"A2A Timeout Error: {e}"); logger.error(f"Timeout: {e}", exc_info=True); exit_code = 1
-            except Exception as e: utils.display_error(f"An unexpected error occurred during task execution: {e}"); logger.exception("Unexpected error during task execution"); exit_code = 1
-            finally:
-                 # Fetch final status if needed (unchanged)
-                 if task_id and final_task_state not in [av_models.TaskState.COMPLETED, av_models.TaskState.FAILED, av_models.TaskState.CANCELED]:
-                     utils.display_info("-" * 20)
-                     status_context_final = utils.console.status("[bold cyan]Fetching final task status...", spinner="earth") if _RICH_AVAILABLE else None
-                     status_obj_final = status_context_final.__enter__() if status_context_final else None
-                     if not status_obj_final: print("Fetching final task status...", flush=True)
-                     try: final_task = await client.get_task_status(agent_card, task_id, manager); final_task_state = final_task.state
-                     except av_exceptions.A2AError as e: utils.display_error(f"Could not fetch final task status: {e}")
-                     except Exception as e: utils.display_error(f"Unexpected error fetching final status: {e}")
-                     finally:
-                         if status_context_final: status_context_final.__exit__(None, None, None)
-                     utils.display_info(f"Final Task State: {final_task_state.value if final_task_state else 'Unknown/Fetch Failed'}")
-
-                 # Determine final exit code (unchanged)
-                 if final_task_state == av_models.TaskState.COMPLETED: utils.display_success("Task completed."); exit_code = 0
-                 elif final_task_state == av_models.TaskState.FAILED: utils.display_error("Task failed."); exit_code = 1
-                 elif final_task_state == av_models.TaskState.CANCELED: utils.display_warning("Task canceled."); exit_code = 2
-                 elif final_task_state == av_models.TaskState.INPUT_REQUIRED: utils.display_warning("Task stopped awaiting input (not supported by CLI)."); exit_code = 2
-                 else: state_str = final_task_state.value if final_task_state else "Unknown/Fetch Failed"; utils.display_warning(f"Task finished with non-terminal or unknown state: {state_str}"); exit_code = 1
-
+        card = await agent_card_utils.load_agent_card(agent_ref, registry_url, config.registry_path)
+        if not card:
+            utils.display_error(f"Agent card not found for reference: {agent_ref}")
+            return None
+        utils.display_success(f"Successfully loaded agent: {card.name} ({card.human_readable_id})")
+        utils.display_info(f"  Agent A2A Endpoint: {card.url}")
+        return card
+    except AgentCardValidationError as e:
+        utils.display_error(f"Agent card validation failed for {agent_ref}: {e}")
+        logger.error(f"Validation error details: {e.errors()}", exc_info=True)
+        return None
+    except AgentCardFetchError as e:
+        utils.display_error(f"Failed to fetch agent card for {agent_ref}: {e}")
+        logger.error(f"Fetch error details", exc_info=True)
+        return None
     except Exception as e:
-        utils.display_error(f"Failed to initialize or use A2A client: {e}")
-        logger.exception("Error initializing/using AgentVaultClient")
-        exit_code = 1
+        utils.display_error(f"An unexpected error occurred while loading agent card {agent_ref}: {e}")
+        logger.error(f"Unexpected agent load error", exc_info=True)
+        return None
+
+def _get_auth_details(
+    card: AgentCard, mgr: key_manager.KeyManager, service_override: Optional[str] = None
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Gets authentication scheme, key, and source, handling errors."""
+    scheme = card.preferred_auth_scheme
+    key = None
+    key_source = None
+    service_id = service_override or card.preferred_auth_service_identifier
+
+    if not scheme:
+        utils.display_error("Agent card does not specify any supported authentication schemes.")
+        return None, None, None
+    if scheme == "none":
+        utils.display_info("Agent supports 'none' authentication scheme. No credentials needed.")
+        return scheme, None, None
+
+    if not service_id:
+        utils.display_error(f"Agent requires '{scheme}' authentication, but no service identifier was found in the agent card.")
+        utils.display_info("You can try specifying one with the --auth-service-id option.")
+        return None, None, None
+
+    utils.display_info(f"Agent requires '{scheme}' authentication for service '{service_id}'. Looking up credentials...")
+
+    try:
+        if scheme == "apiKey":
+            key = mgr.get_key(service_id)
+            key_source = mgr.get_key_source(service_id)
+        elif scheme == "oauth2":
+            # For OAuth2, we might need client_id and client_secret for client_credentials flow
+            # Or just rely on stored refresh tokens etc. for authorization_code flow (handled by client)
+            # Let's assume for now the client handles the flow if tokens exist, but check for config
+            client_id = mgr.get_oauth_client_id(service_id)
+            client_secret = mgr.get_oauth_client_secret(service_id) # May be None
+            key = client_id # Use client_id as the primary identifier for OAuth presence check
+            key_source = mgr.get_oauth_source(service_id)
+            if not key:
+                 utils.display_error(f"OAuth2 configuration required for service '{service_id}' but none found (checked Env, File, Keyring).")
+                 utils.display_info("Use 'agentvault config set --oauth-configure' to set up OAuth2 credentials.")
+                 return scheme, None, None # Indicate scheme but missing key
+            # Store both for potential use by the client
+            key = f"client_id={client_id}" # Pack for potential client use, may need refinement
+            if client_secret:
+                key += f";client_secret={client_secret}"
+
+        else:
+            utils.display_error(f"Unsupported authentication scheme specified by agent: {scheme}")
+            return None, None, None
+
+        if not key:
+            utils.display_error(f"Credentials required for service '{service_id}' but none found (checked Env, File, Keyring).")
+            if scheme == "apiKey":
+                 utils.display_info("Use 'agentvault config set' to configure the key using --key or --keyring.")
+            # OAuth guidance already given if key (client_id) was missing
+            return scheme, None, None # Indicate scheme but missing key
+        else:
+            utils.display_success(f"Credentials found for service '{service_id}' (Source: {key_source}).")
+            return scheme, key, key_source
+
+    except KeyManagementError as e:
+        utils.display_error(f"Error accessing credentials for service '{service_id}': {e}")
+        logger.error("Key management error", exc_info=True)
+        return scheme, None, None
+    except Exception as e:
+        utils.display_error(f"An unexpected error occurred during credential lookup for '{service_id}': {e}")
+        logger.error("Unexpected credential lookup error", exc_info=True)
+        return scheme, None, None
+
+
+def _determine_artifact_filename(artifact: Artifact, output_dir: pathlib.Path, task_id: str) -> pathlib.Path:
+    """Determines a safe filename for an artifact."""
+    # Sanitize artifact ID for use as part of filename
+    safe_base_name = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in artifact.id)[:100]
+
+    # Determine extension based on media type or artifact type
+    ext = ".bin" # Default extension
+    if artifact.media_type:
+        # Basic mapping, can be expanded
+        mime_map = {
+            "text/plain": ".txt",
+            "text/markdown": ".md",
+            "application/json": ".json",
+            "application/pdf": ".pdf",
+            "image/png": ".png",
+            "image/jpeg": ".jpg",
+            "image/gif": ".gif",
+            "application/octet-stream": ".bin",
+        }
+        ext = mime_map.get(artifact.media_type.lower(), ".bin")
+    elif artifact.type:
+        # Fallback to artifact type if media_type is missing
+        type_map = {
+            "log": ".log",
+            "file": ".dat",
+            "code": ".txt", # Default code to text
+        }
+        ext = type_map.get(artifact.type.lower(), ".bin")
+
+    # Ensure directory exists
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Construct filename: {output_dir}/{sanitized_artifact_id}{.ext}
+    filename = output_dir / f"{safe_base_name}{ext}"
+
+    # Handle potential filename collisions (though unlikely with UUIDs/unique IDs)
+    counter = 1
+    base_filename = filename.stem
+    while filename.exists():
+        filename = output_dir / f"{base_filename}_{counter}{ext}"
+        counter += 1
+        if counter > 100: # Safety break
+             logger.error(f"Could not find unique filename for artifact {artifact.id} after 100 attempts.")
+             # Fallback to a more unique name
+             filename = output_dir / f"{safe_base_name}_{uuid.uuid4().hex[:8]}{ext}"
+             break
+
+    return filename
+
+async def _save_artifact(artifact: Artifact, output_dir: pathlib.Path, task_id: str):
+    """Saves artifact content to a file."""
+    if artifact.content is None:
+        utils.display_warning(f"Artifact '{artifact.id}' has no content to save.")
+        return
+
+    filename = _determine_artifact_filename(artifact, output_dir, task_id)
+    utils.display_info(f"  Saving artifact: {artifact.id} (Type: {artifact.type}, Media Type: {artifact.media_type or 'N/A'})")
+    try:
+        # Assume content is string, needs encoding for binary write
+        # TODO: Handle potentially pre-encoded binary content if model changes
+        content_bytes = artifact.content.encode('utf-8')
+        with open(filename, "wb") as f:
+            f.write(content_bytes)
+        utils.display_info(f"  Content saved to: {filename}")
+    except IOError as e:
+        utils.display_error(f"  Error saving artifact {artifact.id} to {filename}: {e}")
+        logger.error(f"IOError saving artifact {artifact.id}", exc_info=True)
+    except Exception as e:
+        utils.display_error(f"  Unexpected error saving artifact {artifact.id}: {e}")
+        logger.error(f"Unexpected error saving artifact {artifact.id}", exc_info=True)
+
+
+async def _handle_sse_events(
+    client: av_client.AgentVaultClient,
+    task_id: str,
+    output_artifacts_dir: Optional[pathlib.Path] = None,
+    timeout: Optional[float] = None
+) -> TaskState:
+    """Processes SSE events from the agent, updating display and saving artifacts."""
+    global _interrupted
+    last_state = TaskState.PENDING
+    processed_messages = set()
+    processed_artifacts = set()
+    start_time = asyncio.get_event_loop().time()
+
+    # --- Rich Live Display Setup ---
+    live_display = None
+    status_spinner = None
+    message_panel = None
+    artifact_text = None
+    if _RICH_AVAILABLE:
+        status_spinner = Spinner("dots", text=Text("Waiting for task updates...", style="blue"))
+        message_panel = Panel("", title="Agent Messages", border_style="green", expand=False)
+        artifact_text = Text("", style="dim")
+        display_group = click.Group(status_spinner, message_panel, artifact_text)
+        live_display = Live(display_group, refresh_per_second=4, transient=False) # Keep final state
+
+    async def update_display(state: TaskState, message: Optional[str] = None, artifact_info: Optional[str] = None):
+        if live_display:
+            nonlocal status_spinner, message_panel, artifact_text
+            status_text = f"Task Status: {state.value.upper()}"
+            if message:
+                status_text += f" - {message}"
+            status_spinner.text = Text(status_text, style="blue" if state in [TaskState.PENDING, TaskState.WORKING] else "green" if state == TaskState.COMPLETED else "red")
+
+            if message and message not in processed_messages:
+                 # Append new message content to the panel
+                 current_content = message_panel.renderable if isinstance(message_panel.renderable, str) else ""
+                 # Basic check for markdown, render accordingly
+                 if any(c in message for c in ['*', '_', '`', '#']):
+                     new_content = Markdown(message)
+                 else:
+                     new_content = Text(message)
+                 # Combine (if needed, adjust formatting)
+                 if current_content:
+                     message_panel.renderable = click.Group(current_content, new_content)
+                 else:
+                     message_panel.renderable = new_content
+                 processed_messages.add(message) # Avoid duplication in panel
+
+            if artifact_info and artifact_info not in processed_artifacts:
+                current_artifacts = artifact_text.plain
+                new_artifact_line = f"- Artifact Updated: {artifact_info}"
+                artifact_text.plain = f"{current_artifacts}\n{new_artifact_line}" if current_artifacts else new_artifact_line
+                processed_artifacts.add(artifact_info) # Avoid duplication
+
+            # Update the live display group
+            live_display.update(click.Group(status_spinner, message_panel, artifact_text))
+        else:
+            # Fallback to simple printing if Rich is not available
+            status_text = f"Task Status: {state.value.upper()}"
+            if message:
+                status_text += f" - {message}"
+            utils.display_info(status_text)
+            if message and message not in processed_messages:
+                 utils.console.print(f"Assistant: {message}")
+                 processed_messages.add(message)
+            if artifact_info and artifact_info not in processed_artifacts:
+                 utils.display_info(f"Artifact Updated: {artifact_info}")
+                 processed_artifacts.add(artifact_info)
+
+    try:
+        if live_display:
+            with live_display:
+                await update_display(TaskState.PENDING) # Initial status
+                async for event in client.receive_messages(task_id):
+                    if _interrupted:
+                        utils.display_warning("Stopping event processing due to interrupt.")
+                        break # Exit the loop gracefully
+
+                    # Timeout check
+                    if timeout and (asyncio.get_event_loop().time() - start_time > timeout):
+                        utils.display_error(f"Timeout reached ({timeout}s) waiting for task completion.")
+                        # Consider attempting to cancel the task on the agent side if API supports it
+                        raise asyncio.TimeoutError("Task execution timed out.")
+
+                    if isinstance(event, TaskStatusUpdateEvent):
+                        last_state = event.state
+                        await update_display(event.state, event.message)
+                        if event.state.is_terminal():
+                            break # Stop listening if task is completed or failed
+
+                    elif isinstance(event, TaskMessageEvent):
+                        # Display message content
+                        msg_content = " ".join([part.content for part in event.message.parts if isinstance(part, TextPart)])
+                        if msg_content:
+                            await update_display(last_state, message=msg_content) # Update with message, keep last known state
+
+                    elif isinstance(event, TaskArtifactUpdateEvent):
+                        artifact_info = f"{event.artifact.id} (Type: {event.artifact.type})"
+                        await update_display(last_state, artifact_info=artifact_info)
+                        if output_artifacts_dir and event.artifact.content is not None:
+                            await _save_artifact(event.artifact, output_artifacts_dir, task_id)
+
+                    # Add a small sleep to prevent tight loop if stream is very fast or empty
+                    await asyncio.sleep(0.05)
+
+        else: # No Rich available
+            await update_display(TaskState.PENDING) # Initial status
+            async for event in client.receive_messages(task_id):
+                if _interrupted:
+                    utils.display_warning("Stopping event processing due to interrupt.")
+                    break
+
+                # Timeout check
+                if timeout and (asyncio.get_event_loop().time() - start_time > timeout):
+                    utils.display_error(f"Timeout reached ({timeout}s) waiting for task completion.")
+                    raise asyncio.TimeoutError("Task execution timed out.")
+
+                if isinstance(event, TaskStatusUpdateEvent):
+                    last_state = event.state
+                    await update_display(event.state, event.message)
+                    if event.state.is_terminal():
+                        break
+                elif isinstance(event, TaskMessageEvent):
+                    msg_content = " ".join([part.content for part in event.message.parts if isinstance(part, TextPart)])
+                    if msg_content:
+                         await update_display(last_state, message=msg_content)
+                elif isinstance(event, TaskArtifactUpdateEvent):
+                    artifact_info = f"{event.artifact.id} (Type: {event.artifact.type})"
+                    await update_display(last_state, artifact_info=artifact_info)
+                    if output_artifacts_dir and event.artifact.content is not None:
+                        await _save_artifact(event.artifact, output_artifacts_dir, task_id)
+                await asyncio.sleep(0.05)
+
+    except asyncio.TimeoutError:
+        # Error already displayed
+        return TaskState.FAILED # Or a specific timeout state if available
+    except A2AConnectionError as e:
+        logger.error(f"Connection failed during event stream: {e}", exc_info=True)
+        utils.display_error(f"Connection lost while waiting for task updates: {e}")
+        # Fallback to fetching final status might be needed
+        return TaskState.UNKNOWN # Indicate connection was lost
+    except A2AError as e:
+        logger.error(f"A2A error during event stream: {e}", exc_info=True)
+        utils.display_error(f"An error occurred while receiving task updates: {e}")
+        return TaskState.UNKNOWN
+    except Exception as e:
+        logger.error(f"Unexpected error processing SSE events: {e}", exc_info=True)
+        utils.display_error(f"An unexpected error occurred: {e}")
+        return TaskState.UNKNOWN
     finally:
-        signal.signal(signal.SIGINT, original_sigint_handler)
-        return exit_code
+        # Ensure live display is stopped if it was started
+        # This might not be strictly necessary if using `with live_display:`
+        # but added for robustness.
+        # if live_display and live_display.is_started:
+        #     live_display.stop()
+        pass # 'with' statement handles stopping
+
+    if _interrupted:
+         utils.display_warning("Task processing was interrupted.")
+         # Attempt to get final status if possible, but mark as interrupted
+         return TaskState.CANCELLED # Or UNKNOWN depending on desired state
+
+    return last_state
+
+
+async def _get_final_task_status(client: av_client.AgentVaultClient, task_id: str) -> Task:
+    """Fetches the final task status."""
+    utils.display_info("Fetching final task details...")
+    try:
+        final_task = await client.get_task_status(task_id)
+        utils.display_success(f"Final task state: {final_task.state.value.upper()}")
+        # Optionally display final messages/artifacts here if needed
+        return final_task
+    except A2AError as e:
+        utils.display_error(f"Failed to retrieve final task status: {e}")
+        logger.error(f"Failed to get final task status for {task_id}", exc_info=True)
+        # Create a dummy Task object to indicate failure but allow type consistency
+        return Task(
+            id=task_id,
+            state=TaskState.UNKNOWN, # Indicate fetch failed
+            createdAt=datetime.datetime.now(datetime.timezone.utc), # Placeholder
+            updatedAt=datetime.datetime.now(datetime.timezone.utc), # Placeholder
+            messages=[],
+            artifacts=[]
+        )
+
+# --- MODIFIED: Add @click.pass_context and ctx parameter ---
+@click.command()
+@click.option('--agent', '-a', 'agent_ref', required=True, help='Agent reference (human-readable ID, URL, or local file path).')
+@click.option('--input', '-i', 'input_content', required=True, help='Initial input/prompt for the agent. Prefix with "@" to read from a file (e.g., @prompt.txt).')
+@click.option('--context', '-c', 'context_content', multiple=True, help='Additional context for the agent. Prefix with "@" to read from a file. Can be used multiple times.')
+@click.option('--output-artifacts', '-o', type=click.Path(file_okay=False, dir_okay=True, writable=True, path_type=pathlib.Path), help='Directory to save any artifacts generated by the agent.')
+@click.option('--registry', '-r', 'registry_url', help='URL of the agent registry to use for resolving agent IDs.')
+@click.option('--timeout', '-t', type=float, default=300.0, help='Timeout in seconds to wait for the task to complete (default: 300).')
+@click.option('--auth-service-id', help='Override the service identifier used for looking up authentication credentials.')
+@click.option('--use-keyring/--no-use-keyring', default=True, help='Enable/disable using the system keyring for credentials.')
+@click.pass_context
+async def run(
+    ctx: click.Context, # Added ctx parameter
+    agent_ref: str,
+    input_content: str,
+    context_content: Tuple[str],
+    output_artifacts: Optional[pathlib.Path],
+    registry_url: Optional[str],
+    timeout: float,
+    auth_service_id: Optional[str],
+    use_keyring: bool
+):
+# --- END MODIFIED ---
+    """
+    Run a task with a specified agent.
+
+    Loads the agent card, prepares the initial message and context,
+    initiates a task with the agent via A2A protocol, streams status
+    updates and messages, and optionally saves artifacts.
+    """
+    global _interrupted
+    _interrupted = False # Reset interrupt flag for this run
+    # Set up signal handling for graceful shutdown
+    try:
+        signal.signal(signal.SIGINT, _signal_handler)
+        signal.signal(signal.SIGTERM, _signal_handler)
+    except ValueError:
+        # Cannot set signal handlers in non-main thread (e.g. during tests)
+        logger.warning("Could not set signal handlers. Graceful interruption might not work.")
+        pass
+
+
+    config = AgentVaultConfig()
+    config.load() # Load default config
+
+    # 1. Load Agent Card
+    card = await _load_agent_card(agent_ref, registry_url, config)
+    if not card:
+        # --- MODIFIED: Use ctx.exit(1) instead of return 1 ---
+        ctx.exit(1)
+        # --- END MODIFIED ---
+
+    # 2. Handle Authentication
+    utils.display_info("Initializing KeyManager...")
+    try:
+        mgr = key_manager.KeyManager(use_keyring=use_keyring)
+        utils.display_success("KeyManager initialized.")
+    except Exception as e:
+        utils.display_error(f"Failed to initialize KeyManager: {e}")
+        logger.error("KeyManager initialization failed", exc_info=True)
+        # --- MODIFIED: Use ctx.exit(1) instead of return 1 ---
+        ctx.exit(1)
+        # --- END MODIFIED ---
+
+    auth_scheme, auth_key, _ = _get_auth_details(card, mgr, auth_service_id)
+
+    if auth_scheme is None: # Error occurred and was displayed in helper
+         # --- MODIFIED: Use ctx.exit(1) instead of return 1 ---
+         ctx.exit(1)
+         # --- END MODIFIED ---
+    if auth_scheme != "none" and auth_key is None: # Scheme requires key, but none found
+         # Error message already displayed by _get_auth_details
+         # --- MODIFIED: Use ctx.exit(1) instead of return 1 ---
+         ctx.exit(1)
+         # --- END MODIFIED ---
+
+    # 3. Prepare Initial Message and Context
+    initial_message_parts = []
+    # Handle input (file or direct string)
+    if input_content.startswith('@'):
+        input_file = pathlib.Path(input_content[1:])
+        try:
+            input_text = input_file.read_text(encoding='utf-8')
+            utils.display_info(f"Read input from file: {input_file}")
+            initial_message_parts.append(TextPart(content=input_text))
+        except FileNotFoundError:
+            utils.display_error(f"Input file not found: {input_file}")
+            # --- MODIFIED: Use ctx.exit(1) instead of return 1 ---
+            ctx.exit(1)
+            # --- END MODIFIED ---
+        except IOError as e:
+            utils.display_error(f"Error reading input file {input_file}: {e}")
+            # --- MODIFIED: Use ctx.exit(1) instead of return 1 ---
+            ctx.exit(1)
+            # --- END MODIFIED ---
+    else:
+        initial_message_parts.append(TextPart(content=input_content))
+
+    # Handle context files/strings
+    for ctx_item in context_content:
+        if ctx_item.startswith('@'):
+            ctx_file = pathlib.Path(ctx_item[1:])
+            try:
+                ctx_text = ctx_file.read_text(encoding='utf-8')
+                utils.display_info(f"Read context from file: {ctx_file}")
+                # Decide how to structure context parts - separate TextPart for now
+                initial_message_parts.append(TextPart(content=ctx_text, role="context")) # Assuming role="context" is valid or handled
+            except FileNotFoundError:
+                utils.display_error(f"Context file not found: {ctx_file}")
+                # --- MODIFIED: Use ctx.exit(1) instead of return 1 ---
+                ctx.exit(1)
+                # --- END MODIFIED ---
+            except IOError as e:
+                utils.display_error(f"Error reading context file {ctx_file}: {e}")
+                # --- MODIFIED: Use ctx.exit(1) instead of return 1 ---
+                ctx.exit(1)
+                # --- END MODIFIED ---
+        else:
+             initial_message_parts.append(TextPart(content=ctx_item, role="context"))
+
+    initial_message = Message(role="user", parts=initial_message_parts)
+
+    # 4. Initialize A2A Client
+    try:
+        # Pass necessary auth details based on scheme
+        client_auth_params = {}
+        if auth_scheme == "apiKey":
+            client_auth_params['api_key'] = auth_key
+        elif auth_scheme == "oauth2":
+            # The client needs to handle parsing the packed key or use stored tokens
+            # This might require refinement in the client library
+            # For now, just pass the packed string, assuming client knows what to do
+             client_auth_params['oauth_config'] = auth_key # Placeholder name
+        # Add other schemes as needed
+
+        client = av_client.AgentVaultClient(
+            agent_url=card.url,
+            auth_scheme=auth_scheme,
+            **client_auth_params
+        )
+        utils.display_info("A2A Client initialized.")
+    except Exception as e:
+        utils.display_error(f"Failed to initialize A2A client: {e}")
+        logger.error("A2A client initialization failed", exc_info=True)
+        # --- MODIFIED: Use ctx.exit(1) instead of return 1 ---
+        ctx.exit(1)
+        # --- END MODIFIED ---
+
+
+    # 5. Run Task and Process Events
+    task_id = None
+    final_state = TaskState.UNKNOWN
+    try:
+        utils.display_info("Initiating task with agent...")
+        task_id = await client.initiate_task(initial_message=initial_message)
+        utils.display_success(f"Task initiated successfully. Task ID: {task_id}")
+
+        # Process SSE stream
+        final_state = await _handle_sse_events(client, task_id, output_artifacts, timeout)
+
+        # If stream finished without terminal state or was interrupted/lost connection, get final status
+        if not final_state.is_terminal() or final_state == TaskState.UNKNOWN:
+             if _interrupted and final_state != TaskState.CANCELLED:
+                 final_state = TaskState.CANCELLED # Mark as cancelled if interrupted
+             else:
+                 utils.display_warning(f"Event stream ended with non-terminal state ({final_state.value}). Fetching final status.")
+                 final_task_obj = await _get_final_task_status(client, task_id)
+                 final_state = final_task_obj.state # Update with fetched state
+
+    except A2AAuthenticationError as e:
+        utils.display_error(f"A2A Authentication Error: {e}")
+        logger.error("A2A Authentication Error", exc_info=True)
+        # --- MODIFIED: Use ctx.exit(1) instead of return 1 ---
+        ctx.exit(1)
+        # --- END MODIFIED ---
+    except A2AConnectionError as e:
+        utils.display_error(f"A2A Connection Error: {e}")
+        logger.error("A2A Connection Error", exc_info=True)
+        # Attempt to get final status if task_id was obtained
+        if task_id:
+            utils.display_warning("Attempting to fetch final task status despite connection error...")
+            final_task_obj = await _get_final_task_status(client, task_id)
+            final_state = final_task_obj.state
+        else:
+            final_state = TaskState.FAILED # Failed before getting task_id
+        # --- MODIFIED: Use ctx.exit(1) instead of return 1 ---
+        ctx.exit(1) # Exit even if final status was fetched, as connection failed initially
+        # --- END MODIFIED ---
+    except A2ARemoteAgentError as e:
+        utils.display_error(f"Remote Agent Error: {e}")
+        logger.error("Remote Agent Error", exc_info=True)
+        final_state = TaskState.FAILED # Assume failed if agent reported error
+        # --- MODIFIED: Use ctx.exit(1) instead of return 1 ---
+        ctx.exit(1)
+        # --- END MODIFIED ---
+    except A2ATimeoutError as e:
+        utils.display_error(f"A2A Timeout Error: {e}")
+        logger.error("A2A Timeout Error", exc_info=True)
+        final_state = TaskState.FAILED # Assume failed on timeout
+        # --- MODIFIED: Use ctx.exit(1) instead of return 1 ---
+        ctx.exit(1)
+        # --- END MODIFIED ---
+    except A2AError as e:
+        utils.display_error(f"A2A Error: {e}")
+        logger.error("A2A Error", exc_info=True)
+        final_state = TaskState.FAILED # Assume general A2A failure
+        # --- MODIFIED: Use ctx.exit(1) instead of return 1 ---
+        ctx.exit(1)
+        # --- END MODIFIED ---
+    except asyncio.CancelledError:
+         utils.display_warning("Task run was cancelled.")
+         final_state = TaskState.CANCELLED
+         # --- MODIFIED: Use ctx.exit(1) instead of return 1 ---
+         ctx.exit(1) # Exit with error code on cancellation
+         # --- END MODIFIED ---
+    except Exception as e:
+        utils.display_error(f"An unexpected error occurred during task execution: {e}")
+        logger.error("Unexpected error during run", exc_info=True)
+        final_state = TaskState.FAILED
+        # --- MODIFIED: Use ctx.exit(1) instead of return 1 ---
+        ctx.exit(1)
+        # --- END MODIFIED ---
+    finally:
+        # Restore default signal handlers
+        try:
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        except ValueError:
+            pass # Ignore if they couldn't be set initially
+        except Exception as e:
+             logger.warning(f"Could not restore default signal handlers: {e}")
+
+        utils.console.print("----") # Separator
+        utils.console.print(f"Final Task State: {final_state.value.upper()}")
+        if not final_state.is_successful():
+             utils.display_warning(f"Task finished with non-terminal or unknown state: {final_state.value.upper()}")
+
+
+    # Final exit based on terminal state
+    if final_state.is_successful():
+        utils.display_success("Task completed successfully.")
+        # Implicit ctx.exit(0)
+    else:
+        utils.display_error("Task did not complete successfully.")
+        # --- MODIFIED: Use ctx.exit(1) instead of return 1 ---
+        ctx.exit(1)
+        # --- END MODIFIED ---
