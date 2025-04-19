@@ -3,6 +3,9 @@ from typer.testing import CliRunner
 from pathlib import Path
 import os # Import os for chdir
 import logging # Import logging for caplog
+# --- ADDED: Import re ---
+import re
+# --- END ADDED ---
 
 # Import the Typer app instance
 # --- MODIFIED: Corrected import path based on structure ---
@@ -68,18 +71,18 @@ def test_package_agent_requires_output_dir():
     """Test that the command fails if output directory is missing."""
     result = runner.invoke(app, ["--entrypoint", "main:app"])
     assert result.exit_code != 0
-    # --- MODIFIED: Remove single quotes from assertion ---
-    assert "Missing option" in result.output
-    assert "--output-dir" in result.output # Check for the option name without quotes
+    # --- MODIFIED: Use re.search to ignore formatting ---
+    # Check that the core message "Missing option" and the option name exist,
+    # ignoring surrounding characters/formatting.
+    assert re.search(r"Missing option.*--output-dir", result.output)
     # --- END MODIFIED ---
 
 def test_package_agent_requires_entrypoint():
     """Test that the command fails if entrypoint is missing."""
     result = runner.invoke(app, ["--output-dir", "./temp_out"])
     assert result.exit_code != 0
-    # --- MODIFIED: Remove single quotes from assertion ---
-    assert "Missing option" in result.output
-    assert "--entrypoint" in result.output # Check for the option name without quotes
+    # --- MODIFIED: Use re.search to ignore formatting ---
+    assert re.search(r"Missing option.*--entrypoint", result.output)
     # --- END MODIFIED ---
 
 # --- Tests for requirements handling ---
