@@ -24,7 +24,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      # --- MODIFIED: Use an EXACT Poetry version ---
       - name: Install Poetry
         uses: snok/install-poetry@v1
         with:
@@ -32,7 +31,6 @@ jobs:
           virtualenvs-create: true
           virtualenvs-in-project: false # Keep false for CI caching
           installer-parallel: true
-      # --- END MODIFIED ---
 
       - name: Display Poetry version
         run: poetry --version
@@ -60,10 +58,14 @@ jobs:
           poetry install --sync --with dev --no-interaction
         # No working-directory needed, runs in root
 
+      # --- MODIFIED: Remove --requirement poetry.lock ---
       - name: Run pip-audit # Run in root
         run: |
           echo "Running pip-audit using 'poetry run'..."
-          poetry run pip-audit --progress-spinner=off --strict --requirement poetry.lock
-          # Explicitly point to the lock file for clarity
+          # Run pip-audit within the environment managed by Poetry.
+          # It will audit the packages installed by 'poetry install'.
+          poetry run pip-audit --progress-spinner=off --strict
+          # REMOVED: --requirement poetry.lock
 
         # No working-directory needed, runs in root
+      # --- END MODIFIED ---
