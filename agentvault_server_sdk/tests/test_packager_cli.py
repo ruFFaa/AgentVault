@@ -9,8 +9,10 @@ import logging # Import logging for caplog
 from agentvault_server_sdk.packager.cli import app, DOCKERIGNORE_CONTENT # Import content for check
 # --- END MODIFIED ---
 
-# Instantiate CliRunner with mix_stderr=True
-runner = CliRunner(mix_stderr=True)
+# --- MODIFIED: Instantiate CliRunner with NO_COLOR env var ---
+# Instantiate CliRunner with mix_stderr=True and disable color output
+runner = CliRunner(mix_stderr=True, env={"NO_COLOR": "1"})
+# --- END MODIFIED ---
 
 def test_package_agent_dockerfile_generation(tmp_path: Path):
     """Test that the 'package' command generates a Dockerfile and .dockerignore."""
@@ -66,7 +68,7 @@ def test_package_agent_requires_output_dir():
     """Test that the command fails if output directory is missing."""
     result = runner.invoke(app, ["--entrypoint", "main:app"])
     assert result.exit_code != 0
-    # --- MODIFIED: Check for key parts of the message ---
+    # --- Keep the less strict assertions ---
     assert "Missing option" in result.output
     assert "'--output-dir'" in result.output # Check for the option name itself
     # --- END MODIFIED ---
@@ -75,7 +77,7 @@ def test_package_agent_requires_entrypoint():
     """Test that the command fails if entrypoint is missing."""
     result = runner.invoke(app, ["--output-dir", "./temp_out"])
     assert result.exit_code != 0
-    # --- MODIFIED: Check for key parts of the message ---
+    # --- Keep the less strict assertions ---
     assert "Missing option" in result.output
     assert "'--entrypoint'" in result.output # Check for the option name itself
     # --- END MODIFIED ---
