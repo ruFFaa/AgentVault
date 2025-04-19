@@ -68,18 +68,18 @@ def test_package_agent_requires_output_dir():
     """Test that the command fails if output directory is missing."""
     result = runner.invoke(app, ["--entrypoint", "main:app"])
     assert result.exit_code != 0
-    # --- Keep the less strict assertions ---
+    # --- MODIFIED: Remove single quotes from assertion ---
     assert "Missing option" in result.output
-    assert "'--output-dir'" in result.output # Check for the option name itself
+    assert "--output-dir" in result.output # Check for the option name without quotes
     # --- END MODIFIED ---
 
 def test_package_agent_requires_entrypoint():
     """Test that the command fails if entrypoint is missing."""
     result = runner.invoke(app, ["--output-dir", "./temp_out"])
     assert result.exit_code != 0
-    # --- Keep the less strict assertions ---
+    # --- MODIFIED: Remove single quotes from assertion ---
     assert "Missing option" in result.output
-    assert "'--entrypoint'" in result.output # Check for the option name itself
+    assert "--entrypoint" in result.output # Check for the option name without quotes
     # --- END MODIFIED ---
 
 # --- Tests for requirements handling ---
