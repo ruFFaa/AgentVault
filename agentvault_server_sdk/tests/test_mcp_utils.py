@@ -1,8 +1,12 @@
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch # Added patch
+import logging # Added logging
+import importlib # Added importlib
+import sys # Added sys
 
 # Import the function to test
-from agentvault_server_sdk.mcp_utils import get_mcp_context
+# Need to import the module itself to reload it after patching
+from agentvault_server_sdk import mcp_utils
 
 # Import or mock the Message model
 try:
@@ -52,7 +56,7 @@ def test_get_mcp_context_success():
     mcp_data = {"user_id": "123", "session_info": {"theme": "dark"}}
     # Use the helper to create a valid message
     message = create_test_message(metadata={"other_key": "value", "mcp_context": mcp_data})
-    result = get_mcp_context(message)
+    result = mcp_utils.get_mcp_context(message)
     assert result == mcp_data
 
 def test_get_mcp_context_no_metadata():
@@ -71,14 +75,14 @@ def test_get_mcp_context_no_metadata():
     # Also set it to None just in case del didn't work as expected on the mock
     message_no_meta.metadata = None
 
-    result = get_mcp_context(message_no_meta)
+    result = mcp_utils.get_mcp_context(message_no_meta)
     assert result is None
 
 def test_get_mcp_context_metadata_is_none():
     """Test message where metadata attribute exists but is None."""
     # Use the helper
     message = create_test_message(metadata=None)
-    result = get_mcp_context(message)
+    result = mcp_utils.get_mcp_context(message)
     assert result is None
 
 def test_get_mcp_context_metadata_not_dict():
@@ -90,26 +94,57 @@ def test_get_mcp_context_metadata_not_dict():
     message_mock.parts = [TextPart(content="test")]
     message_mock.metadata = ["list", "is", "not", "dict"] # Assign the invalid type
     # --- END MODIFIED ---
-    result = get_mcp_context(message_mock) # Pass the mock object
+    result = mcp_utils.get_mcp_context(message_mock) # Pass the mock object
     assert result is None
 
 def test_get_mcp_context_key_missing():
     """Test message with metadata dictionary but missing 'mcp_context' key."""
     # Use the helper
     message = create_test_message(metadata={"other_key": "value", "another": 123})
-    result = get_mcp_context(message)
+    result = mcp_utils.get_mcp_context(message)
     assert result is None
 
 def test_get_mcp_context_value_not_dict():
     """Test message where 'mcp_context' value is not a dictionary."""
     # Use the helper
     message = create_test_message(metadata={"mcp_context": "this is a string, not a dict"})
-    result = get_mcp_context(message)
+    result = mcp_utils.get_mcp_context(message)
     assert result is None
 
 def test_get_mcp_context_empty_dict_value():
     """Test message where 'mcp_context' value is an empty dictionary."""
     # Use the helper
     message = create_test_message(metadata={"mcp_context": {}})
-    result = get_mcp_context(message)
+    result = mcp_utils.get_mcp_context(message)
     assert result == {}
+
+# --- ADDED: Test for import fallback ---
+def test_get_mcp_context_import_error(monkeypatch, caplog):
+    """Test get_mcp_context when core models cannot be imported."""
+    # Simulate ImportError by temporarily removing the module
+    # Use monkeypatch for cleaner sys.modules manipulation
+    monkeypatch.setitem(sys.modules, 'agentvault.models', None)
+
+    # Reload the module under test to trigger the import error handling
+    importlib.reload(mcp_utils)
+
+    # Create a dummy message (doesn't need real structure as import failed,
+    # but needs the 'metadata' attribute for the function logic)
+    mcp_payload = {"data": 1}
+    dummy_message = MagicMock()
+    dummy_message.metadata = {"mcp_context": mcp_payload}
+
+    with caplog.at_level(logging.ERROR):
+        result = mcp_utils.get_mcp_context(dummy_message) # Call the reloaded function
+
+    # --- MODIFIED: Assert result is extracted correctly despite import error ---
+    assert result == mcp_payload # Function should still work via duck typing
+    # --- END MODIFIED ---
+    assert "Failed to import Message model from 'agentvault'" in caplog.text
+
+    # Clean up - restore the module if it was originally present
+    # This might be needed if other tests in the same session rely on it
+    monkeypatch.delitem(sys.modules, 'agentvault.models', raising=False)
+    # Force reload again to restore normal state for subsequent tests
+    importlib.reload(mcp_utils)
+# --- END ADDED ---

@@ -467,4 +467,33 @@ def test_route_tasks_sendSubscribe_invalid_id_type(test_app_with_agent):
     assert resp_data["error"]["code"] == JSONRPC_INVALID_PARAMS
     assert "'id' parameter is required" in resp_data["error"]["message"] # Error message might be generic
 
+# --- ADDED: Tests for Decorated Method Error Handling ---
+
+def test_route_decorated_method_agent_error(test_app_with_agent):
+    """Test decorated method raising AgentServerError returns JSONRPC_APP_ERROR."""
+    mock_agent, client, store = test_app_with_agent
+    error_msg = "Agent failed processing echo"
+    mock_agent.configure_custom_echo_error(AgentServerError(error_msg))
+
+    response = make_rpc_request(client, "custom/echo", params={"message": "test"}, req_id="deco-err1")
+    assert response.status_code == status.HTTP_200_OK # JSON-RPC error
+    resp_data = response.json()
+    assert resp_data["id"] == "deco-err1"
+    assert resp_data["error"]["code"] == JSONRPC_APP_ERROR
+    assert f"Agent error: {error_msg}" in resp_data["error"]["message"]
+
+def test_route_decorated_method_bad_return_type(test_app_with_agent):
+    """Test decorated method returning wrong type results in JSONRPC_INTERNAL_ERROR."""
+    mock_agent, client, store = test_app_with_agent
+    # Configure the mock agent's method to return an int instead of a str
+    mock_agent.configure_custom_bad_return(12345) # Method expects str
+
+    response = make_rpc_request(client, "custom/bad_return", params={"value": 1}, req_id="deco-err2")
+    # This error happens *after* the handler runs, during response validation/serialization
+    assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR # Internal server error
+    resp_data = response.json()
+    assert resp_data["id"] == "deco-err2"
+    assert resp_data["error"]["code"] == JSONRPC_INTERNAL_ERROR
+    assert "Invalid return type" in resp_data["error"]["message"]
+
 # --- END ADDED ---
