@@ -5,13 +5,12 @@ import datetime
 import os
 from typing import Optional, List, Dict, Any, Tuple, Annotated
 
-
 from sqlalchemy import select, func, or_
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import cast, Text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload # Keep import for get_agent_card
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
 from pydantic import ValidationError as PydanticValidationError # To catch validation errors
@@ -29,20 +28,21 @@ except ImportError:
     _agentvault_lib_available = False
     logging.warning("Could not import 'agentvault' library. Agent Card validation during CRUD operations will be skipped.")
 
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# --- Helper Function to build response dict ---
+# --- Helper Function to build response dict (Original Version - Assumes developer loaded) ---
 def _build_agent_card_read_dict(db_card: models.AgentCard) -> dict:
     """Builds the dictionary for AgentCardRead response from the ORM model."""
     if not db_card:
         return {} # Should not happen if called correctly
-    # Ensure developer relationship is loaded (get_agent_card should handle this)
-    developer_verified = False
+
+    developer_verified = False # Default to False if not loaded
+    # Original logic assumed relationship was loaded via selectinload
     if hasattr(db_card, 'developer') and db_card.developer:
         developer_verified = getattr(db_card.developer, 'is_verified', False)
+        logger.debug(f"Developer relationship was loaded for Card {db_card.id}. Verified: {developer_verified}")
     else:
         logger.warning(f"Developer relationship not loaded for AgentCard {db_card.id} when building response.")
 
@@ -85,9 +85,13 @@ async def submit_agent_card(
         db_agent_card = await agent_card.create_agent_card(
             db=db, developer_id=current_developer.id, card_create=card_in
         )
-        if db_agent_card and (not hasattr(db_agent_card, 'developer') or not db_agent_card.developer):
+        # Refresh to load the relationship for the response
+        if db_agent_card:
              logger.info(f"Refreshing developer relationship for created card {db_agent_card.id}")
              await db.refresh(db_agent_card, attribute_names=['developer'])
+        else:
+             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create agent card record.")
+
 
         response_dict = _build_agent_card_read_dict(db_agent_card)
         return schemas.AgentCardRead.model_validate(response_dict)
@@ -152,7 +156,7 @@ async def list_agent_cards(
         logger.info(f"Listing public agent cards with skip={skip}, limit={limit}, active_only={active_only}, search='{search}', tags={tags}, has_tee={has_tee}, tee_type='{tee_type}'")
 
     try:
-        # Ensure CRUD function is called with the correct parameters
+        # Call CRUD function (which now includes selectinload again)
         items, total_items = await agent_card.list_agent_cards(
             db=db, skip=skip, limit=limit, active_only=active_only, search=search, tags=tags,
             developer_id=developer_id_filter,
@@ -160,8 +164,9 @@ async def list_agent_cards(
             tee_type=tee_type
         )
 
-        current_page = (skip // limit) + 1
-        total_pages = math.ceil(total_items / limit) if limit > 0 else 0
+        # Construct pagination info
+        current_page = (skip // limit) + 1 if limit > 0 else 1
+        total_pages = math.ceil(total_items / limit) if limit > 0 else (1 if total_items > 0 else 0)
 
         pagination_info = schemas.PaginationInfo(
             total_items=total_items,
@@ -170,6 +175,7 @@ async def list_agent_cards(
             total_pages=total_pages,
             current_page=current_page,
         )
+        # Serialize items to summary schema
         summaries = [schemas.AgentCardSummary.model_validate(item) for item in items]
         return schemas.AgentCardListResponse(items=summaries, pagination=pagination_info)
 
@@ -202,7 +208,7 @@ async def get_agent_card(
         logger.warning(f"Agent card with ID {card_id} not found.")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent Card not found")
 
-    response_dict = _build_agent_card_read_dict(db_card)
+    response_dict = _build_agent_card_read_dict(db_card) # Helper handles potential missing dev
     return schemas.AgentCardRead.model_validate(response_dict)
 
 
@@ -227,20 +233,27 @@ async def update_agent_card(
     Validates `card_data` if provided.
     """
     logger.info(f"Received request to update agent card {card_id} from developer ID: {current_developer.id}")
+    # Fetch card WITH developer info for ownership check
     db_card = await agent_card.get_agent_card(db=db, card_id=card_id)
     if db_card is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent Card not found")
 
+    # Check ownership
     if db_card.developer_id != current_developer.id:
         logger.warning(f"Developer {current_developer.id} attempted to update agent card {card_id} owned by {db_card.developer_id}")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update this agent card")
 
     try:
+        # Pass the fetched db_card to the update function
         updated_card = await agent_card.update_agent_card(db=db, db_card=db_card, card_update=card_in)
 
-        if updated_card and (not hasattr(updated_card, 'developer') or not updated_card.developer):
+        # Refresh developer relationship AFTER update
+        if updated_card:
              logger.info(f"Refreshing developer relationship for updated card {updated_card.id}")
              await db.refresh(updated_card, attribute_names=['developer'])
+        else:
+             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update agent card record.")
+
 
         response_dict = _build_agent_card_read_dict(updated_card)
         return schemas.AgentCardRead.model_validate(response_dict)
@@ -278,27 +291,33 @@ async def delete_agent_card(
     Returns 204 No Content on success.
     """
     logger.info(f"Received request to deactivate agent card {card_id} from developer ID: {current_developer.id}")
+    # Fetch card WITH developer info for ownership check
     db_card = await agent_card.get_agent_card(db=db, card_id=card_id)
     if db_card is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent Card not found")
 
+    # Check ownership
     if db_card.developer_id != current_developer.id:
         logger.warning(f"Developer {current_developer.id} attempted to delete agent card {card_id} owned by {db_card.developer_id}")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete this agent card")
 
+    # Call the delete (deactivate) function
     success = await agent_card.delete_agent_card(db=db, card_id=card_id)
 
+    # Check result and raise appropriate error if deletion failed unexpectedly
     if not success:
+        # Re-check the card status to see if it failed because it wasn't found
+        # or due to a DB error during the update.
         check_card = await agent_card.get_agent_card(db=db, card_id=card_id)
-        if check_card and check_card.is_active:
-             logger.error(f"Failed to deactivate agent card {card_id} due to a database error.")
-             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to deactivate agent card")
-        elif not check_card:
-             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent Card not found")
+        if not check_card:
+             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent Card not found during deletion process.")
+        elif check_card.is_active: # Still active? Then the update failed.
+             logger.error(f"Failed to deactivate agent card {card_id} due to a database error during update.")
+             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to deactivate agent card due to internal error.")
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-# --- ADDED: GET /agent-cards/id/{human_readable_id} ---
+# --- GET /agent-cards/id/{human_readable_id} ---
 @router.get(
     "/id/{human_readable_id:path}", # Use path parameter to allow slashes
     response_model=schemas.AgentCardRead,
@@ -313,15 +332,13 @@ async def get_agent_card_by_human_id(
 ) -> schemas.AgentCardRead:
     """
     Public endpoint to retrieve a specific Agent Card by its humanReadableId.
-    Note: This assumes humanReadableId is unique, which should be enforced by agent card schema/registry logic.
     """
     logger.info(f"Fetching agent card with humanReadableId: {human_readable_id}")
-    # Need a new CRUD function for this lookup
-    db_card = await agent_card.get_agent_card_by_human_readable_id(db=db, human_readable_id=human_readable_id) # Assumes this CRUD function exists
+    # This CRUD function uses selectinload, which should be fine now
+    db_card = await agent_card.get_agent_card_by_human_readable_id(db=db, human_readable_id=human_readable_id)
     if db_card is None:
         logger.warning(f"Agent card with humanReadableId '{human_readable_id}' not found.")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent Card not found")
 
-    response_dict = _build_agent_card_read_dict(db_card)
+    response_dict = _build_agent_card_read_dict(db_card) # Helper handles potential missing dev
     return schemas.AgentCardRead.model_validate(response_dict)
-# --- END ADDED ---
