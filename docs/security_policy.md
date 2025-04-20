@@ -23,18 +23,17 @@ We appreciate responsible disclosure. Please report any suspected security vulne
 
 *   **GitHub Private Vulnerability Reporting:** If you are reporting via GitHub, please use the built-in "Report a vulnerability" feature within the main AgentVault repository. This allows for secure communication and tracking.
 
-    **`[LINK_TO_GITHUB_SECURITY_TAB_PLACEHOLDER]`**
+    **`[https://github.com/SecureAgentTools/AgentVault/]`**
 
-    **[IMPORTANT NOTE]:** *This link is a placeholder and MUST be replaced with the actual URL to the repository's Security tab once available.*
+  
 
 **Alternative Method:**
 
 *   **Email:** If you cannot use GitHub's reporting feature, you can email your report to:
 
-    **`[CONTACT_EMAIL_PLACEHOLDER]`**
+    **`[AgentVault@proton.com`**
 
-    **[IMPORTANT NOTE]:** *This email address is a placeholder and MUST be replaced with the actual project security contact email before public release. Use this for vulnerability reports ONLY.*
-
+    
     Use a clear subject line like "Security Vulnerability Report: AgentVault [Component Name]".
 
 **What to Include:**

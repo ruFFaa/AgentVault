@@ -8,9 +8,8 @@ This Privacy Policy describes how the AgentVault Project Maintainers ("we", "us"
 
 The data controller for the information processed via the Service is The AgentVault Project Maintainers. You can contact us regarding privacy matters at:
 
-**`[CONTACT_EMAIL_PLACEHOLDER]`**
+**`[AgentVault@proton.me]`**
 
-**[IMPORTANT NOTE]:** *This email address is a placeholder and MUST be replaced with the actual project contact email before public release.*
 
 **2. Information We Collect**
 
@@ -67,9 +66,8 @@ Depending on your location, you may have certain rights regarding your personal 
 
 To exercise these rights, please contact us at:
 
-**`[CONTACT_EMAIL_PLACEHOLDER]`**
+**`[AgentVault@proton.me]`**
 
-**[IMPORTANT NOTE]:** *This email address is a placeholder and MUST be replaced with the actual project contact email before public release.*
 
 We will respond to your request consistent with applicable law.
 
@@ -89,6 +87,6 @@ We may update this Privacy Policy from time to time. If we make material changes
 
 If you have any questions about this Privacy Policy, please contact us at:
 
-**`[CONTACT_EMAIL_PLACEHOLDER]`**
+**`[AgentVault@proton.me]`**
 
-**[IMPORTANT NOTE]:** *This email address is a placeholder and MUST be replaced with the actual project contact email before public release.*
+

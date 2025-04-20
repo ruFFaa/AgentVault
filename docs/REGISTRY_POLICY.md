@@ -39,9 +39,9 @@ Users who encounter Agent Cards that appear to violate the Content Guidelines, a
 
 *   **How to Report:** Please send a detailed report including the Agent Card ID (the UUID) and a description of the issue to:
 
-    **`[CONTACT_EMAIL_PLACEHOLDER]`**
+    **`[AgentVault@proton.me]`**
 
-    **[IMPORTANT NOTE]:** *This email address is a placeholder and MUST be replaced with the actual project contact email before public release.*
+
 
 *   **Review Process:** Reports will be reviewed by the AgentVault maintainers based on this policy.
 
