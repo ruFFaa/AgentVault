@@ -22,64 +22,41 @@ These scenarios illustrate how features like **standardized discovery (Registry)
 **Diagram:**
 
 ```mermaid
-graph TD
-    %% Define styles
-    classDef supportGroup fill:#f3e5f5,stroke:#333,stroke-width:1px
-    classDef agentGroup fill:#e8f5e9,stroke:#333,stroke-width:1px
-    classDef registry fill:#ccf2ff,stroke:#333,stroke-width:2px,shape:cylinder
-    classDef agent fill:#e6ffcc,stroke:#333,stroke-width:1px
-    classDef authAgent fill:#ccf,stroke:#333,stroke-width:1px
-    classDef human fill:#f2f2f2,stroke:#333,stroke-width:1px
-    classDef autoPath fill:#c8e6c9,stroke:#4caf50,stroke-width:1px
-    classDef manualPath fill:#fff9c4,stroke:#fbc02d,stroke-width:1px
-    
-    subgraph SupportChannels["🎧 Support Channels"]
-        Helpdesk["🎫 Helpdesk System"]:::agent
-        User["👤 User"]:::human -- "Creates Ticket" --> Helpdesk
+flowchart TD
+    subgraph UserInteraction["User Interaction"]
+        User(("👤 User"))
+        Orchestrator[/"🧠 OrchestratorAgent"/]
     end
     
-    subgraph AgentNetwork["🌐 Agent Network"]
-        Orchestrator["🧠 Support Orchestrator"]:::agent
-        Registry[("📚 AgentVault Registry")]:::registry
-        SentimentAgent["😊 Sentiment Analysis Agent"]:::agent
-        TopicAgent["🏷️ Topic Classification Agent"]:::agent
-        CRMAgent["👥 CRM Lookup Agent (Auth Req)"]:::authAgent
-        KBAgent["📚 Knowledge Base Agent"]:::agent
-        RoutingAgent["🔀 Routing Logic Agent"]:::agent
-        HelpdeskUpdateAgent["✏️ Helpdesk Update Agent (Auth Req)"]:::authAgent
+    subgraph SecureProfile["Secure User Profile"]
+        ProfileAgent[("👤 Profile Agent(TEE)")]
     end
     
-    %% Fixed missing arrow destination
-    Helpdesk -- "Trigger" --> Orchestrator
-    Orchestrator -- "1. New Ticket Data" --> Orchestrator
+    subgraph AgentDiscovery["Agent Discovery"]
+        Registry["📚 Registry"]
+        FlightAgent["✈️ Flight SearchAgent"]
+        HotelAgent["🏨 Hotel SearchAgent"]
+        BookingAgent{"🔐 Booking Agent(Auth Required)"}
+    end
     
-    Orchestrator -- "2. Find Agents" --> Registry
-    Registry -- "3. Agent Cards" --> Orchestrator
+    User --> Orchestrator
+    Orchestrator --> User
     
-    Orchestrator -- "4. Task: Analyze Sentiment" --> SentimentAgent
-    Orchestrator -- "5. Task: Classify Topic" --> TopicAgent
-    Orchestrator -- "6. Task: Get Customer Info (Auth)" --> CRMAgent
-    SentimentAgent -- "7. Sentiment Score" --> Orchestrator
-    TopicAgent -- "8. Topic Labels" --> Orchestrator
-    CRMAgent -- "9. Customer History/Tier" --> Orchestrator
+    Orchestrator <--> ProfileAgent
     
-    Orchestrator -- "10. Task: Search KB (Topic, Content)" --> KBAgent
-    KBAgent -- "11. Potential Answer / No Match" --> Orchestrator
+    Orchestrator <--> Registry
+    Orchestrator <--> FlightAgent
+    Orchestrator <--> HotelAgent
+    Orchestrator <--> BookingAgent
     
-    %% Fixed the alt/else syntax by using a decision node
-    Orchestrator -- "12. Check KB Match" --> KBDecision{Good KB Match?}
-    
-    %% Automated reply path
-    KBDecision -- "Yes" --> HighConfidence[High Confidence KB Match]:::autoPath
-    HighConfidence -- "13a. Task: Send Auto-Reply (Auth)" --> HelpdeskUpdateAgent
-    HelpdeskUpdateAgent -- "14a. Updates" --> Helpdesk
-    
-    %% Manual routing path
-    KBDecision -- "No" --> LowConfidence[No KB Match / Low Confidence]:::manualPath
-    LowConfidence -- "13b. Task: Determine Route" --> RoutingAgent
-    RoutingAgent -- "14b. Recommended Queue" --> Orchestrator
-    Orchestrator -- "15b. Task: Assign Ticket (Auth)" --> HelpdeskUpdateAgent
-    HelpdeskUpdateAgent -- "16b. Updates" --> Helpdesk
+    style Orchestrator fill:#ff9e80,stroke:#ff6e40,color:black
+    style Registry fill:#80d8ff,stroke:#40c4ff,color:black
+    style ProfileAgent fill:#ea80fc,stroke:#e040fb,color:black
+    style FlightAgent fill:#b9f6ca,stroke:#69f0ae,color:black
+    style HotelAgent fill:#b9f6ca,stroke:#69f0ae,color:black
+    style BookingAgent fill:#84ffff,stroke:#18ffff,color:black
+    style User fill:#fff59d,stroke:#ffee58,color:black
+
 ```
 
 **AgentVault Value:**
@@ -105,40 +82,38 @@ graph TD
 **Diagram:**
 
 ```mermaid
-graph TD
-    %% Define styles
-    classDef researcher fill:#f2f2f2,stroke:#333,stroke-width:1px
-    classDef orchestrator fill:#ffd6cc,stroke:#333,stroke-width:2px
-    classDef registry fill:#ccf2ff,stroke:#333,stroke-width:2px,shape:cylinder
-    classDef agent fill:#e6ffcc,stroke:#333,stroke-width:1px
-    classDef secureAgent fill:#f9f,stroke:#333,stroke-width:2px,stroke-dasharray:5 5
+flowchart LR
+    Researcher(("👩‍🔬 Researcher"))
+    Orchestrator[/"🧠 PipelineOrchestrator"/]
+    Registry(("📚 Registry"))
     
-    Researcher["👩‍🔬 Researcher"]:::researcher -- "Configures" --> Orchestrator["🧠 Pipeline Orchestrator"]:::orchestrator
-    Registry[("📚 AgentVault Registry")]:::registry
-    
-    Orchestrator -- "1. Find Agents (search, extract, sim...)" --> Registry
-    Registry -- "2. Agent Cards" --> Orchestrator
-    
-    subgraph ResearchTasks["🔬 Research & Analysis Tasks"]
-        SearchAgent["🔎 Lit Search Agent"]:::agent
-        Extractor["📄 PDF Extract Agent"]:::agent
-        Simulator["⚙️ Simulation Agent (TEE)"]:::secureAgent
-        Analyzer["📊 Analysis Agent"]:::agent
-        Writer["📝 Draft Writer Agent"]:::agent
-        
-        Orchestrator -- "3. Task: Find Papers" --> SearchAgent
-        SearchAgent -- "4. Paper URLs/Refs" --> Orchestrator
-        Orchestrator -- "5. Task: Extract Data (URLs)" --> Extractor
-        Extractor -- "6. Data Artifacts" --> Orchestrator
-        Orchestrator -- "7. Task: Run Simulation (Data)" --> Simulator
-        Simulator -- "8. Result Artifacts" --> Orchestrator
-        Orchestrator -- "9. Task: Analyze Results" --> Analyzer
-        Analyzer -- "10. Analysis Summary" --> Orchestrator
-        Orchestrator -- "11. Task: Draft Report" --> Writer
-        Writer -- "12. Draft Section" --> Orchestrator
+    subgraph Research["Research & Analysis Pipeline"]
+        direction TB
+        SearchAgent["🔎 LiteratureSearch Agent"]
+        Extractor["📄 PDF ExtractAgent"]
+        Simulator["⚙️ SimulationAgent (TEE)"]
+        Analyzer["📊 AnalysisAgent"]
+        Writer["📝 Draft WriterAgent"]
     end
     
-    Orchestrator -- "13. Final Report" --> Researcher
+    Researcher <--> Orchestrator
+    Orchestrator <--> Registry
+    
+    Orchestrator <--> SearchAgent
+    Orchestrator <--> Extractor
+    Orchestrator <--> Simulator
+    Orchestrator <--> Analyzer
+    Orchestrator <--> Writer
+    
+    style Researcher fill:#fff59d,stroke:#ffee58,color:black
+    style Orchestrator fill:#ff9e80,stroke:#ff6e40,color:black
+    style Registry fill:#80d8ff,stroke:#40c4ff,color:black
+    style SearchAgent fill:#b9f6ca,stroke:#69f0ae,color:black
+    style Extractor fill:#b9f6ca,stroke:#69f0ae,color:black
+    style Simulator fill:#ea80fc,stroke:#e040fb,color:black
+    style Analyzer fill:#b9f6ca,stroke:#69f0ae,color:black
+    style Writer fill:#b9f6ca,stroke:#69f0ae,color:black
+
 ```
 
 **AgentVault Value:**
@@ -163,48 +138,48 @@ graph TD
 **Diagram:**
 
 ```mermaid
-graph TD
-    %% Define styles
-    classDef factoryGroup fill:#fff3e0,stroke:#333,stroke-width:1px
-    classDef controlGroup fill:#e3f2fd,stroke:#333,stroke-width:1px
-    classDef agent fill:#e6ffcc,stroke:#333,stroke-width:1px
-    classDef registry fill:#ccf2ff,stroke:#333,stroke-width:2px,shape:cylinder
-    classDef authAgent fill:#ccf,stroke:#333,stroke-width:1px
-    classDef human fill:#f2f2f2,stroke:#333,stroke-width:1px
-    
-    subgraph FactoryFloor["🏭 Factory Floor (Edge)"]
-        SensorAgent["🌡️ Temp Sensor Agent"]:::agent
-        ActuatorAgent["🔧 Valve Actuator Agent (Auth Req)"]:::authAgent
-        MachineAgent["⚙️ Machine Status Agent"]:::agent
+flowchart TD
+    subgraph FactoryFloor["Factory Floor Edge"]
+        SensorAgent[("🌡️ TemperatureSensor Agent")]
+        ActuatorAgent{"🔧 Valve Actuator(Auth Required)"}
+        MachineAgent[("⚙️ Machine StatusAgent")]
     end
     
-    subgraph ControlNetwork["🌐 Local Control Network"]
-        LocalRegistry[("📚 Local Registry")]:::registry
-        MonitorAgent["👁️ Monitoring Agent"]:::agent
-        AlertAgent["🚨 Alerting Agent"]:::agent
-        ControlAgent["🎮 Control Agent"]:::agent
-        Supervisor["👨‍💼 Human Supervisor"]:::human
+    subgraph ControlNetwork["Local Control Network"]
+        LocalRegistry[("📚 Local Registry")]
+        MonitorAgent[/"👁️ MonitoringAgent"/]
+        AlertAgent[/"🚨 AlertingAgent"/]
+        ControlAgent[/"🎮 ControlAgent"/]
+        Supervisor(("👨‍💼 HumanSupervisor"))
     end
     
-    %% Registration flow
-    SensorAgent -- "Register" --> LocalRegistry
-    ActuatorAgent -- "Register" --> LocalRegistry
-    MachineAgent -- "Register" --> LocalRegistry
-    AlertAgent -- "Register" --> LocalRegistry
-    ControlAgent -- "Register" --> LocalRegistry
+    %% Registration connections
+    SensorAgent --> LocalRegistry
+    ActuatorAgent --> LocalRegistry
+    MachineAgent --> LocalRegistry
+    AlertAgent --> LocalRegistry
+    ControlAgent --> LocalRegistry
     
     %% Monitoring flow
-    MonitorAgent -- "1. Discover Sensors" --> LocalRegistry
-    SensorAgent -- "2. Temp Data (SSE)" --> MonitorAgent
-    MachineAgent -- "3. Status Data (SSE)" --> MonitorAgent
+    MonitorAgent --> LocalRegistry
+    SensorAgent --> MonitorAgent
+    MachineAgent --> MonitorAgent
     
-    %% Alert and response flow
-    MonitorAgent -- "4. Anomaly Detected!" --> AlertAgent
-    AlertAgent -- "5. Notify Supervisor" --> Supervisor
-    AlertAgent -- "6. Find Control Agent" --> LocalRegistry
-    AlertAgent -- "7. Trigger Action" --> ControlAgent
-    ControlAgent -- "8. Find Actuator" --> LocalRegistry
-    ControlAgent -- "9. Send Command (Auth)" --> ActuatorAgent
+    %% Alert flow
+    MonitorAgent --> AlertAgent
+    AlertAgent --> Supervisor
+    AlertAgent --> ControlAgent
+    ControlAgent --> ActuatorAgent
+    
+    style SensorAgent fill:#b9f6ca,stroke:#69f0ae,color:black
+    style ActuatorAgent fill:#84ffff,stroke:#18ffff,color:black
+    style MachineAgent fill:#b9f6ca,stroke:#69f0ae,color:black
+    style LocalRegistry fill:#80d8ff,stroke:#40c4ff,color:black
+    style MonitorAgent fill:#ff9e80,stroke:#ff6e40,color:black
+    style AlertAgent fill:#ff9e80,stroke:#ff6e40,color:black
+    style ControlAgent fill:#ff9e80,stroke:#ff6e40,color:black
+    style Supervisor fill:#fff59d,stroke:#ffee58,color:black
+
 ```
 
 **AgentVault Value:**
@@ -231,46 +206,46 @@ graph TD
 **Diagram:**
 
 ```mermaid
-graph TD
-    %% Define styles
-    classDef crmGroup fill:#ffebee,stroke:#333,stroke-width:1px
-    classDef agentGroup fill:#e8f5e9,stroke:#333,stroke-width:1px
-    classDef registry fill:#ccf2ff,stroke:#333,stroke-width:2px,shape:cylinder
-    classDef agent fill:#e6ffcc,stroke:#333,stroke-width:1px
-    classDef authAgent fill:#ccf,stroke:#333,stroke-width:1px
-    classDef human fill:#f2f2f2,stroke:#333,stroke-width:1px
-    
-    subgraph CRMSystem["💼 CRM System"]
-        CRM["📊 CRM Platform"]:::agent
-        User["👩‍💼 Sales Rep"]:::human --> CRM
-        CRM -- "Creates Lead" --> Trigger["🔔 Webhook/Trigger"]:::agent
+flowchart TD
+    subgraph CRMSystem["CRM System"]
+        User(("👩‍💼 Sales Rep"))
+        CRM[("📊 CRM Platform")]
+        Trigger[/"🔔 Webhook/Trigger"/]
     end
     
-    subgraph AgentNetwork["🌐 Agent Network"]
-        Orchestrator["🧠 CRM Orchestrator Agent"]:::agent
-        Registry[("📚 AgentVault Registry")]:::registry
-        LinkedInAgent["🔗 LinkedIn Enricher (Auth Req)"]:::authAgent
-        FirmographicsAgent["🏢 Firmographics Agent (Auth Req)"]:::authAgent
-        ValidatorAgent["✓ Contact Validator"]:::agent
+    subgraph AgentNetwork["Agent Network"]
+        Orchestrator[/"🧠 CRM OrchestratorAgent"/]
+        Registry["📚 Registry"]
+        
+        subgraph EnrichmentServices["Enrichment Services"]
+            direction LR
+            LinkedInAgent{"🔗 LinkedIn Enricher(Auth Required)"}
+            FirmographicsAgent{"🏢 Firmographics(Auth Required)"}
+            ValidatorAgent["✓ ContactValidator"]
+        end
     end
     
-    %% Fixed the syntax error in this flow
+    User --> CRM
+    CRM --> Trigger
     Trigger --> Orchestrator
-    Orchestrator -- "1. Enrich Lead Request" --> Orchestrator
     
-    Orchestrator -- "2. Find Agents (linkedin, firmographics...)" --> Registry
-    Registry -- "3. Agent Cards (URLs, Auth)" --> Orchestrator
+    Orchestrator <--> Registry
     
-    Orchestrator -- "4. Task: Find Profile (Auth)" --> LinkedInAgent
-    Orchestrator -- "5. Task: Get Firmographics (Auth)" --> FirmographicsAgent
-    Orchestrator -- "6. Task: Validate Email" --> ValidatorAgent
+    Orchestrator <--> LinkedInAgent
+    Orchestrator <--> FirmographicsAgent
+    Orchestrator <--> ValidatorAgent
     
-    LinkedInAgent -- "7. Profile URL Result" --> Orchestrator
-    FirmographicsAgent -- "8. Company Data Result" --> Orchestrator
-    ValidatorAgent -- "9. Validation Result" --> Orchestrator
+    Orchestrator --> CRM
     
-    Orchestrator -- "10. Synthesize Data" --> Orchestrator
-    Orchestrator -- "11. Update CRM Record" --> CRM
+    style User fill:#fff59d,stroke:#ffee58,color:black
+    style CRM fill:#bbdefb,stroke:#64b5f6,color:black
+    style Trigger fill:#ffcc80,stroke:#ffa726,color:black
+    style Orchestrator fill:#ff9e80,stroke:#ff6e40,color:black
+    style Registry fill:#80d8ff,stroke:#40c4ff,color:black
+    style LinkedInAgent fill:#84ffff,stroke:#18ffff,color:black
+    style FirmographicsAgent fill:#84ffff,stroke:#18ffff,color:black
+    style ValidatorAgent fill:#b9f6ca,stroke:#69f0ae,color:black
+
 ```
 
 **AgentVault Value:**
@@ -298,58 +273,49 @@ graph TD
 **Diagram:**
 
 ```mermaid
-graph TD
-    %% Define styles
-    classDef systemsGroup fill:#fff8e1,stroke:#333,stroke-width:1px
-    classDef agentGroup fill:#e1f5fe,stroke:#333,stroke-width:1px
-    classDef registry fill:#ccf2ff,stroke:#333,stroke-width:2px,shape:cylinder
-    classDef agent fill:#e6ffcc,stroke:#333,stroke-width:1px
-    classDef authAgent fill:#ccf,stroke:#333,stroke-width:1px
-    classDef successPath fill:#c8e6c9,stroke:#4caf50,stroke-width:1px
-    classDef errorPath fill:#ffcdd2,stroke:#f44336,stroke-width:1px
+flowchart TB
+    Ecommerce[("🛍️ E-commercePlatform")] --> OrderAgent[/"📦 Order ProcessingAgent"/]
     
-    subgraph SalesSystems["🛒 Sales & Fulfillment Systems"]
-        Ecommerce["🛍️ E-commerce Platform"]:::agent --> OrderAgent["📦 Order Processing Agent"]:::agent
-        ERP["💻 ERP / WMS / Accounting"]:::agent
-        ShippingAPI["🚚 Shipping Provider API"]:::agent
-        CRM["👥 CRM System"]:::agent
+    subgraph Systems["Enterprise Systems"]
+        ERP[("💻 ERP / WMS")]
+        ShippingAPI[("🚚 Shipping API")]
+        CRM[("👥 CRM System")]
     end
     
-    subgraph AgentNetwork["🌐 Agent Network"]
-        Registry[("📚 AgentVault Registry")]:::registry
-        InventoryAgent["🔢 Inventory Agent"]:::agent
-        ShippingAgent["🏷️ Shipping Label Agent (Auth Req)"]:::authAgent
-        BillingAgent["💰 Billing Agent"]:::agent
-        CRMUpdateAgent["📝 CRM Update Agent"]:::agent
+    subgraph AgentNetwork["Agent Network"]
+        Registry[("📚 Registry")]
+        InventoryAgent["🔢 InventoryAgent"]
+        ShippingAgent{"🏷️ Shipping Label(Auth Required)"}
+        BillingAgent["💰 BillingAgent"]
+        CRMUpdateAgent["📝 CRM UpdateAgent"]
     end
     
-    OrderAgent -- "1. Find Agents" --> Registry
-    Registry -- "2. Agent Cards" --> OrderAgent
+    OrderAgent <--> Registry
     
-    OrderAgent -- "3. Task: Check Stock (SKU)" --> InventoryAgent
-    InventoryAgent -- "Connects" --> ERP
-    InventoryAgent -- "4. Stock Status" --> OrderAgent
+    OrderAgent <--> InventoryAgent
+    InventoryAgent <--> ERP
     
-    %% Fixed the alt/else syntax by using a decision node
-    OrderAgent -- "5. Check Availability" --> StockDecision{Stock Available?}
+    OrderAgent <--> ShippingAgent
+    ShippingAgent <--> ShippingAPI
     
-    %% Success path - stock available
-    StockDecision -- "Yes" --> StockAvailable[Stock Available]:::successPath
-    StockAvailable -- "6a. Task: Create Label (Auth)" --> ShippingAgent
-    ShippingAgent -- "Connects" --> ShippingAPI
-    ShippingAgent -- "7a. Label Artifact/Tracking" --> OrderAgent
-    OrderAgent -- "8a. Task: Create Invoice" --> BillingAgent
-    BillingAgent -- "Connects" --> ERP
-    BillingAgent -- "9a. Invoice Created" --> OrderAgent
-    OrderAgent -- "10a. Task: Update Order Status" --> CRMUpdateAgent
-    CRMUpdateAgent -- "Connects" --> CRM
-    CRMUpdateAgent -- "11a. Status Updated" --> OrderAgent
-    OrderAgent -- "12a. Notify Fulfillment Complete" --> Ecommerce
+    OrderAgent <--> BillingAgent
+    BillingAgent <--> ERP
     
-    %% Error path - stock unavailable
-    StockDecision -- "No" --> StockUnavailable[Stock Unavailable]:::errorPath
-    StockUnavailable -- "6b. Notify Backorder/Issue" --> OrderAgent
-    OrderAgent -- "7b. Update Status" --> Ecommerce
+    OrderAgent <--> CRMUpdateAgent
+    CRMUpdateAgent <--> CRM
+    
+    OrderAgent --> Ecommerce
+    
+    style Ecommerce fill:#bbdefb,stroke:#64b5f6,color:black
+    style OrderAgent fill:#ff9e80,stroke:#ff6e40,color:black
+    style Registry fill:#80d8ff,stroke:#40c4ff,color:black
+    style InventoryAgent fill:#b9f6ca,stroke:#69f0ae,color:black
+    style ShippingAgent fill:#84ffff,stroke:#18ffff,color:black
+    style BillingAgent fill:#b9f6ca,stroke:#69f0ae,color:black
+    style CRMUpdateAgent fill:#b9f6ca,stroke:#69f0ae,color:black
+    style ERP fill:#bbdefb,stroke:#64b5f6,color:black
+    style ShippingAPI fill:#bbdefb,stroke:#64b5f6,color:black
+    style CRM fill:#bbdefb,stroke:#64b5f6,color:black
 ```
 
 **AgentVault Value:**
@@ -378,64 +344,50 @@ graph TD
 **Diagram:**
 
 ```mermaid
-graph TD
-    %% Define styles
-    classDef supportGroup fill:#f3e5f5,stroke:#333,stroke-width:1px
-    classDef agentGroup fill:#e8f5e9,stroke:#333,stroke-width:1px
-    classDef registry fill:#ccf2ff,stroke:#333,stroke-width:2px,shape:cylinder
-    classDef agent fill:#e6ffcc,stroke:#333,stroke-width:1px
-    classDef authAgent fill:#ccf,stroke:#333,stroke-width:1px
-    classDef human fill:#f2f2f2,stroke:#333,stroke-width:1px
-    classDef autoPath fill:#c8e6c9,stroke:#4caf50,stroke-width:1px
-    classDef manualPath fill:#fff9c4,stroke:#fbc02d,stroke-width:1px
+flowchart LR
+    User(("👤 User")) --> Helpdesk[("🎫 HelpdeskSystem")]
+    Helpdesk --> Orchestrator[/"🧠 SupportOrchestrator"/]
     
-    subgraph SupportChannels["🎧 Support Channels"]
-        Helpdesk["🎫 Helpdesk System"]:::agent
-        User["👤 User"]:::human -- "Creates Ticket" --> Helpdesk
+    subgraph AgentNetwork["Agent Ecosystem"]
+        Registry["📚 Registry"]
+        
+        subgraph Analysis["Analysis Agents"]
+            direction TB
+            SentimentAgent["😊 SentimentAnalysis"]
+            TopicAgent["🏷️ TopicClassification"]
+            CRMAgent{"👥 CRM Lookup(Auth Required)"}
+        end
+        
+        subgraph Resolution["Resolution Path"]
+            direction TB
+            KBAgent["📚 Knowledge BaseAgent"]
+            RoutingAgent["🔀 Routing LogicAgent"]
+            HelpdeskUpdateAgent{"✏️ Helpdesk Update(Auth Required)"}
+        end
     end
     
-    subgraph AgentNetwork["🌐 Agent Network"]
-        Orchestrator["🧠 Support Orchestrator"]:::agent
-        Registry[("📚 AgentVault Registry")]:::registry
-        SentimentAgent["😊 Sentiment Analysis Agent"]:::agent
-        TopicAgent["🏷️ Topic Classification Agent"]:::agent
-        CRMAgent["👥 CRM Lookup Agent (Auth Req)"]:::authAgent
-        KBAgent["📚 Knowledge Base Agent"]:::agent
-        RoutingAgent["🔀 Routing Logic Agent"]:::agent
-        HelpdeskUpdateAgent["✏️ Helpdesk Update Agent (Auth Req)"]:::authAgent
-    end
+    Orchestrator <--> Registry
     
-    %% Fixed missing arrow destination
-    Helpdesk -- "Trigger" --> Orchestrator
-    Orchestrator -- "1. New Ticket Data" --> Orchestrator
+    Orchestrator <--> SentimentAgent
+    Orchestrator <--> TopicAgent
+    Orchestrator <--> CRMAgent
     
-    Orchestrator -- "2. Find Agents" --> Registry
-    Registry -- "3. Agent Cards" --> Orchestrator
+    Orchestrator <--> KBAgent
+    Orchestrator <--> RoutingAgent
+    Orchestrator <--> HelpdeskUpdateAgent
     
-    Orchestrator -- "4. Task: Analyze Sentiment" --> SentimentAgent
-    Orchestrator -- "5. Task: Classify Topic" --> TopicAgent
-    Orchestrator -- "6. Task: Get Customer Info (Auth)" --> CRMAgent
-    SentimentAgent -- "7. Sentiment Score" --> Orchestrator
-    TopicAgent -- "8. Topic Labels" --> Orchestrator
-    CRMAgent -- "9. Customer History/Tier" --> Orchestrator
+    HelpdeskUpdateAgent --> Helpdesk
     
-    Orchestrator -- "10. Task: Search KB (Topic, Content)" --> KBAgent
-    KBAgent -- "11. Potential Answer / No Match" --> Orchestrator
-    
-    %% Fixed the alt/else syntax by using a decision node
-    Orchestrator -- "12. Check KB Match" --> KBDecision{Good KB Match?}
-    
-    %% Automated reply path
-    KBDecision -- "Yes" --> HighConfidence[High Confidence KB Match]:::autoPath
-    HighConfidence -- "13a. Task: Send Auto-Reply (Auth)" --> HelpdeskUpdateAgent
-    HelpdeskUpdateAgent -- "14a. Updates" --> Helpdesk
-    
-    %% Manual routing path
-    KBDecision -- "No" --> LowConfidence[No KB Match / Low Confidence]:::manualPath
-    LowConfidence -- "13b. Task: Determine Route" --> RoutingAgent
-    RoutingAgent -- "14b. Recommended Queue" --> Orchestrator
-    Orchestrator -- "15b. Task: Assign Ticket (Auth)" --> HelpdeskUpdateAgent
-    HelpdeskUpdateAgent -- "16b. Updates" --> Helpdesk
+    style User fill:#fff59d,stroke:#ffee58,color:black
+    style Helpdesk fill:#bbdefb,stroke:#64b5f6,color:black
+    style Orchestrator fill:#ff9e80,stroke:#ff6e40,color:black
+    style Registry fill:#80d8ff,stroke:#40c4ff,color:black
+    style SentimentAgent fill:#b9f6ca,stroke:#69f0ae,color:black
+    style TopicAgent fill:#b9f6ca,stroke:#69f0ae,color:black
+    style CRMAgent fill:#84ffff,stroke:#18ffff,color:black
+    style KBAgent fill:#b9f6ca,stroke:#69f0ae,color:black
+    style RoutingAgent fill:#b9f6ca,stroke:#69f0ae,color:black
+    style HelpdeskUpdateAgent fill:#84ffff,stroke:#18ffff,color:black
 ```
 
 **AgentVault Value:**
@@ -445,4 +397,3 @@ graph TD
 *   **Efficiency:** Automates common tasks and routes complex issues effectively, reducing manual triage and resolution time.
 
 ---
-#
