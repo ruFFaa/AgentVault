@@ -1,25 +1,33 @@
+# --- START OF FILE: agentvault_registry/src/agentvault_registry/crud/developer.py ---
 import logging
 import datetime
 import uuid
 from typing import Optional, List, Dict, Any, Union
 import re
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func # Added func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError
 
 from agentvault_registry import models, schemas, security
+# --- ADDED: Import timedelta from datetime ---
+from datetime import timedelta, timezone
+# --- END ADDED ---
+
 
 logger = logging.getLogger(__name__)
 
 # Define constants
-API_KEY_PREFIX = "avreg_"  # This was missing and causing errors
+API_KEY_PREFIX = "avreg_"
 
 async def get_developer_by_id(db: AsyncSession, developer_id: int) -> Optional[models.Developer]:
     """Get a developer by ID, with eager loading of agent cards."""
     try:
-        return await db.get(models.Developer, developer_id, options=[selectinload(models.Developer.agent_cards)])
+        # session.get is awaitable directly
+        # --- CORRECTED: Added selectinload for api_keys ---
+        return await db.get(models.Developer, developer_id, options=[selectinload(models.Developer.agent_cards), selectinload(models.Developer.api_keys)])
+        # --- END CORRECTION ---
     except Exception as e:
         logger.error(f"Error fetching developer ID {developer_id}: {e}", exc_info=True)
         return None
@@ -27,9 +35,9 @@ async def get_developer_by_id(db: AsyncSession, developer_id: int) -> Optional[m
 async def get_developer_by_email(db: AsyncSession, email: str) -> Optional[models.Developer]:
     """Get a developer by email address."""
     try:
-        stmt = select(models.Developer).where(models.Developer.email == email)
+        stmt = select(models.Developer).where(func.lower(models.Developer.email) == email.lower()) # Case-insensitive lookup
         result = await db.execute(stmt)
-        return await result.scalar_one_or_none()  # Fix: await the scalar_one_or_none call
+        return result.scalar_one_or_none()
     except Exception as e:
         logger.error(f"Error fetching developer by email '{email}': {e}", exc_info=True)
         return None
@@ -60,11 +68,20 @@ async def create_developer(db: AsyncSession, developer: schemas.DeveloperCreate)
     """
     Create a new developer record, hashing the provided password.
     """
-    hashed_password = security.hash_password(developer.password)
-    
+    hashed_password = security.hash_password(developer.password.get_secret_value()) # Use get_secret_value()
+
+    # Generate recovery keys and hash the first one
+    recovery_keys = security.generate_recovery_keys()
+    hashed_recovery_key = security.hash_recovery_key(recovery_keys[0]) # Hash the first key
+
     # Generate a verification token
     verification_token = security.generate_verification_token()
-    
+    # --- CORRECTED: Use settings for expiry ---
+    from agentvault_registry.config import settings # Import settings locally
+    token_expiry = datetime.datetime.now(timezone.utc) + timedelta(hours=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS)
+    # --- END CORRECTION ---
+
+
     # Create the Developer model instance
     db_developer = models.Developer(
         email=developer.email,
@@ -72,17 +89,23 @@ async def create_developer(db: AsyncSession, developer: schemas.DeveloperCreate)
         hashed_password=hashed_password,
         is_verified=False,
         email_verification_token=verification_token,
-        created_at=datetime.datetime.now(datetime.timezone.utc)
+        verification_token_expires=token_expiry,
+        hashed_recovery_key=hashed_recovery_key, # Store the hash
+        created_at=datetime.datetime.now(timezone.utc)
     )
-    
-    return await create_developer_with_hashed_details(db, db_developer)
+
+    created_dev = await create_developer_with_hashed_details(db, db_developer)
+    # Attach recovery keys temporarily for the response (they are not stored in DB)
+    setattr(created_dev, '_plain_recovery_keys', recovery_keys)
+    return created_dev
+
 
 async def get_developer_by_verification_token(db: AsyncSession, token: str) -> Optional[models.Developer]:
     """Get a developer by email verification token."""
     try:
         stmt = select(models.Developer).where(models.Developer.email_verification_token == token)
         result = await db.execute(stmt)
-        return await result.scalar_one_or_none()  # Fix: await the scalar_one_or_none call
+        return result.scalar_one_or_none()
     except Exception as e:
         logger.error(f"Error fetching developer by verification token: {e}", exc_info=True)
         return None
@@ -92,8 +115,9 @@ async def verify_developer_email(db: AsyncSession, developer: models.Developer) 
     try:
         developer.is_verified = True
         developer.email_verification_token = None
-        developer.verified_at = datetime.datetime.now(datetime.timezone.utc)
-        
+        developer.verification_token_expires = None # Clear expiry too
+        # developer.verified_at = datetime.datetime.now(datetime.timezone.utc) # Add this field to model if desired
+
         db.add(developer)
         await db.commit()
         await db.refresh(developer)
@@ -105,7 +129,7 @@ async def verify_developer_email(db: AsyncSession, developer: models.Developer) 
         return False
 
 async def create_api_key(
-    db: AsyncSession, developer_id: int, prefix: str, hashed_key: str, description: str
+    db: AsyncSession, developer_id: int, prefix: str, hashed_key: str, description: Optional[str] # Made description optional
 ) -> Optional[models.DeveloperApiKey]:
     """Create a new API key for a developer."""
     try:
@@ -117,7 +141,7 @@ async def create_api_key(
             is_active=True,
             created_at=datetime.datetime.now(datetime.timezone.utc)
         )
-        
+
         db.add(api_key)
         await db.commit()
         await db.refresh(api_key)
@@ -133,7 +157,7 @@ async def get_developer_by_plain_api_key(db: AsyncSession, plain_key: str) -> Op
     if not plain_key.startswith(API_KEY_PREFIX):
         logger.warning(f"Attempted access with invalid API key format")
         return None
-    
+
     try:
         # Get active API keys with matching prefix
         stmt = (
@@ -142,22 +166,31 @@ async def get_developer_by_plain_api_key(db: AsyncSession, plain_key: str) -> Op
                 models.DeveloperApiKey.key_prefix == API_KEY_PREFIX,
                 models.DeveloperApiKey.is_active == True
             )
-            .options(selectinload(models.DeveloperApiKey.developer))
+            .options(selectinload(models.DeveloperApiKey.developer)) # Eager load developer
         )
         result = await db.execute(stmt)
-        api_keys = await result.scalars().all()  # Fix: await scalars().all()
-        
+        # --- CORRECTED: Removed await from scalars().all() ---
+        api_keys = result.scalars().all()
+        # --- END CORRECTION ---
+
         # Check each key for a hash match
+        matched_api_key = None
         for api_key in api_keys:
             if security.verify_api_key(plain_key, api_key.hashed_key):
-                # Update last_used_at timestamp
-                api_key.last_used_at = datetime.datetime.now(datetime.timezone.utc)
-                db.add(api_key)
-                await db.commit()
-                return api_key.developer
-        
+                matched_api_key = api_key
+                break # Found the match
+
+        if matched_api_key:
+            # Update last_used_at timestamp
+            matched_api_key.last_used_at = datetime.datetime.now(datetime.timezone.utc)
+            db.add(matched_api_key)
+            await db.commit() # Commit the timestamp update
+            return matched_api_key.developer # Return the eager-loaded developer
+
+        logger.warning(f"No active API key found matching the provided key hash (prefix: {API_KEY_PREFIX}).")
         return None
     except Exception as e:
+        await db.rollback() # Rollback potential commit failure
         logger.error(f"Error validating API key: {e}", exc_info=True)
         return None
 
@@ -173,7 +206,9 @@ async def get_active_api_keys_for_developer(db: AsyncSession, developer_id: int)
             .order_by(models.DeveloperApiKey.created_at.desc())
         )
         result = await db.execute(stmt)
-        scalars_result = await result.scalars()  # Fix: await the scalars call
+        # --- CORRECTED: Removed await from scalars() ---
+        scalars_result = result.scalars()
+        # --- END CORRECTION ---
         keys = list(scalars_result.all())
         return keys
     except Exception as e:
@@ -185,25 +220,25 @@ async def deactivate_api_key(db: AsyncSession, developer_id: int, api_key_id: in
     try:
         # Get the API key
         api_key = await db.get(models.DeveloperApiKey, api_key_id)
-        
+
         # Check if API key exists and belongs to the developer
         if not api_key:
             logger.warning(f"API key ID {api_key_id} not found for deactivation")
             return False
-            
+
         if api_key.developer_id != developer_id:
             logger.warning(f"API key ID {api_key_id} does not belong to developer {developer_id}")
             return False
-            
+
         # If already inactive, nothing to do
         if not api_key.is_active:
             logger.info(f"API key ID {api_key_id} is already inactive")
             return True
-            
+
         # Deactivate the key
         api_key.is_active = False
-        api_key.deactivated_at = datetime.datetime.now(datetime.timezone.utc)
-        
+        # api_key.deactivated_at = datetime.datetime.now(datetime.timezone.utc) # Add this field if needed
+
         db.add(api_key)
         await db.commit()
         logger.info(f"Deactivated API key ID {api_key_id} for developer {developer_id}")
@@ -217,16 +252,17 @@ async def get_developer_access_level(db: AsyncSession, developer_id: int) -> str
     """
     Get a developer's access level. Currently just checks if they're verified,
     but will expand to include other levels (e.g., admin) in the future.
-    
+
     Returns a string value: "none", "unverified", or "verified"
     """
     developer = await get_developer_by_id(db, developer_id)
-    
+
     if not developer:
         return "none"
-    
+
     if not developer.is_verified:
         return "unverified"
-    
+
     # Default for verified users
     return "verified"
+# --- END OF FILE: agentvault_registry/src/agentvault_registry/crud/developer.py ---

@@ -1,3 +1,4 @@
+# --- START OF FILE: agentvault_registry/src/agentvault_registry/crud/agent_card.py ---
 import logging
 import uuid
 import math
@@ -147,7 +148,9 @@ async def get_agent_card(db: AsyncSession, card_id: uuid.UUID) -> Optional[model
             .options(selectinload(models.AgentCard.developer))
         )
         result = await db.execute(stmt)
-        db_card = await result.scalar_one_or_none()  # Fix: await the scalar_one_or_none call
+        # --- CORRECTED: Removed await ---
+        db_card = result.scalar_one_or_none()
+        # --- END CORRECTION ---
         if db_card:
             if db_card.developer: logger.debug(f"Found Agent Card: {db_card.name} (Developer: {db_card.developer.name})")
             else: logger.warning(f"Found Agent Card {db_card.name} but developer relationship was not loaded/found.")
@@ -176,7 +179,9 @@ async def get_agent_card_by_human_readable_id(db: AsyncSession, human_readable_i
             .options(selectinload(models.AgentCard.developer))
         )
         result = await db.execute(stmt)
-        db_card = await result.scalar_one_or_none()  # Fix: await the scalar_one_or_none call
+        # --- CORRECTED: Removed await ---
+        db_card = result.scalar_one_or_none()
+        # --- END CORRECTION ---
         if db_card:
             logger.debug(f"Found Agent Card by humanReadableId: {db_card.name} (ID: {db_card.id})")
         else:
@@ -268,7 +273,9 @@ async def list_agent_cards(
     # Get total count
     try:
         count_result = await db.execute(count_stmt_base)
-        total_items = await count_result.scalar_one_or_none() or 0  # Fix: await scalar_one_or_none
+        # --- CORRECTED: Removed await ---
+        total_items = count_result.scalar_one_or_none() or 0
+        # --- END CORRECTION ---
     except Exception as e:
         logger.error(f"Error counting agent cards: {e}", exc_info=True)
         return [], 0
@@ -286,8 +293,10 @@ async def list_agent_cards(
 
     try:
         result = await db.execute(final_stmt)
-        scalars_result = await result.scalars()  # Fix: await the scalars call
+        # --- CORRECTED: Removed await from scalars().all() ---
+        scalars_result = result.scalars()
         items = list(scalars_result.all())
+        # --- END CORRECTION ---
         logger.debug(f"Returning {len(items)} agent cards for the current page.")
         return items, total_items
     except Exception as e:
@@ -370,3 +379,4 @@ async def delete_agent_card(db: AsyncSession, card_id: uuid.UUID) -> bool:
     else:
         logger.warning(f"Agent Card {card_id} not found for deactivation.")
         return False
+# --- END OF FILE: agentvault_registry/src/agentvault_registry/crud/agent_card.py ---
