@@ -60,6 +60,7 @@ flowchart TD
 ```
 
 **AgentVault Value:**
+
 *   **Discovery:** Dynamically finds specialized travel agents.
 *   **Interoperability:** Standard A2A ensures communication between diverse agents.
 *   **Security:** Manages authentication for profile access and booking actions via KeyManager & Auth Schemes. TEE declaration enhances trust.
@@ -117,6 +118,7 @@ flowchart LR
 ```
 
 **AgentVault Value:**
+
 *   **Discovery:** Finds specialized scientific agents, including filtering by TEE capability.
 *   **Interoperability:** Standard A2A allows complex pipeline construction.
 *   **Artifacts:** Enables exchange of large/complex data (simulation inputs/outputs).
@@ -183,6 +185,7 @@ flowchart TD
 ```
 
 **AgentVault Value:**
+
 *   **Decentralization:** Enables local discovery and communication via a local Registry.
 *   **Interoperability:** Standard A2A connects heterogeneous devices/agents.
 *   **Real-time Data:** SSE facilitates efficient monitoring streams.
@@ -249,6 +252,7 @@ flowchart TD
 ```
 
 **AgentVault Value:**
+
 *   **Modularity:** Easily find and swap enrichment agents via the Registry.
 *   **Standardization:** A2A protocol simplifies interaction with diverse data providers.
 *   **Security:** KeyManager handles API keys for premium enrichment services securely.
@@ -319,6 +323,7 @@ flowchart TB
 ```
 
 **AgentVault Value:**
+
 *   **Process Automation:** Connects disparate systems (E-commerce, ERP, Shipping, CRM) via standardized agents.
 *   **Interoperability:** A2A allows communication between custom internal agents (Inventory, Billing) and external service wrappers (Shipping).
 *   **Security:** Securely manages API keys for external services like shipping providers.
