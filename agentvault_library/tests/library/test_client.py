@@ -15,6 +15,9 @@ import httpx
 # --- MODIFIED: Added AsyncMock ---
 from unittest.mock import patch, MagicMock, ANY, call, AsyncMock
 # --- END MODIFIED ---
+# --- ADDED: Import freezegun ---
+from freezegun import freeze_time
+# --- END ADDED ---
 from typing import Optional, Dict, Any, Union, Tuple, List, AsyncGenerator
 
 
@@ -106,6 +109,14 @@ def agent_card_oauth2(mock_a2a_server: MockServerInfo) -> AgentCard:
         )]
     )
 
+# --- ADDED: Fixture for OAuth agent card without tokenUrl ---
+# This fixture is no longer needed as we modify the valid card in the test
+# @pytest.fixture
+# def agent_card_oauth2_no_token_url(mock_a2a_server: MockServerInfo) -> AgentCard:
+#     """Provides an AgentCard instance supporting OAuth2 but missing tokenUrl."""
+#     # ... (implementation removed) ...
+# --- END ADDED ---
+
 
 # --- Helper Async Generator Functions ---
 async def mock_receive_empty() -> AsyncGenerator[Any, None]:
@@ -118,8 +129,8 @@ async def mock_receive_events(*events) -> AsyncGenerator[Any, None]:
     test_logger.info(f"Mock generator starting. Will yield {len(events)} events.")
     for i, event in enumerate(events):
         media_type_to_log = "N/A"
-        # --- MODIFIED: Check _AGENTVAULT_AVAILABLE ---
-        if _AGENTVAULT_AVAILABLE and isinstance(event, TaskArtifactUpdateEvent):
+        # --- MODIFIED: Check _AGENTVAULT_IMPORTED ---
+        if _AGENTVAULT_IMPORTED and isinstance(event, TaskArtifactUpdateEvent):
         # --- END MODIFIED ---
              if hasattr(event, 'artifact') and hasattr(event.artifact, 'media_type'):
                  media_type_to_log = event.artifact.media_type
@@ -244,6 +255,120 @@ async def test_get_auth_headers_oauth2_token_endpoint_error(mock_key_manager, ag
                 await client._get_auth_headers(agent_card_oauth2, mock_key_manager)
     # --- END MODIFIED ---
     assert token_route.called # Verify token endpoint was called
+
+# --- ADDED: New OAuth2 Tests ---
+@pytest.mark.asyncio
+async def test_get_auth_headers_oauth2_cached_token(mock_key_manager, agent_card_oauth2, mock_a2a_server: MockServerInfo):
+    """Test using a valid cached OAuth2 token."""
+    token_url = str(agent_card_oauth2.auth_schemes[0].token_url)
+    service_id = agent_card_oauth2.auth_schemes[0].service_identifier
+    cached_token = "cached_valid_token"
+    # Set expiry far in the future
+    expiry = datetime.datetime.now(datetime.timezone.utc).timestamp() + 3600
+
+    # --- MODIFIED: Removed explicit respx context and pass_through ---
+    # The mock_a2a_server fixture already sets up respx and the default token route.
+    # We expect the code *not* to call the token route due to the cache.
+    async with AgentVaultClient() as client:
+        # Manually insert token into client's cache
+        client._token_cache[service_id] = (cached_token, expiry)
+        headers = await client._get_auth_headers(agent_card_oauth2, mock_key_manager)
+    # --- END MODIFIED ---
+
+    assert headers == {"Authorization": f"Bearer {cached_token}"}
+    # Key manager shouldn't be called either if token is cached
+    mock_key_manager.get_oauth_client_id.assert_not_called()
+    mock_key_manager.get_oauth_client_secret.assert_not_called()
+    # We cannot easily assert the token route wasn't called without more complex respx setup
+    # when using the fixture, but the logic implies it wasn't.
+
+@pytest.mark.asyncio
+async def test_get_auth_headers_oauth2_expired_token(mock_key_manager, agent_card_oauth2, mock_a2a_server: MockServerInfo):
+    """Test fetching a new token when the cached one is expired."""
+    token_url = str(agent_card_oauth2.auth_schemes[0].token_url)
+    service_id = agent_card_oauth2.auth_schemes[0].service_identifier
+    cached_token = "expired_token"
+    new_token = "newly_fetched_token"
+    # Set expiry in the past
+    expiry = datetime.datetime.now(datetime.timezone.utc).timestamp() - 7200
+
+    async with respx.mock(using="httpx") as respx_mock_context:
+        # Mock token endpoint to return the new token
+        token_route = respx_mock_context.post(token_url).mock(
+            return_value=httpx.Response(200, json={"access_token": new_token, "token_type": "Bearer", "expires_in": 3600})
+        )
+        async with AgentVaultClient() as client:
+            # Manually insert expired token into cache
+            client._token_cache[service_id] = (cached_token, expiry)
+            headers = await client._get_auth_headers(agent_card_oauth2, mock_key_manager)
+
+    assert headers == {"Authorization": f"Bearer {new_token}"}
+    assert token_route.called # Ensure token endpoint WAS called
+    # Key manager should be called now
+    mock_key_manager.get_oauth_client_id.assert_called_once_with(service_id)
+    mock_key_manager.get_oauth_client_secret.assert_called_once_with(service_id)
+    # Check cache was updated
+    assert client._token_cache[service_id][0] == new_token
+    assert client._token_cache[service_id][1] > expiry
+
+@pytest.mark.asyncio
+async def test_get_auth_headers_oauth2_no_token_url(mock_key_manager, agent_card_oauth2):
+    """Test error when agent card is missing the tokenUrl for oauth2."""
+    # --- MODIFIED: Use valid card fixture and mock attribute ---
+    test_card = agent_card_oauth2 # Start with valid card
+    test_card.auth_schemes[0].token_url = None # Set token_url to None *after* creation
+
+    with pytest.raises(A2AAuthenticationError, match="missing 'tokenUrl'"):
+        async with AgentVaultClient() as client:
+            # Pass the modified card object
+            await client._get_auth_headers(test_card, mock_key_manager)
+    # --- END MODIFIED ---
+
+@pytest.mark.asyncio
+async def test_get_auth_headers_oauth2_token_network_error(mock_key_manager, agent_card_oauth2, mock_a2a_server: MockServerInfo):
+    """Test network error during token fetch."""
+    token_url = str(agent_card_oauth2.auth_schemes[0].token_url)
+    async with respx.mock(using="httpx") as respx_mock_context:
+        token_route = respx_mock_context.post(token_url).mock(side_effect=httpx.ConnectError("Connection refused"))
+        with pytest.raises(A2AAuthenticationError, match="Could not connect to token endpoint"):
+            async with AgentVaultClient() as client:
+                await client._get_auth_headers(agent_card_oauth2, mock_key_manager)
+    assert token_route.called
+
+@pytest.mark.asyncio
+async def test_get_auth_headers_oauth2_token_timeout(mock_key_manager, agent_card_oauth2, mock_a2a_server: MockServerInfo):
+    """Test timeout during token fetch."""
+    token_url = str(agent_card_oauth2.auth_schemes[0].token_url)
+    async with respx.mock(using="httpx") as respx_mock_context:
+        token_route = respx_mock_context.post(token_url).mock(side_effect=httpx.TimeoutException("Timeout occurred", request=None))
+        with pytest.raises(A2AAuthenticationError, match="Timeout connecting to token endpoint"):
+            async with AgentVaultClient() as client:
+                await client._get_auth_headers(agent_card_oauth2, mock_key_manager)
+    assert token_route.called
+
+@pytest.mark.asyncio
+async def test_get_auth_headers_oauth2_token_invalid_json(mock_key_manager, agent_card_oauth2, mock_a2a_server: MockServerInfo):
+    """Test invalid JSON response from token endpoint."""
+    token_url = str(agent_card_oauth2.auth_schemes[0].token_url)
+    async with respx.mock(using="httpx") as respx_mock_context:
+        token_route = respx_mock_context.post(token_url).mock(return_value=httpx.Response(200, text="{invalid json"))
+        with pytest.raises(A2AAuthenticationError, match="Invalid JSON response from token endpoint"):
+            async with AgentVaultClient() as client:
+                await client._get_auth_headers(agent_card_oauth2, mock_key_manager)
+    assert token_route.called
+
+@pytest.mark.asyncio
+async def test_get_auth_headers_oauth2_token_missing_access_token(mock_key_manager, agent_card_oauth2, mock_a2a_server: MockServerInfo):
+    """Test token response missing the 'access_token' field."""
+    token_url = str(agent_card_oauth2.auth_schemes[0].token_url)
+    async with respx.mock(using="httpx") as respx_mock_context:
+        token_route = respx_mock_context.post(token_url).mock(return_value=httpx.Response(200, json={"token_type": "Bearer"})) # Missing access_token
+        with pytest.raises(A2AAuthenticationError, match="missing 'access_token'"):
+            async with AgentVaultClient() as client:
+                await client._get_auth_headers(agent_card_oauth2, mock_key_manager)
+    assert token_route.called
+# --- END ADDED ---
+
 
 # --- Test initiate_task ---
 @pytest.mark.asyncio
