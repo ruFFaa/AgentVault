@@ -4,7 +4,10 @@ import datetime
 from freezegun import freeze_time
 from typing import Union, Any, List
 # --- ADDED: Import patch ---
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock, AsyncMock # Added AsyncMock
+# --- END ADDED ---
+# --- ADDED: Import logging ---
+import logging
 # --- END ADDED ---
 
 
@@ -339,9 +342,119 @@ async def test_update_task_state_triggers_notify(task_store: InMemoryTaskStore):
     # Patch the notify method to check it's called
     with patch.object(task_store, 'notify_status_update', wraps=task_store.notify_status_update) as mock_notify:
         await task_store.update_task_state(task_id, TaskState.WORKING)
-        mock_notify.assert_awaited_once_with(task_id, TaskState.WORKING)
+        # --- MODIFIED: Correct assertion ---
+        mock_notify.assert_awaited_once_with(task_id, TaskState.WORKING) # Removed None
+        # --- END MODIFIED ---
 
     # Check the queue still received the event via the wrapped call
     event = await asyncio.wait_for(q1.get(), timeout=0.1)
     assert isinstance(event, TaskStatusUpdateEvent)
     assert event.state == TaskState.WORKING
+
+# --- ADDED: Tests for Edge Cases and Errors ---
+
+@pytest.mark.asyncio
+async def test_create_task_already_exists(task_store: InMemoryTaskStore, caplog):
+    """Test creating a task that already exists."""
+    task_id = "existing-task"
+    await task_store.create_task(task_id) # Create it first
+    initial_context = task_store._tasks[task_id]
+
+    with caplog.at_level(logging.WARNING):
+        new_context = await task_store.create_task(task_id) # Try creating again
+
+    assert new_context is initial_context # Should return the existing one
+    assert f"Task '{task_id}' already exists" in caplog.text
+
+@pytest.mark.asyncio
+async def test_update_task_state_not_found(task_store: InMemoryTaskStore, caplog):
+    """Test updating state for a non-existent task."""
+    task_id = "non-existent-task"
+    with caplog.at_level(logging.WARNING):
+        context = await task_store.update_task_state(task_id, TaskState.WORKING)
+
+    assert context is None
+    assert f"Task '{task_id}' not found for state update" in caplog.text
+
+@pytest.mark.asyncio
+async def test_delete_task_not_found(task_store: InMemoryTaskStore, caplog):
+    """Test deleting a non-existent task."""
+    task_id = "non-existent-task"
+    with caplog.at_level(logging.WARNING):
+        result = await task_store.delete_task(task_id)
+
+    assert result is False
+    assert f"Task '{task_id}' not found for deletion" in caplog.text
+
+@pytest.mark.asyncio
+async def test_remove_listener_task_not_found(task_store: InMemoryTaskStore, caplog):
+    """Test removing a listener from a non-existent task."""
+    task_id = "non-existent-task"
+    q1 = asyncio.Queue()
+    with caplog.at_level(logging.WARNING):
+        await task_store.remove_listener(task_id, q1)
+    assert f"Attempted to remove listener from non-existent task '{task_id}'" in caplog.text
+
+@pytest.mark.asyncio
+async def test_remove_listener_queue_not_found(task_store: InMemoryTaskStore, caplog):
+    """Test removing a listener queue that wasn't added."""
+    task_id = "listener-task-2"
+    q1 = asyncio.Queue()
+    q2 = asyncio.Queue()
+    await task_store.add_listener(task_id, q1) # Add q1
+
+    with caplog.at_level(logging.WARNING):
+        await task_store.remove_listener(task_id, q2) # Try removing q2
+
+    assert f"Attempted to remove a listener queue not present for task '{task_id}'" in caplog.text
+    assert await task_store.get_listeners(task_id) == [q1] # q1 should still be there
+
+@pytestmark_notify
+@pytest.mark.asyncio
+async def test_notify_listeners_queue_put_error(task_store: InMemoryTaskStore, caplog):
+    """Test error handling when putting event onto a listener queue fails."""
+    task_id = "notify-queue-error"
+    await task_store.create_task(task_id)
+    q_ok = asyncio.Queue()
+    q_bad = MagicMock(spec=asyncio.Queue)
+    q_bad.put = AsyncMock(side_effect=asyncio.QueueFull("Mock Queue Full")) # Simulate error
+
+    await task_store.add_listener(task_id, q_ok)
+    await task_store.add_listener(task_id, q_bad)
+
+    with caplog.at_level(logging.ERROR):
+        await task_store.notify_status_update(task_id, TaskState.FAILED, "Notify Error Test")
+
+    # Check the good queue received the event
+    event_ok = await asyncio.wait_for(q_ok.get(), timeout=0.1)
+    assert isinstance(event_ok, TaskStatusUpdateEvent)
+    assert event_ok.state == TaskState.FAILED
+
+    # Check the bad queue put was attempted and error logged
+    q_bad.put.assert_awaited_once()
+    assert f"Failed to put event onto listener queue 1 for task '{task_id}'" in caplog.text
+    assert "Mock Queue Full" in caplog.text
+
+@pytestmark_notify
+@pytest.mark.asyncio
+@patch("agentvault_server_sdk.state.TaskStatusUpdateEvent") # Patch the model class
+async def test_notify_status_update_event_creation_error(mock_event_cls, task_store: InMemoryTaskStore, caplog):
+    """Test error handling if TaskStatusUpdateEvent creation fails."""
+    task_id = "notify-create-error"
+    await task_store.create_task(task_id)
+    q1 = asyncio.Queue()
+    await task_store.add_listener(task_id, q1)
+
+    error_message = "Mock Pydantic validation error"
+    mock_event_cls.side_effect = ValueError(error_message) # Simulate model init error
+
+    with caplog.at_level(logging.ERROR):
+        await task_store.notify_status_update(task_id, TaskState.WORKING)
+
+    assert q1.empty() # Queue should be empty
+    assert f"Failed to create TaskStatusUpdateEvent instance for task '{task_id}'" in caplog.text
+    assert error_message in caplog.text
+
+# Similar tests can be added for notify_message_event and notify_artifact_event creation errors
+
+# --- END ADDED ---

@@ -193,13 +193,25 @@ def make_rpc_request(
     client: TestClient,
     method: str,
     params: Optional[Dict[str, Any]] = None,
-    req_id: Union[str, int] = 1
+    req_id: Union[str, int] = 1,
+    # --- ADDED: Allow sending raw content ---
+    raw_content: Optional[Union[str, bytes]] = None,
+    json_payload: Optional[Dict[str, Any]] = None,
+    # --- END ADDED ---
 ) -> Any:
     """Helper to make JSON-RPC POST requests."""
-    payload = {"jsonrpc": "2.0", "method": method, "id": req_id}
-    if params is not None:
-        payload["params"] = params
-    response = client.post("/a2a/", json=payload)
+    # --- MODIFIED: Handle raw_content ---
+    if raw_content is not None:
+        headers = {"Content-Type": "application/json"} # Still set header
+        response = client.post("/a2a/", content=raw_content, headers=headers)
+    elif json_payload is not None:
+         response = client.post("/a2a/", json=json_payload)
+    # --- END MODIFIED ---
+    else:
+        payload = {"jsonrpc": "2.0", "method": method, "id": req_id}
+        if params is not None:
+            payload["params"] = params
+        response = client.post("/a2a/", json=payload)
     return response
 
 # --- Test Cases ---
@@ -379,3 +391,80 @@ async def test_route_tasks_sendSubscribe_generator_error(test_app_with_agent):
     assert error_data.get("error") == "stream_error"
     assert f"RuntimeError: {error_message}" in error_data.get("message", "")
     # --- END MODIFIED ---
+
+# --- ADDED: Tests for Invalid JSON-RPC Requests ---
+
+def test_invalid_json_request(test_app_with_agent):
+    """Test sending invalid JSON."""
+    _, client, _ = test_app_with_agent
+    response = make_rpc_request(client, method="", raw_content=b"{invalid json")
+    assert response.status_code == status.HTTP_200_OK # JSON-RPC error
+    resp_data = response.json()
+    assert resp_data["id"] is None # No ID could be parsed
+    assert resp_data["error"]["code"] == JSONRPC_PARSE_ERROR
+
+def test_non_dict_request(test_app_with_agent):
+    """Test sending a JSON array instead of an object."""
+    _, client, _ = test_app_with_agent
+    response = make_rpc_request(client, method="", json_payload=[1, 2, 3])
+    assert response.status_code == status.HTTP_200_OK # JSON-RPC error
+    resp_data = response.json()
+    assert resp_data["id"] is None # No ID could be parsed
+    assert resp_data["error"]["code"] == JSONRPC_INVALID_REQUEST
+    assert "Payload must be a JSON object" in resp_data["error"]["message"]
+
+def test_missing_method_request(test_app_with_agent):
+    """Test sending a request missing the 'method' field."""
+    _, client, _ = test_app_with_agent
+    payload = {"jsonrpc": "2.0", "id": "m-err"}
+    response = make_rpc_request(client, method="", json_payload=payload)
+    assert response.status_code == status.HTTP_200_OK # JSON-RPC error
+    resp_data = response.json()
+    assert resp_data["id"] == "m-err"
+    assert resp_data["error"]["code"] == JSONRPC_INVALID_REQUEST
+    assert "'method' is required" in resp_data["error"]["message"]
+
+def test_invalid_jsonrpc_version(test_app_with_agent):
+    """Test sending a request with the wrong 'jsonrpc' version."""
+    _, client, _ = test_app_with_agent
+    payload = {"jsonrpc": "1.0", "method": "test", "id": "v-err"}
+    response = make_rpc_request(client, method="", json_payload=payload)
+    assert response.status_code == status.HTTP_200_OK # JSON-RPC error
+    resp_data = response.json()
+    assert resp_data["id"] == "v-err"
+    assert resp_data["error"]["code"] == JSONRPC_INVALID_REQUEST
+    assert "'jsonrpc' must be '2.0'" in resp_data["error"]["message"]
+
+# --- ADDED: Tests for tasks/sendSubscribe Parameter Validation ---
+
+def test_route_tasks_sendSubscribe_missing_params(test_app_with_agent):
+    """Test tasks/sendSubscribe with missing 'params' field."""
+    mock_agent, client, store = test_app_with_agent
+    response = make_rpc_request(client, "tasks/sendSubscribe", params=None, req_id="sub-bad1")
+    assert response.status_code == status.HTTP_200_OK # JSON-RPC error
+    resp_data = response.json()
+    assert resp_data["id"] == "sub-bad1"
+    assert resp_data["error"]["code"] == JSONRPC_INVALID_PARAMS
+    assert "Params must be a dictionary" in resp_data["error"]["message"]
+
+def test_route_tasks_sendSubscribe_missing_id_in_params(test_app_with_agent):
+    """Test tasks/sendSubscribe with 'params' missing the 'id' key."""
+    mock_agent, client, store = test_app_with_agent
+    response = make_rpc_request(client, "tasks/sendSubscribe", params={"other": "value"}, req_id="sub-bad2")
+    assert response.status_code == status.HTTP_200_OK # JSON-RPC error
+    resp_data = response.json()
+    assert resp_data["id"] == "sub-bad2"
+    assert resp_data["error"]["code"] == JSONRPC_INVALID_PARAMS
+    assert "'id' parameter is required" in resp_data["error"]["message"]
+
+def test_route_tasks_sendSubscribe_invalid_id_type(test_app_with_agent):
+    """Test tasks/sendSubscribe with 'id' parameter of wrong type."""
+    mock_agent, client, store = test_app_with_agent
+    response = make_rpc_request(client, "tasks/sendSubscribe", params={"id": 12345}, req_id="sub-bad3")
+    assert response.status_code == status.HTTP_200_OK # JSON-RPC error
+    resp_data = response.json()
+    assert resp_data["id"] == "sub-bad3"
+    assert resp_data["error"]["code"] == JSONRPC_INVALID_PARAMS
+    assert "'id' parameter is required" in resp_data["error"]["message"] # Error message might be generic
+
+# --- END ADDED ---
