@@ -391,6 +391,7 @@ flowchart LR
 ```
 
 **AgentVault Value:**
+
 *   **Workflow Orchestration:** Enables complex, multi-step support workflows involving analysis, enrichment, and action.
 *   **Specialization:** Allows using best-of-breed agents for sentiment, classification, KB search, etc.
 *   **Secure Data Access:** Protects access to CRM and Helpdesk systems via authenticated agents.
