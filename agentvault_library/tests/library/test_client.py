@@ -31,7 +31,7 @@ from agentvault.models import (
 )
 from agentvault.exceptions import (
     AgentVaultError, A2AError, A2AConnectionError, A2AAuthenticationError,
-    A2ARemoteAgentError, A2ATimeoutError, A2AMessageError
+    A2ARemoteAgentError, A2ATimeoutError, A2AMessageError, KeyManagementError
 )
 # --- ADDED: Import testing utils ---
 from agentvault_testing_utils.fixtures import mock_a2a_server, MockServerInfo
@@ -46,7 +46,10 @@ from agentvault_testing_utils.mock_server import (
     JSONRPC_INVALID_PARAMS,
     JSONRPC_INTERNAL_ERROR,
     # --- ADDED: Import default task creator ---
-    create_default_mock_task
+    create_default_mock_task,
+    # --- ADDED: Import more error codes ---
+    JSONRPC_PARSE_ERROR, JSONRPC_INVALID_REQUEST, JSONRPC_METHOD_NOT_FOUND, JSONRPC_TASK_NOT_FOUND
+    # --- END ADDED ---
     # --- END ADDED ---
 )
 # --- END MODIFIED ---
@@ -683,5 +686,173 @@ async def test_process_sse_lines_yield_error(caplog):
     # Ensure error wasn't logged by the generator's internal handler
     # (The error happens *outside* the generator's try/except around yield)
     assert "Error yielding parsed SSE event" not in caplog.text
+
+# --- ADDED: Tests for _make_request ---
+
+@pytest.mark.asyncio
+@pytest.mark.respx(using="httpx")
+async def test_make_request_success(respx_mock):
+    """Test _make_request successful POST with JSON-RPC result."""
+    url = "http://test.com/api"
+    req_id = "mkreq-1"
+    result_data = {"status": "ok", "value": 123}
+    payload = {"jsonrpc": "2.0", "method": "test_method", "id": req_id}
+    mock_route = respx_mock.post(url).mock(
+        return_value=httpx.Response(200, json=create_jsonrpc_success_response(req_id, result_data))
+    )
+    async with AgentVaultClient() as client:
+        response_data = await client._make_request("POST", url, json_payload=payload)
+
+    assert response_data == result_data
+    assert mock_route.called
+
+@pytest.mark.asyncio
+@pytest.mark.respx(using="httpx")
+async def test_make_request_timeout(respx_mock):
+    """Test _make_request raises A2ATimeoutError on httpx.TimeoutException."""
+    url = "http://test.com/api"
+    payload = {"jsonrpc": "2.0", "method": "test_method", "id": 1}
+    mock_route = respx_mock.post(url).mock(side_effect=httpx.TimeoutException("Timeout!", request=None))
+    async with AgentVaultClient() as client:
+        with pytest.raises(A2ATimeoutError, match="Request timed out"):
+            await client._make_request("POST", url, json_payload=payload)
+    assert mock_route.called
+
+@pytest.mark.asyncio
+@pytest.mark.respx(using="httpx")
+async def test_make_request_connect_error(respx_mock):
+    """Test _make_request raises A2AConnectionError on httpx.ConnectError."""
+    url = "http://test.com/api"
+    payload = {"jsonrpc": "2.0", "method": "test_method", "id": 1}
+    mock_route = respx_mock.post(url).mock(side_effect=httpx.ConnectError("Connection failed!"))
+    async with AgentVaultClient() as client:
+        with pytest.raises(A2AConnectionError, match="Connection failed"):
+            await client._make_request("POST", url, json_payload=payload)
+    assert mock_route.called
+
+@pytest.mark.asyncio
+@pytest.mark.respx(using="httpx")
+async def test_make_request_http_status_error(respx_mock):
+    """Test _make_request raises A2ARemoteAgentError on httpx.HTTPStatusError."""
+    url = "http://test.com/api"
+    payload = {"jsonrpc": "2.0", "method": "test_method", "id": 1}
+    mock_route = respx_mock.post(url).mock(return_value=httpx.Response(500, text="Internal Server Error"))
+    async with AgentVaultClient() as client:
+        with pytest.raises(A2ARemoteAgentError) as excinfo:
+            await client._make_request("POST", url, json_payload=payload)
+    assert excinfo.value.status_code == 500
+    assert "Internal Server Error" in str(excinfo.value)
+    assert mock_route.called
+
+@pytest.mark.asyncio
+@pytest.mark.respx(using="httpx")
+async def test_make_request_invalid_json_response(respx_mock):
+    """Test _make_request raises A2AMessageError on invalid JSON response."""
+    url = "http://test.com/api"
+    payload = {"jsonrpc": "2.0", "method": "test_method", "id": 1}
+    mock_route = respx_mock.post(url).mock(return_value=httpx.Response(200, text="{not json"))
+    async with AgentVaultClient() as client:
+        with pytest.raises(A2AMessageError, match="Failed to decode JSON response"):
+            await client._make_request("POST", url, json_payload=payload)
+    assert mock_route.called
+
+@pytest.mark.asyncio
+@pytest.mark.respx(using="httpx")
+async def test_make_request_json_rpc_error_response(respx_mock):
+    """Test _make_request raises A2ARemoteAgentError on JSON-RPC error response."""
+    url = "http://test.com/api"
+    req_id = "err-req-1"
+    error_code = JSONRPC_INVALID_PARAMS
+    error_message = "Missing required parameter"
+    payload = {"jsonrpc": "2.0", "method": "test_method", "id": req_id}
+    error_response = create_jsonrpc_error_response(req_id, error_code, error_message)
+    mock_route = respx_mock.post(url).mock(return_value=httpx.Response(200, json=error_response))
+    async with AgentVaultClient() as client:
+        with pytest.raises(A2ARemoteAgentError) as excinfo:
+            await client._make_request("POST", url, json_payload=payload)
+    assert excinfo.value.status_code == error_code
+    # --- MODIFIED: Check str(excinfo.value) ---
+    assert error_message in str(excinfo.value)
+    # --- END MODIFIED ---
+    assert mock_route.called
+
+@pytest.mark.asyncio
+@pytest.mark.respx(using="httpx")
+async def test_make_request_response_not_dict(respx_mock):
+    """Test _make_request raises A2AMessageError if JSON response is not a dict."""
+    url = "http://test.com/api"
+    payload = {"jsonrpc": "2.0", "method": "test_method", "id": 1}
+    mock_route = respx_mock.post(url).mock(return_value=httpx.Response(200, json=[1, 2, 3])) # Return list
+    async with AgentVaultClient() as client:
+        with pytest.raises(A2AMessageError, match="Expected dictionary"):
+            await client._make_request("POST", url, json_payload=payload)
+    assert mock_route.called
+
+@pytest.mark.asyncio
+@pytest.mark.respx(using="httpx")
+async def test_make_request_response_missing_result_or_error(respx_mock):
+    """Test _make_request raises A2AMessageError if response lacks result/error."""
+    url = "http://test.com/api"
+    payload = {"jsonrpc": "2.0", "method": "test_method", "id": 1}
+    mock_route = respx_mock.post(url).mock(return_value=httpx.Response(200, json={"jsonrpc": "2.0", "id": 1})) # Missing result/error
+    async with AgentVaultClient() as client:
+        with pytest.raises(A2AMessageError, match="Missing 'result' or 'error' key"):
+            await client._make_request("POST", url, json_payload=payload)
+    assert mock_route.called
+
+# --- ADDED: Tests for Public Method Error Handling ---
+
+@pytest.mark.asyncio
+async def test_initiate_task_auth_error(mock_key_manager, agent_card_apikey, sample_message):
+    """Test initiate_task handles A2AAuthenticationError from _get_auth_headers."""
+    mock_key_manager.get_key.return_value = None # Simulate missing key
+    async with AgentVaultClient() as client:
+        with pytest.raises(A2AAuthenticationError, match="Missing API key"):
+            await client.initiate_task(agent_card_apikey, sample_message, mock_key_manager)
+
+@pytest.mark.asyncio
+async def test_initiate_task_key_management_error(mock_key_manager, agent_card_apikey, sample_message):
+    """Test initiate_task handles KeyManagementError from _get_auth_headers."""
+    error_msg = "Keyring access failed"
+    mock_key_manager.get_key.side_effect = KeyManagementError(error_msg)
+    async with AgentVaultClient() as client:
+        # Should be wrapped in A2AAuthenticationError
+        with pytest.raises(A2AAuthenticationError, match=f"Authentication failed due to key management error: {error_msg}"):
+            await client.initiate_task(agent_card_apikey, sample_message, mock_key_manager)
+
+@pytest.mark.asyncio
+@patch("agentvault.client.AgentVaultClient._make_request", new_callable=AsyncMock)
+@patch("agentvault.client.AgentVaultClient._get_auth_headers", new_callable=AsyncMock)
+async def test_initiate_task_make_request_error(mock_get_headers, mock_make_request, mock_key_manager, agent_card_no_auth, sample_message):
+    """Test initiate_task handles errors from _make_request."""
+    mock_get_headers.return_value = {} # Simulate successful auth header fetch
+    error_to_raise = A2ARemoteAgentError("Agent failed init", status_code=500)
+    mock_make_request.side_effect = error_to_raise
+
+    async with AgentVaultClient() as client:
+        with pytest.raises(A2ARemoteAgentError, match="Agent failed init"):
+            await client.initiate_task(agent_card_no_auth, sample_message, mock_key_manager)
+
+    mock_get_headers.assert_awaited_once()
+    mock_make_request.assert_awaited_once()
+
+@pytest.mark.asyncio
+@patch("agentvault.client.AgentVaultClient._make_request", new_callable=AsyncMock)
+@patch("agentvault.client.AgentVaultClient._get_auth_headers", new_callable=AsyncMock)
+async def test_initiate_task_unexpected_error(mock_get_headers, mock_make_request, mock_key_manager, agent_card_no_auth, sample_message):
+    """Test initiate_task handles unexpected errors."""
+    mock_get_headers.return_value = {}
+    error_to_raise = ValueError("Unexpected validation issue")
+    mock_make_request.side_effect = error_to_raise
+
+    async with AgentVaultClient() as client:
+        # Should be wrapped in A2AError
+        with pytest.raises(A2AError, match="An unexpected error occurred during task initiation"):
+            await client.initiate_task(agent_card_no_auth, sample_message, mock_key_manager)
+
+    mock_get_headers.assert_awaited_once()
+    mock_make_request.assert_awaited_once()
+
+# Similar error handling tests can be added for send_message, get_task_status, terminate_task
 
 # --- END ADDED ---

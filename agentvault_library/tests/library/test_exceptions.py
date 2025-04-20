@@ -2,6 +2,13 @@ import pytest
 
 # Import the exceptions to test
 from agentvault.exceptions import AgentCardFetchError, A2ARemoteAgentError
+# --- ADDED: Import models for type hints if needed, but don't skip based on it ---
+try:
+    from agentvault.models import AgentCard # Example for potential future use
+    _MODELS_AVAILABLE = True
+except ImportError:
+    _MODELS_AVAILABLE = False
+# --- REMOVED: pytestmark skip ---
 
 # --- Tests for AgentCardFetchError ---
 
@@ -52,9 +59,7 @@ def test_agent_card_fetch_error_str_long_response_body():
     str_repr = str(exc)
     assert str_repr.startswith(msg) # Check it starts with the base message
     assert "(response_body='" in str_repr # Check the body part is included
-    # --- MODIFIED: Correct endswith assertion for string repr ---
     assert str_repr.endswith("...)") # Check it ends with ellipsis and closing parenthesis
-    # --- END MODIFIED ---
     assert len(str_repr) < len(msg) + 150 # Check it's significantly shorter than full body
 
 # --- Tests for A2ARemoteAgentError ---
