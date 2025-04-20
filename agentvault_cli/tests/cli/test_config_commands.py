@@ -66,7 +66,7 @@ async def test_config_set_file_guidance(runner: CliRunner, mocker: MockerFixture
     mock_display_info.assert_any_call(f"Guidance: To use a file for 'my-service':")
     mock_display_info.assert_any_call(f"  In '{key_file}' (.env format):")
     mock_display_info.assert_any_call("    my-service=<your_api_key>")
-    mock_display_info.assert_any_call("    AGENTVAULT_OAUTH_my-service_CLIENT_ID=<your_client_id>")
+    # Note: OAuth guidance check moved to test_config_set_file_guidance_includes_oauth
     mock_display_info.assert_any_call(f"  Or in '{key_file}' (.json format):")
     mock_display_info.assert_any_call('    "my-service": {')
 
@@ -479,3 +479,110 @@ async def test_config_list_empty(runner: CliRunner, mocker: MockerFixture):
     mock_display_table.assert_not_called()
     mock_display_info.assert_any_call("(Credentials stored only in the OS keyring will not be listed here unless previously accessed.)")
 # --- END MODIFIED ---
+
+# --- ADDED TESTS ---
+
+@pytest.mark.asyncio
+async def test_config_set_file_guidance_includes_oauth(runner: CliRunner, mocker: MockerFixture, tmp_path: pathlib.Path):
+    """Test 'config set --file' guidance includes OAuth details."""
+    mock_display_info = mocker.patch('agentvault_cli.commands.config.utils.display_info')
+    key_file = tmp_path / "guidance.env"
+
+    result = await runner.invoke(config_group, ['set', 'my-service', '--file', str(key_file)])
+
+    assert result.exit_code == 0, f"CLI Error: {result.output}"
+    # Check specifically for OAuth guidance lines
+    mock_display_info.assert_any_call("    AGENTVAULT_OAUTH_my-service_CLIENT_ID=<your_client_id>")
+    mock_display_info.assert_any_call("    AGENTVAULT_OAUTH_my-service_CLIENT_SECRET=<your_client_secret>")
+    mock_display_info.assert_any_call('      "oauth": { "clientId": "<your_client_id>", "clientSecret": "<your_client_secret>" }')
+
+
+@pytest.mark.asyncio
+async def test_config_set_keyring_empty_input(runner: CliRunner, mocker: MockerFixture):
+    """Test 'config set --keyring' handles empty API key input."""
+    mock_display_error = mocker.patch('agentvault_cli.commands.config.utils.display_error')
+    mock_key_manager_cls = mocker.patch('agentvault_cli.commands.config.key_manager.KeyManager')
+    # Mock prompt to return empty string first time
+    mock_prompt = mocker.patch('agentvault_cli.commands.config.click.prompt', new_callable=AsyncMock, return_value="")
+
+    mock_manager_instance = MagicMock()
+    mock_manager_instance.use_keyring = True # Assume keyring backend *is* functional initially
+    mock_key_manager_cls.return_value = mock_manager_instance
+
+    result = await runner.invoke(
+        config_group,
+        ['set', 'empty-key-service', '--keyring'],
+        catch_exceptions=True # Catch the exit
+    )
+
+    assert result.exit_code == 1, f"CLI Error: {result.output}"
+    assert isinstance(result.exception, SystemExit)
+    assert result.exception.code == 1
+    mock_prompt.assert_awaited_once() # Prompt was called once
+    mock_display_error.assert_called_once_with("API key cannot be empty.")
+    mock_manager_instance.set_key_in_keyring.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_config_set_keyring_backend_not_functional(runner: CliRunner, mocker: MockerFixture, capsys):
+    """Test 'config set --keyring' when keyring backend is not functional."""
+    mock_display_error = mocker.patch('agentvault_cli.commands.config.utils.display_error')
+    mock_display_info = mocker.patch('agentvault_cli.commands.config.utils.display_info')
+    mock_key_manager_cls = mocker.patch('agentvault_cli.commands.config.key_manager.KeyManager')
+    # Mock prompt to provide valid input if it were called
+    mock_prompt = mocker.patch('agentvault_cli.commands.config.click.prompt', new_callable=AsyncMock, side_effect=["test-api-key", "test-api-key"])
+
+    mock_manager_instance = MagicMock()
+    # Simulate KeyManager init succeeding but use_keyring being False afterwards
+    mock_manager_instance.use_keyring = False
+    mock_manager_instance.set_key_in_keyring = MagicMock()
+    mock_key_manager_cls.return_value = mock_manager_instance
+
+    # Disable capsys to potentially avoid the ValueError, but focus on asserting the mock call
+    with capsys.disabled():
+        result = await runner.invoke(
+            config_group,
+            ['set', 'nonfunc-keyring-service', '--keyring'],
+            catch_exceptions=True # Catch the exit
+        )
+
+    # Assert the specific error message was displayed
+    mock_display_error.assert_any_call("Keyring support is enabled but the backend is not functional. Cannot store key.")
+    mock_display_info.assert_any_call("Hint: Check keyring documentation for backend setup or install 'keyrings.alt'.")
+    # Check the exception caught by the runner (should be SystemExit now)
+    assert isinstance(result.exception, SystemExit)
+    assert result.exception.code == 1
+    mock_prompt.assert_awaited_once() # Prompt is called before the check
+    mock_manager_instance.set_key_in_keyring.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_config_set_oauth_configure_backend_not_functional(runner: CliRunner, mocker: MockerFixture, capsys):
+    """Test 'config set --oauth-configure' when keyring backend is not functional."""
+    mock_display_error = mocker.patch('agentvault_cli.commands.config.utils.display_error')
+    mock_display_info = mocker.patch('agentvault_cli.commands.config.utils.display_info')
+    mock_key_manager_cls = mocker.patch('agentvault_cli.commands.config.key_manager.KeyManager')
+
+    mock_manager_instance = MagicMock()
+    # Simulate KeyManager init succeeding but use_keyring being False afterwards
+    mock_manager_instance.use_keyring = False
+    mock_manager_instance.set_oauth_creds_in_keyring = MagicMock()
+    mock_key_manager_cls.return_value = mock_manager_instance
+
+    # Disable capsys to potentially avoid the ValueError, but focus on asserting the mock call
+    with capsys.disabled():
+        result = await runner.invoke(
+            config_group,
+            ['set', 'nonfunc-oauth-service', '--oauth-configure'],
+            catch_exceptions=True # Catch the exit
+        )
+
+    # Assert the specific error message was displayed
+    mock_display_error.assert_any_call("Keyring support is not available or functional. Cannot securely store OAuth credentials.")
+    mock_display_info.assert_any_call("Hint: Check keyring documentation for backend setup or install 'keyrings.alt'.")
+    # Check the exception caught by the runner (should be SystemExit now)
+    assert isinstance(result.exception, SystemExit)
+    assert result.exception.code == 1
+    mock_manager_instance.set_oauth_creds_in_keyring.assert_not_called()
+
+# --- END ADDED TESTS ---

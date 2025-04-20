@@ -141,6 +141,10 @@ async def set_key(
         except click.exceptions.Abort: # Catch Abort from prompt confirmation mismatch
             utils.display_error("API key confirmation did not match. Aborted.")
             ctx.exit(1) # Keep exit here for Abort
+        # --- ADDED: Explicitly catch Exit to prevent generic handler ---
+        except click.exceptions.Exit as e:
+            raise e # Re-raise the Exit exception to terminate cleanly
+        # --- END ADDED ---
         except Exception as e:
             utils.display_error(f"An unexpected error occurred while setting API key in keyring: {e}")
             logger.exception("Unexpected error in config set --keyring") # Log traceback for debug
@@ -192,6 +196,10 @@ async def set_key(
         except click.exceptions.Abort: # Catch Abort from prompt confirmation mismatch
             utils.display_error("Client Secret confirmation did not match. Aborted.")
             ctx.exit(1) # Keep exit here for Abort
+        # --- ADDED: Explicitly catch Exit to prevent generic handler ---
+        except click.exceptions.Exit as e:
+            raise e # Re-raise the Exit exception to terminate cleanly
+        # --- END ADDED ---
         except Exception as e:
             utils.display_error(f"An unexpected error occurred while setting OAuth credentials: {e}")
             logger.exception("Unexpected error in config set --oauth-configure")
@@ -262,6 +270,10 @@ async def get_key(ctx: click.Context, service_id: str, show_key: bool, show_oaut
                  utils.display_info("    (Use --show-oauth-id to display Client ID)")
             # Note: Never display client secret here
 
+    # --- ADDED: Explicitly catch Exit to prevent generic handler ---
+    except click.exceptions.Exit as e:
+        raise e # Re-raise the Exit exception to terminate cleanly
+    # --- END ADDED ---
     except Exception as e:
         utils.display_error(f"An unexpected error occurred while getting credential source: {e}")
         logger.exception(f"Unexpected error in config get for service '{service_id}'")
@@ -323,6 +335,10 @@ async def list_keys(ctx: click.Context):
         utils.display_info("Credentials stored only in the OS keyring are typically loaded on demand and")
         utils.display_info("may not appear here unless accessed by 'config get' or an agent run.")
 
+    # --- ADDED: Explicitly catch Exit to prevent generic handler ---
+    except click.exceptions.Exit as e:
+        raise e # Re-raise the Exit exception to terminate cleanly
+    # --- END ADDED ---
     except Exception as e:
         utils.display_error(f"An unexpected error occurred while listing credential sources: {e}")
         logger.exception("Unexpected error in config list")
