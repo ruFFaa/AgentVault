@@ -1,198 +1,448 @@
 # AgentVault Use Cases & Scenarios
 
-The core [AgentVault Vision](vision.md) is to enable a future where diverse AI agents can collaborate securely and effectively. This page provides more concrete examples of complex workflows made possible or significantly easier by the AgentVault ecosystem and its foundational components.
+The core [AgentVault Vision](vision.md) is to enable a future where diverse AI agents can collaborate securely and effectively. This page provides concrete examples of complex workflows made possible or significantly easier by the AgentVault ecosystem and its foundational components.
 
-These scenarios illustrate how features like **standardized discovery (Registry)**, **secure interoperable communication (A2A Profile)**, **robust authentication (Auth Schemes & KeyManager)**, and **developer tooling (SDKs, Library)** come together.
+These scenarios illustrate how features like **standardized discovery (Registry)**, **secure interoperable communication (A2A Profile)**, **robust authentication (Auth Schemes & KeyManager)**, and **developer tooling (SDKs, Library)** come together to create powerful, automated solutions.
 
 ---
 
-## Scenario 1: Hyper-Personalized Concierge & Automated Life Management
+## Scenario 1: Hyper-Personalized Concierge & Life Management
 
-**The Goal:** An AI personal assistant that proactively manages complex tasks like travel planning by securely coordinating multiple specialized agents based on deep user preferences.
+**Goal:** An AI personal assistant that proactively manages complex tasks like travel planning by securely coordinating multiple specialized agents based on deep user preferences stored securely.
 
-**The Workflow:**
+**Workflow:**
 
-1.  **User Request:** The user tells their primary **Orchestrator Agent**, "Plan a relaxing weekend trip to Napa Valley next month for two people, budget under $1000. We want to visit 2-3 wineries known for excellent Cabernet Sauvignon, prefer boutique hotels with refundable rates, and need flights from SFO."
-2.  **Secure Context Retrieval:** The Orchestrator Agent authenticates (e.g., using OAuth2) with the user's **User Profile Agent**. This agent runs in a **TEE** and securely stores sensitive preferences. It only releases relevant, scoped information.
-3.  **Dynamic Discovery (Registry):** The Orchestrator queries the **AgentVault Registry** for agents with capabilities like `flights`, `hotels`, `wine-reviews`, `booking`.
-4.  **Parallel Task Delegation (A2A):** The Orchestrator tasks the discovered agents (`FlightSearchAgent`, `WineReviewAgent`, `HotelSearchAgent`) via A2A.
-5.  **Asynchronous Results & Streaming (A2A + SSE):** Agents respond, potentially streaming results (like flight options) via **SSE**.
-6.  **Synthesis & User Interaction:** The Orchestrator correlates information and presents synthesized options to the user.
-7.  **Secure Action Execution (A2A + Auth):** Upon user confirmation of an itinerary, the Orchestrator securely instructs the `HotelBookingAgent` (using its required auth scheme) to make the booking.
+1.  **User Request:** User asks their primary **Orchestrator Agent** to plan a trip with specific constraints (destination, budget, preferences).
+2.  **Secure Context:** Orchestrator authenticates (e.g., OAuth2) with the user's **Profile Agent** (running in a TEE) to retrieve relevant, scoped preferences.
+3.  **Discovery:** Orchestrator queries the **AgentVault Registry** for agents capable of `flights`, `hotels`, `activity-booking`, `reviews`.
+4.  **Task Delegation:** Orchestrator tasks discovered agents (`FlightSearchAgent`, `HotelSearchAgent`, etc.) via the **A2A protocol**. Authentication (e.g., API Key via KeyManager) is used for premium or booking agents.
+5.  **Results & Synthesis:** Agents return results (potentially streaming via SSE). Orchestrator synthesizes options.
+6.  **Action:** Upon user confirmation, Orchestrator securely instructs booking agents via A2A to finalize reservations.
 
 **Diagram:**
 
 ```mermaid
 graph TD
-    subgraph User Interaction
-        User -- Request --> Orchestrator(Orchestrator Agent)
-        Orchestrator -- Presents Options/Confirms --> User
+    %% Define styles
+    classDef supportGroup fill:#f3e5f5,stroke:#333,stroke-width:1px
+    classDef agentGroup fill:#e8f5e9,stroke:#333,stroke-width:1px
+    classDef registry fill:#ccf2ff,stroke:#333,stroke-width:2px,shape:cylinder
+    classDef agent fill:#e6ffcc,stroke:#333,stroke-width:1px
+    classDef authAgent fill:#ccf,stroke:#333,stroke-width:1px
+    classDef human fill:#f2f2f2,stroke:#333,stroke-width:1px
+    classDef autoPath fill:#c8e6c9,stroke:#4caf50,stroke-width:1px
+    classDef manualPath fill:#fff9c4,stroke:#fbc02d,stroke-width:1px
+    
+    subgraph SupportChannels["🎧 Support Channels"]
+        Helpdesk["🎫 Helpdesk System"]:::agent
+        User["👤 User"]:::human -- "Creates Ticket" --> Helpdesk
     end
-
-    subgraph Secure Profile
-        ProfileAgent[(User Profile Agent TEE)]
-        Orchestrator -- Auth & Request Prefs --> ProfileAgent
-        ProfileAgent -- Scoped Prefs --> Orchestrator
+    
+    subgraph AgentNetwork["🌐 Agent Network"]
+        Orchestrator["🧠 Support Orchestrator"]:::agent
+        Registry[("📚 AgentVault Registry")]:::registry
+        SentimentAgent["😊 Sentiment Analysis Agent"]:::agent
+        TopicAgent["🏷️ Topic Classification Agent"]:::agent
+        CRMAgent["👥 CRM Lookup Agent (Auth Req)"]:::authAgent
+        KBAgent["📚 Knowledge Base Agent"]:::agent
+        RoutingAgent["🔀 Routing Logic Agent"]:::agent
+        HelpdeskUpdateAgent["✏️ Helpdesk Update Agent (Auth Req)"]:::authAgent
     end
-
-    subgraph Agent Discovery
-        Registry[(AgentVault Registry)]
-        Orchestrator -- Query Agents --> Registry
-        Registry -- Agent Cards --> Orchestrator
-    end
-
-    subgraph Task Execution
-        FlightAgent(Flight Search Agent)
-        HotelAgent(Hotel Search Agent)
-        ReviewAgent(Wine Review Agent)
-        BookingAgent(Hotel Booking Agent)
-
-        Orchestrator -- Task: Find Flights --> FlightAgent
-        Orchestrator -- Task: Find Hotels --> HotelAgent
-        Orchestrator -- Task: Find Reviews --> ReviewAgent
-        FlightAgent -- Flight Options (SSE) --> Orchestrator
-        HotelAgent -- Hotel Options --> Orchestrator
-        ReviewAgent -- Winery List --> Orchestrator
-        Orchestrator -- Task: Book Hotel --> BookingAgent
-        BookingAgent -- Confirmation --> Orchestrator
-    end
-
-    Registry -- Provides Agent URLs/Auth --> Orchestrator
+    
+    %% Fixed missing arrow destination
+    Helpdesk -- "Trigger" --> Orchestrator
+    Orchestrator -- "1. New Ticket Data" --> Orchestrator
+    
+    Orchestrator -- "2. Find Agents" --> Registry
+    Registry -- "3. Agent Cards" --> Orchestrator
+    
+    Orchestrator -- "4. Task: Analyze Sentiment" --> SentimentAgent
+    Orchestrator -- "5. Task: Classify Topic" --> TopicAgent
+    Orchestrator -- "6. Task: Get Customer Info (Auth)" --> CRMAgent
+    SentimentAgent -- "7. Sentiment Score" --> Orchestrator
+    TopicAgent -- "8. Topic Labels" --> Orchestrator
+    CRMAgent -- "9. Customer History/Tier" --> Orchestrator
+    
+    Orchestrator -- "10. Task: Search KB (Topic, Content)" --> KBAgent
+    KBAgent -- "11. Potential Answer / No Match" --> Orchestrator
+    
+    %% Fixed the alt/else syntax by using a decision node
+    Orchestrator -- "12. Check KB Match" --> KBDecision{Good KB Match?}
+    
+    %% Automated reply path
+    KBDecision -- "Yes" --> HighConfidence[High Confidence KB Match]:::autoPath
+    HighConfidence -- "13a. Task: Send Auto-Reply (Auth)" --> HelpdeskUpdateAgent
+    HelpdeskUpdateAgent -- "14a. Updates" --> Helpdesk
+    
+    %% Manual routing path
+    KBDecision -- "No" --> LowConfidence[No KB Match / Low Confidence]:::manualPath
+    LowConfidence -- "13b. Task: Determine Route" --> RoutingAgent
+    RoutingAgent -- "14b. Recommended Queue" --> Orchestrator
+    Orchestrator -- "15b. Task: Assign Ticket (Auth)" --> HelpdeskUpdateAgent
+    HelpdeskUpdateAgent -- "16b. Updates" --> Helpdesk
 ```
 
-**How AgentVault Enables This:**
-
-*   **Registry:** Essential for discovering the specialized `FlightSearch`, `HotelSearch`, `WineReview`, and `Booking` agents dynamically.
-*   **A2A Protocol:** Provides the standard language for the Orchestrator to task diverse agents and receive structured results or streamed updates (SSE).
-*   **Auth Schemes & KeyManager:** Enables secure, standardized authentication between the Orchestrator, the sensitive User Profile Agent, and the transactional Booking Agent.
-*   **TEE Awareness:** Allows the User Profile Agent to declare its secure TEE status, increasing trust.
-*   **(Future) MCP:** Would allow richer context to be passed securely.
+**AgentVault Value:**
+*   **Discovery:** Dynamically finds specialized travel agents.
+*   **Interoperability:** Standard A2A ensures communication between diverse agents.
+*   **Security:** Manages authentication for profile access and booking actions via KeyManager & Auth Schemes. TEE declaration enhances trust.
 
 ---
 
 ## Scenario 2: Automated Scientific Discovery Pipeline
 
-**The Goal:** Accelerate research by automating the process of finding relevant studies, extracting key data, running complex simulations (potentially on secure hardware), analyzing results, and drafting reports.
+**Goal:** Accelerate research by automating the process of finding relevant studies, extracting key data, running complex simulations (potentially on secure hardware), analyzing results, and drafting reports.
 
-**The Workflow:**
+**Workflow:**
 
-1.  **Setup:** A researcher configures a **Pipeline Orchestrator Agent**.
-2.  **Literature Search (Discovery & A2A):** Orchestrator finds and tasks `PubMedSearchAgent` / `ArXivSearchAgent` via the **Registry** and **A2A**.
-3.  **Data Retrieval:** Search agents return paper identifiers/URLs.
-4.  **Information Extraction (A2A & Artifacts):** Orchestrator tasks `PDFDataExtractionAgent` with URLs. Agent returns structured data **Artifacts**.
-5.  **Simulation Setup (TEE & A2A):** Orchestrator finds `ProteinFoldingSimAgent` (declaring **TEE** support) via Registry. *(Future: Verifies attestation)*. Tasks agent via **A2A** with input data references.
-6.  **Secure Simulation:** Simulation Agent runs computation in TEE, returns result **Artifacts**.
-7.  **Analysis (A2A):** Orchestrator tasks `BioStatAnalysisAgent` with simulation results. Agent returns statistical summaries.
-8.  **Report Generation (A2A):** Orchestrator sends components to `DraftWriterAgent`, receives draft manuscript section.
+1.  **Setup:** Researcher configures a **Pipeline Orchestrator Agent**.
+2.  **Literature Search:** Orchestrator discovers (`Registry`) and tasks (`A2A`) `PubMedSearchAgent` / `ArXivSearchAgent`.
+3.  **Information Extraction:** Orchestrator tasks `PDFDataExtractionAgent` with URLs from search results. Agent returns structured data **Artifacts**.
+4.  **Simulation:** Orchestrator discovers `ProteinFoldingSimAgent` (declaring **TEE** support) via Registry. Tasks agent via **A2A** with input data artifacts.
+5.  **Analysis:** Orchestrator tasks `BioStatAnalysisAgent` with simulation result artifacts.
+6.  **Report Generation:** Orchestrator sends components to `DraftWriterAgent`.
 
 **Diagram:**
 
 ```mermaid
 graph TD
-    Researcher -- Configures --> Orchestrator(Pipeline Orchestrator)
-    Registry[(AgentVault Registry)]
-
-    Orchestrator -- Find Agents --> Registry
-
-    subgraph Literature Search
-        PubMed(PubMed Search Agent)
-        ArXiv(ArXiv Search Agent)
-        Orchestrator -- Search Keywords --> PubMed
-        Orchestrator -- Search Keywords --> ArXiv
-        PubMed -- Paper IDs/URLs --> Orchestrator
-        ArXiv -- Paper IDs/URLs --> Orchestrator
+    %% Define styles
+    classDef researcher fill:#f2f2f2,stroke:#333,stroke-width:1px
+    classDef orchestrator fill:#ffd6cc,stroke:#333,stroke-width:2px
+    classDef registry fill:#ccf2ff,stroke:#333,stroke-width:2px,shape:cylinder
+    classDef agent fill:#e6ffcc,stroke:#333,stroke-width:1px
+    classDef secureAgent fill:#f9f,stroke:#333,stroke-width:2px,stroke-dasharray:5 5
+    
+    Researcher["👩‍🔬 Researcher"]:::researcher -- "Configures" --> Orchestrator["🧠 Pipeline Orchestrator"]:::orchestrator
+    Registry[("📚 AgentVault Registry")]:::registry
+    
+    Orchestrator -- "1. Find Agents (search, extract, sim...)" --> Registry
+    Registry -- "2. Agent Cards" --> Orchestrator
+    
+    subgraph ResearchTasks["🔬 Research & Analysis Tasks"]
+        SearchAgent["🔎 Lit Search Agent"]:::agent
+        Extractor["📄 PDF Extract Agent"]:::agent
+        Simulator["⚙️ Simulation Agent (TEE)"]:::secureAgent
+        Analyzer["📊 Analysis Agent"]:::agent
+        Writer["📝 Draft Writer Agent"]:::agent
+        
+        Orchestrator -- "3. Task: Find Papers" --> SearchAgent
+        SearchAgent -- "4. Paper URLs/Refs" --> Orchestrator
+        Orchestrator -- "5. Task: Extract Data (URLs)" --> Extractor
+        Extractor -- "6. Data Artifacts" --> Orchestrator
+        Orchestrator -- "7. Task: Run Simulation (Data)" --> Simulator
+        Simulator -- "8. Result Artifacts" --> Orchestrator
+        Orchestrator -- "9. Task: Analyze Results" --> Analyzer
+        Analyzer -- "10. Analysis Summary" --> Orchestrator
+        Orchestrator -- "11. Task: Draft Report" --> Writer
+        Writer -- "12. Draft Section" --> Orchestrator
     end
-
-    %% Ensure processing starts *after* search results return to Orchestrator
-    Orchestrator --> DataProcessingStart(Start Data Processing)
-    DataProcessingStart -- URLs --> Extractor(PDF Data Extractor)
-
-    subgraph Data Processing & Analysis
-        Extractor -- Data Artifacts --> Orchestrator
-        Orchestrator -- Input Data --> Simulator[(Protein Sim Agent TEE)]
-        Simulator -- Result Artifacts --> Orchestrator
-        Orchestrator -- Results --> Analyzer(BioStat Analysis Agent)
-        Analyzer -- Analysis Summary --> Orchestrator
-        Orchestrator -- All Components --> Writer(Draft Writer Agent)
-        Writer -- Draft Section --> Orchestrator
-    end
-
-    Orchestrator -- Final Report --> Researcher
-
-    %% Link discovery to execution (implicit via Orchestrator)
-    Registry -- Provides Agent Info --> Orchestrator
+    
+    Orchestrator -- "13. Final Report" --> Researcher
 ```
 
-**How AgentVault Enables This:**
-
-*   **Registry:** Crucial for finding specialized scientific agents. Filtering by **TEE support** is key.
-*   **A2A Protocol:** Defines standard methods for tasking and retrieving complex results, including **Artifacts**.
-*   **Artifacts:** Provides a standard way to reference and exchange potentially large data files.
-*   **TEE Declaration:** Allows simulation agents to advertise their enhanced security posture.
-*   **Modularity:** Researchers can easily swap components found in the registry.
+**AgentVault Value:**
+*   **Discovery:** Finds specialized scientific agents, including filtering by TEE capability.
+*   **Interoperability:** Standard A2A allows complex pipeline construction.
+*   **Artifacts:** Enables exchange of large/complex data (simulation inputs/outputs).
+*   **TEE Declaration:** Allows secure compute agents to advertise their status.
 
 ---
 
-## Scenario 3: Decentralized & Resilient Smart Factory Monitoring
+## Scenario 3: Decentralized Smart Factory Monitoring & Control
 
-**The Goal:** Monitor and control factory floor equipment from various vendors in a resilient way, reducing reliance on a single central cloud and enabling faster local responses.
+**Goal:** Monitor and control factory floor equipment from various vendors in a resilient way, reducing reliance on a single central cloud and enabling faster local responses.
 
-**The Workflow:**
+**Workflow:**
 
-1.  **Local Deployment & Registration:** **Device Agents** (on edge hardware) register with a **local AgentVault Registry**.
-2.  **Local Monitoring (Discovery & SSE):** A local **Monitoring Agent** discovers relevant Device Agents via the local Registry and subscribes to data streams using `tasks/sendSubscribe` (**SSE**).
-3.  **Anomaly Detection & Alerting (A2A):** Monitoring Agent detects an anomaly, finds an `AlertingAgent` via Registry, and sends an alert message via **A2A**.
-4.  **Automated Response (Discovery & A2A + Auth):** Alerting Agent notifies humans *and* tasks a `ControlAgent` (or specific Device Agent capability) via **A2A** using required **Auth Scheme** (e.g., `apiKey`) managed by `KeyManager`.
-5.  **Resilience:** Local loops function even if external internet fails.
+1.  **Local Deployment:** **Device Agents** (wrapping sensors/actuators) register with a **local AgentVault Registry**.
+2.  **Monitoring:** A local **Monitoring Agent** discovers Device Agents via Registry and subscribes to data streams (`tasks/sendSubscribe` via **SSE**).
+3.  **Alerting:** Monitoring Agent detects an anomaly, finds an `AlertingAgent` via Registry, and sends an alert message via **A2A**.
+4.  **Response:** Alerting Agent notifies humans *and* tasks a `ControlAgent` (or specific Device Agent) via **A2A** using required **Auth Scheme** (e.g., `apiKey`) managed by `KeyManager`.
 
 **Diagram:**
 
 ```mermaid
 graph TD
-    subgraph Factory Floor Devices
-        SensorAgent[Temp Sensor Agent]
-        ActuatorAgent[Valve Actuator Agent]
-        MachineAgent[Machine Status Agent]
+    %% Define styles
+    classDef factoryGroup fill:#fff3e0,stroke:#333,stroke-width:1px
+    classDef controlGroup fill:#e3f2fd,stroke:#333,stroke-width:1px
+    classDef agent fill:#e6ffcc,stroke:#333,stroke-width:1px
+    classDef registry fill:#ccf2ff,stroke:#333,stroke-width:2px,shape:cylinder
+    classDef authAgent fill:#ccf,stroke:#333,stroke-width:1px
+    classDef human fill:#f2f2f2,stroke:#333,stroke-width:1px
+    
+    subgraph FactoryFloor["🏭 Factory Floor (Edge)"]
+        SensorAgent["🌡️ Temp Sensor Agent"]:::agent
+        ActuatorAgent["🔧 Valve Actuator Agent (Auth Req)"]:::authAgent
+        MachineAgent["⚙️ Machine Status Agent"]:::agent
     end
-
-    subgraph Local Network Services
-        LocalRegistry[(Local AgentVault Registry)]
-        MonitorAgent(Monitoring Agent)
-        AlertAgent(Alerting Agent)
-        ControlAgent(Control Agent)
-        Supervisor(Human Supervisor)
+    
+    subgraph ControlNetwork["🌐 Local Control Network"]
+        LocalRegistry[("📚 Local Registry")]:::registry
+        MonitorAgent["👁️ Monitoring Agent"]:::agent
+        AlertAgent["🚨 Alerting Agent"]:::agent
+        ControlAgent["🎮 Control Agent"]:::agent
+        Supervisor["👨‍💼 Human Supervisor"]:::human
     end
-
-    %% Registration
-    SensorAgent -- Register --> LocalRegistry
-    ActuatorAgent -- Register --> LocalRegistry
-    MachineAgent -- Register --> LocalRegistry
-    AlertAgent -- Register --> LocalRegistry
-    ControlAgent -- Register --> LocalRegistry
-
-    %% Monitoring Flow
-    MonitorAgent -- Discover Sensors --> LocalRegistry
-    SensorAgent -- Temp Data (SSE) --> MonitorAgent
-    MachineAgent -- Status Data (SSE) --> MonitorAgent
-
-    %% Alerting & Control Flow
-    MonitorAgent -- Anomaly Detected --> AlertAgent
-    AlertAgent -- Notify --> Supervisor
-    AlertAgent -- Discover Control --> LocalRegistry
-    AlertAgent -- Trigger Action --> ControlAgent
-    ControlAgent -- Discover Actuator --> LocalRegistry
-    ControlAgent -- Send Command (Auth) --> ActuatorAgent
-
+    
+    %% Registration flow
+    SensorAgent -- "Register" --> LocalRegistry
+    ActuatorAgent -- "Register" --> LocalRegistry
+    MachineAgent -- "Register" --> LocalRegistry
+    AlertAgent -- "Register" --> LocalRegistry
+    ControlAgent -- "Register" --> LocalRegistry
+    
+    %% Monitoring flow
+    MonitorAgent -- "1. Discover Sensors" --> LocalRegistry
+    SensorAgent -- "2. Temp Data (SSE)" --> MonitorAgent
+    MachineAgent -- "3. Status Data (SSE)" --> MonitorAgent
+    
+    %% Alert and response flow
+    MonitorAgent -- "4. Anomaly Detected!" --> AlertAgent
+    AlertAgent -- "5. Notify Supervisor" --> Supervisor
+    AlertAgent -- "6. Find Control Agent" --> LocalRegistry
+    AlertAgent -- "7. Trigger Action" --> ControlAgent
+    ControlAgent -- "8. Find Actuator" --> LocalRegistry
+    ControlAgent -- "9. Send Command (Auth)" --> ActuatorAgent
 ```
 
-**How AgentVault Enables This:**
-
-*   **Local Registry:** Enables discovery and coordination within a private network.
-*   **Standardized A2A:** Allows heterogeneous devices (wrapped as agents) to communicate.
-*   **SSE Streaming:** Enables efficient real-time monitoring.
-*   **Auth Schemes & KeyManager:** Secures control commands locally.
-*   **Decentralization:** Facilitates a more resilient architecture.
+**AgentVault Value:**
+*   **Decentralization:** Enables local discovery and communication via a local Registry.
+*   **Interoperability:** Standard A2A connects heterogeneous devices/agents.
+*   **Real-time Data:** SSE facilitates efficient monitoring streams.
+*   **Security:** Secures control commands locally via Auth Schemes & KeyManager.
 
 ---
 
-These scenarios illustrate how AgentVault's focus on discovery, standardized communication, security, and developer tooling provides the necessary foundation for building sophisticated, collaborative multi-agent systems in diverse domains.
+## Scenario 4: Automated CRM Lead Enrichment
+
+**Goal:** Automatically enrich new CRM leads with verified external data (LinkedIn, company info, contact validation) to accelerate sales qualification and improve data quality.
+
+**Workflow:**
+
+1.  **Trigger:** A new lead is created in the **CRM**.
+2.  **Orchestration:** A **CRM Orchestrator Agent** is triggered.
+3.  **Discovery:** Orchestrator queries the **AgentVault Registry** for agents tagged `enrichment`, `linkedin`, `firmographics`, `validation`.
+4.  **Task Delegation (A2A):** Orchestrator tasks the discovered agents (`LinkedIn Enricher`, `Firmographics Agent`, `Contact Validator`) via A2A, using appropriate authentication (API Keys via `KeyManager`) for premium data sources.
+5.  **Data Aggregation:** Orchestrator receives structured results (profile URLs, company size, email validity) potentially as **Artifacts** or direct results.
+6.  **CRM Update:** Orchestrator updates the lead record in the **CRM** with the enriched data.
+
+**Diagram:**
+
+```mermaid
+graph TD
+    %% Define styles
+    classDef crmGroup fill:#ffebee,stroke:#333,stroke-width:1px
+    classDef agentGroup fill:#e8f5e9,stroke:#333,stroke-width:1px
+    classDef registry fill:#ccf2ff,stroke:#333,stroke-width:2px,shape:cylinder
+    classDef agent fill:#e6ffcc,stroke:#333,stroke-width:1px
+    classDef authAgent fill:#ccf,stroke:#333,stroke-width:1px
+    classDef human fill:#f2f2f2,stroke:#333,stroke-width:1px
+    
+    subgraph CRMSystem["💼 CRM System"]
+        CRM["📊 CRM Platform"]:::agent
+        User["👩‍💼 Sales Rep"]:::human --> CRM
+        CRM -- "Creates Lead" --> Trigger["🔔 Webhook/Trigger"]:::agent
+    end
+    
+    subgraph AgentNetwork["🌐 Agent Network"]
+        Orchestrator["🧠 CRM Orchestrator Agent"]:::agent
+        Registry[("📚 AgentVault Registry")]:::registry
+        LinkedInAgent["🔗 LinkedIn Enricher (Auth Req)"]:::authAgent
+        FirmographicsAgent["🏢 Firmographics Agent (Auth Req)"]:::authAgent
+        ValidatorAgent["✓ Contact Validator"]:::agent
+    end
+    
+    %% Fixed the syntax error in this flow
+    Trigger --> Orchestrator
+    Orchestrator -- "1. Enrich Lead Request" --> Orchestrator
+    
+    Orchestrator -- "2. Find Agents (linkedin, firmographics...)" --> Registry
+    Registry -- "3. Agent Cards (URLs, Auth)" --> Orchestrator
+    
+    Orchestrator -- "4. Task: Find Profile (Auth)" --> LinkedInAgent
+    Orchestrator -- "5. Task: Get Firmographics (Auth)" --> FirmographicsAgent
+    Orchestrator -- "6. Task: Validate Email" --> ValidatorAgent
+    
+    LinkedInAgent -- "7. Profile URL Result" --> Orchestrator
+    FirmographicsAgent -- "8. Company Data Result" --> Orchestrator
+    ValidatorAgent -- "9. Validation Result" --> Orchestrator
+    
+    Orchestrator -- "10. Synthesize Data" --> Orchestrator
+    Orchestrator -- "11. Update CRM Record" --> CRM
+```
+
+**AgentVault Value:**
+*   **Modularity:** Easily find and swap enrichment agents via the Registry.
+*   **Standardization:** A2A protocol simplifies interaction with diverse data providers.
+*   **Security:** KeyManager handles API keys for premium enrichment services securely.
+*   **Automation:** Reduces manual data entry and improves lead quality efficiently.
+
+---
+
+## Scenario 5: Automated Order Processing & Fulfillment (ERP Integration)
+
+**Goal:** Streamline order fulfillment by automating inventory checks, shipping label generation, billing updates, and CRM notifications when a new order is placed.
+
+**Workflow:**
+
+1.  **Trigger:** New order received in **E-commerce Platform**.
+2.  **Orchestration:** **Order Processing Agent** is triggered.
+3.  **Inventory Check (A2A):** Orchestrator tasks `Inventory Agent` (connected to ERP/WMS) via A2A.
+4.  **Shipping Label (A2A + Auth):** If stock confirmed, Orchestrator discovers (`Registry`) and tasks `Shipping Label Agent` (e.g., ShipStation, EasyPost wrapper) using required API Key (`KeyManager`). Agent returns label data **Artifact**.
+5.  **Billing (A2A):** Orchestrator tasks `Billing Agent` to generate invoice in ERP/Accounting system.
+6.  **CRM Update (A2A):** Orchestrator tasks `CRM Update Agent` to log order status against customer record.
+7.  **Notification:** Orchestrator notifies E-commerce platform/user of completion.
+
+**Diagram:**
+
+```mermaid
+graph TD
+    %% Define styles
+    classDef systemsGroup fill:#fff8e1,stroke:#333,stroke-width:1px
+    classDef agentGroup fill:#e1f5fe,stroke:#333,stroke-width:1px
+    classDef registry fill:#ccf2ff,stroke:#333,stroke-width:2px,shape:cylinder
+    classDef agent fill:#e6ffcc,stroke:#333,stroke-width:1px
+    classDef authAgent fill:#ccf,stroke:#333,stroke-width:1px
+    classDef successPath fill:#c8e6c9,stroke:#4caf50,stroke-width:1px
+    classDef errorPath fill:#ffcdd2,stroke:#f44336,stroke-width:1px
+    
+    subgraph SalesSystems["🛒 Sales & Fulfillment Systems"]
+        Ecommerce["🛍️ E-commerce Platform"]:::agent --> OrderAgent["📦 Order Processing Agent"]:::agent
+        ERP["💻 ERP / WMS / Accounting"]:::agent
+        ShippingAPI["🚚 Shipping Provider API"]:::agent
+        CRM["👥 CRM System"]:::agent
+    end
+    
+    subgraph AgentNetwork["🌐 Agent Network"]
+        Registry[("📚 AgentVault Registry")]:::registry
+        InventoryAgent["🔢 Inventory Agent"]:::agent
+        ShippingAgent["🏷️ Shipping Label Agent (Auth Req)"]:::authAgent
+        BillingAgent["💰 Billing Agent"]:::agent
+        CRMUpdateAgent["📝 CRM Update Agent"]:::agent
+    end
+    
+    OrderAgent -- "1. Find Agents" --> Registry
+    Registry -- "2. Agent Cards" --> OrderAgent
+    
+    OrderAgent -- "3. Task: Check Stock (SKU)" --> InventoryAgent
+    InventoryAgent -- "Connects" --> ERP
+    InventoryAgent -- "4. Stock Status" --> OrderAgent
+    
+    %% Fixed the alt/else syntax by using a decision node
+    OrderAgent -- "5. Check Availability" --> StockDecision{Stock Available?}
+    
+    %% Success path - stock available
+    StockDecision -- "Yes" --> StockAvailable[Stock Available]:::successPath
+    StockAvailable -- "6a. Task: Create Label (Auth)" --> ShippingAgent
+    ShippingAgent -- "Connects" --> ShippingAPI
+    ShippingAgent -- "7a. Label Artifact/Tracking" --> OrderAgent
+    OrderAgent -- "8a. Task: Create Invoice" --> BillingAgent
+    BillingAgent -- "Connects" --> ERP
+    BillingAgent -- "9a. Invoice Created" --> OrderAgent
+    OrderAgent -- "10a. Task: Update Order Status" --> CRMUpdateAgent
+    CRMUpdateAgent -- "Connects" --> CRM
+    CRMUpdateAgent -- "11a. Status Updated" --> OrderAgent
+    OrderAgent -- "12a. Notify Fulfillment Complete" --> Ecommerce
+    
+    %% Error path - stock unavailable
+    StockDecision -- "No" --> StockUnavailable[Stock Unavailable]:::errorPath
+    StockUnavailable -- "6b. Notify Backorder/Issue" --> OrderAgent
+    OrderAgent -- "7b. Update Status" --> Ecommerce
+```
+
+**AgentVault Value:**
+*   **Process Automation:** Connects disparate systems (E-commerce, ERP, Shipping, CRM) via standardized agents.
+*   **Interoperability:** A2A allows communication between custom internal agents (Inventory, Billing) and external service wrappers (Shipping).
+*   **Security:** Securely manages API keys for external services like shipping providers.
+*   **Flexibility:** Easily replace the Shipping Label Agent if switching providers, without changing the Orchestrator significantly.
+
+---
+
+## Scenario 6: Intelligent Customer Support Ticket Routing
+
+**Goal:** Improve customer support efficiency by automatically analyzing incoming tickets, enriching them with context, and routing them to the best-suited queue or agent, potentially providing automated answers for common issues.
+
+**Workflow:**
+
+1.  **Trigger:** New support ticket created in **Helpdesk System**.
+2.  **Orchestration:** **Support Orchestrator Agent** is triggered.
+3.  **Initial Analysis (A2A):** Orchestrator tasks `SentimentAnalysisAgent` and `TopicClassificationAgent` via A2A.
+4.  **Context Enrichment (Discovery & A2A):** Orchestrator discovers (`Registry`) and tasks `CRMLookupAgent` (using auth via `KeyManager`) to fetch customer history/details based on ticket submitter's email.
+5.  **Knowledge Base Check (A2A):** Orchestrator tasks `KnowledgeBaseSearchAgent` with classified topic and ticket content.
+6.  **Decision & Routing:**
+    *   If KB Agent finds a high-confidence answer, Orchestrator sends automated reply via `HelpdeskUpdateAgent`.
+    *   If no KB match, Orchestrator uses sentiment, topic, and customer context to task `RoutingAgent` to assign the ticket to the appropriate human support queue (e.g., Tier 1, Billing, Technical) via `HelpdeskUpdateAgent`.
+
+**Diagram:**
+
+```mermaid
+graph TD
+    %% Define styles
+    classDef supportGroup fill:#f3e5f5,stroke:#333,stroke-width:1px
+    classDef agentGroup fill:#e8f5e9,stroke:#333,stroke-width:1px
+    classDef registry fill:#ccf2ff,stroke:#333,stroke-width:2px,shape:cylinder
+    classDef agent fill:#e6ffcc,stroke:#333,stroke-width:1px
+    classDef authAgent fill:#ccf,stroke:#333,stroke-width:1px
+    classDef human fill:#f2f2f2,stroke:#333,stroke-width:1px
+    classDef autoPath fill:#c8e6c9,stroke:#4caf50,stroke-width:1px
+    classDef manualPath fill:#fff9c4,stroke:#fbc02d,stroke-width:1px
+    
+    subgraph SupportChannels["🎧 Support Channels"]
+        Helpdesk["🎫 Helpdesk System"]:::agent
+        User["👤 User"]:::human -- "Creates Ticket" --> Helpdesk
+    end
+    
+    subgraph AgentNetwork["🌐 Agent Network"]
+        Orchestrator["🧠 Support Orchestrator"]:::agent
+        Registry[("📚 AgentVault Registry")]:::registry
+        SentimentAgent["😊 Sentiment Analysis Agent"]:::agent
+        TopicAgent["🏷️ Topic Classification Agent"]:::agent
+        CRMAgent["👥 CRM Lookup Agent (Auth Req)"]:::authAgent
+        KBAgent["📚 Knowledge Base Agent"]:::agent
+        RoutingAgent["🔀 Routing Logic Agent"]:::agent
+        HelpdeskUpdateAgent["✏️ Helpdesk Update Agent (Auth Req)"]:::authAgent
+    end
+    
+    %% Fixed missing arrow destination
+    Helpdesk -- "Trigger" --> Orchestrator
+    Orchestrator -- "1. New Ticket Data" --> Orchestrator
+    
+    Orchestrator -- "2. Find Agents" --> Registry
+    Registry -- "3. Agent Cards" --> Orchestrator
+    
+    Orchestrator -- "4. Task: Analyze Sentiment" --> SentimentAgent
+    Orchestrator -- "5. Task: Classify Topic" --> TopicAgent
+    Orchestrator -- "6. Task: Get Customer Info (Auth)" --> CRMAgent
+    SentimentAgent -- "7. Sentiment Score" --> Orchestrator
+    TopicAgent -- "8. Topic Labels" --> Orchestrator
+    CRMAgent -- "9. Customer History/Tier" --> Orchestrator
+    
+    Orchestrator -- "10. Task: Search KB (Topic, Content)" --> KBAgent
+    KBAgent -- "11. Potential Answer / No Match" --> Orchestrator
+    
+    %% Fixed the alt/else syntax by using a decision node
+    Orchestrator -- "12. Check KB Match" --> KBDecision{Good KB Match?}
+    
+    %% Automated reply path
+    KBDecision -- "Yes" --> HighConfidence[High Confidence KB Match]:::autoPath
+    HighConfidence -- "13a. Task: Send Auto-Reply (Auth)" --> HelpdeskUpdateAgent
+    HelpdeskUpdateAgent -- "14a. Updates" --> Helpdesk
+    
+    %% Manual routing path
+    KBDecision -- "No" --> LowConfidence[No KB Match / Low Confidence]:::manualPath
+    LowConfidence -- "13b. Task: Determine Route" --> RoutingAgent
+    RoutingAgent -- "14b. Recommended Queue" --> Orchestrator
+    Orchestrator -- "15b. Task: Assign Ticket (Auth)" --> HelpdeskUpdateAgent
+    HelpdeskUpdateAgent -- "16b. Updates" --> Helpdesk
+```
+
+**AgentVault Value:**
+*   **Workflow Orchestration:** Enables complex, multi-step support workflows involving analysis, enrichment, and action.
+*   **Specialization:** Allows using best-of-breed agents for sentiment, classification, KB search, etc.
+*   **Secure Data Access:** Protects access to CRM and Helpdesk systems via authenticated agents.
+*   **Efficiency:** Automates common tasks and routes complex issues effectively, reducing manual triage and resolution time.
+
+---
+#

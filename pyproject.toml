@@ -1,5 +1,3 @@
-# D:\AgentVault\pyproject.toml
-
 [tool.poetry]
 name = "agentvault-monorepo"
 version = "0.1.0" # Overall project version
@@ -54,8 +52,12 @@ pytest-mock = ">=3.12,<4.0" # Needed by library, cli
 respx = ">=0.20,<0.21" # Needed by library, testing-utils
 pytest-httpx = ">=0.28.0,<0.29.0" # Needed by CLI (Requires httpx 0.26.*)
 freezegun = ">=1.1.0" # Needed by server-sdk
-# --- ADDED: Dependency for compile script ---
 pathspec = ">=0.12.1,<0.13.0" # For .gitignore parsing in compile script
+# --- ADDED: MkDocs Dependencies ---
+mkdocs = ">=1.5.0,<2.0.0"
+mkdocs-material = ">=9.0.0,<10.0.0"
+# --- END ADDED ---
+
 
 # --- Extras (Keep keyring optionality) ---
 [tool.poetry.extras]
