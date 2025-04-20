@@ -36,6 +36,12 @@ from agentvault.exceptions import (
 from agentvault.key_manager import KeyManager
 # Import MCP Utils
 from agentvault.mcp_utils import format_mcp_context
+# --- ADDED: Import respx for type hinting in _make_request ---
+try:
+    import respx
+except ImportError:
+    respx = None # type: ignore
+# --- END ADDED ---
 
 
 logger = logging.getLogger(__name__)
@@ -257,9 +263,11 @@ class AgentVaultClient:
                         raise A2ARemoteAgentError(message=f"SSE error event received: {err_msg}", response_body=event_data)
 
                     event_model = SSE_EVENT_TYPE_MAP.get(event_type)
+                    # --- MODIFIED: Add continue if event_model is None ---
                     if not event_model:
                         logger.warning(f"Received unknown SSE event type: '{event_type}'. Data: {event_data}")
-                        continue
+                        continue # Skip unknown event types
+                    # --- END MODIFIED ---
 
                     try:
                         validated_event = event_model.model_validate(event_data)
@@ -429,21 +437,27 @@ class AgentVaultClient:
                                 logger.debug(f"Yielding parsed data: {parsed_data}")
                                 # --- ADDED: Try/Except around yield ---
                                 try:
-                                    yield {"event_type": event_type, "data": parsed_data} # Yield parsed data
+                                    # --- MODIFIED: Check event type BEFORE yielding ---
+                                    if event_type == "error":
+                                        logger.error(f"Received SSE error event from agent: {parsed_data}")
+                                        # Optionally raise A2ARemoteAgentError here, or just yield the error dict
+                                        yield {"event_type": event_type, "data": parsed_data}
+                                    elif event_type in SSE_EVENT_TYPE_MAP:
+                                        yield {"event_type": event_type, "data": parsed_data} # Yield parsed data
+                                    else:
+                                        logger.warning(f"Ignoring unknown SSE event type before yield: '{event_type}'. Data: {parsed_data}")
+                                        # Do not yield unknown types
+                                    # --- END MODIFIED ---
+                                # --- MODIFIED: Correctly re-raise as A2AError ---
                                 except Exception as yield_err:
                                     logger.error(f"Error yielding parsed SSE event (type: {event_type}, data: {parsed_data}): {yield_err}", exc_info=True)
                                     raise A2AError(f"Error processing received event: {yield_err}") from yield_err
-                                # --- END ADDED ---
+                                # --- END MODIFIED ---
                                 processed_event_count += 1
                             except json.JSONDecodeError as e:
                                 logger.error(f"Failed to decode JSON data for SSE event type '{event_type}': {e}. Data: {full_data_str[:200]}...")
                                 # Raise specific error to be caught by outer A2AError handler
                                 raise A2AMessageError(f"Invalid JSON in SSE data for event '{event_type}'") from e
-                            # --- REMOVED: Catch other potential errors during yield/processing (moved inside yield try/except) ---
-                            # except Exception as e:
-                            #     logger.error(f"Error yielding parsed SSE event (type: {event_type}, data: {parsed_data}): {e}", exc_info=True)
-                            #     raise A2AError(f"Error processing received event: {e}") from e
-                            # --- END REMOVED ---
 
                         data_lines = []
                         current_event_type = None
@@ -484,7 +498,15 @@ class AgentVaultClient:
                  event_type = current_event_type or "message"; full_data_str = '\n'.join(data_lines)
                  try:
                      parsed_data = json.loads(full_data_str)
-                     yield {"event_type": event_type, "data": parsed_data};
+                     # --- MODIFIED: Check event type BEFORE yielding ---
+                     if event_type == "error":
+                         logger.error(f"Received final SSE error event from agent: {parsed_data}")
+                         yield {"event_type": event_type, "data": parsed_data}
+                     elif event_type in SSE_EVENT_TYPE_MAP:
+                         yield {"event_type": event_type, "data": parsed_data};
+                     else:
+                          logger.warning(f"Ignoring unknown final SSE event type: '{event_type}'. Data: {parsed_data}")
+                     # --- END MODIFIED ---
                      processed_event_count += 1
                  except json.JSONDecodeError as e: logger.error(f"Failed to decode JSON data for final SSE event type '{event_type}': {e}. Data: {full_data_str[:200]}...")
 
