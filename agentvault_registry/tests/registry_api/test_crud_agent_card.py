@@ -1,331 +1,460 @@
 import pytest
 import uuid
 import datetime
+import logging
 from typing import List, Optional, Dict, Any, Tuple
 from unittest.mock import patch, MagicMock, AsyncMock, ANY, call, create_autospec
 
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, AsyncResult, AsyncScalarResult
+# Keep base imports needed for context
+from sqlalchemy import select, func
 
+# Import components to test
 from agentvault_registry.crud import agent_card as agent_card_crud
 from agentvault_registry import models, schemas
 
-# --- Create mock_agent_card fixture since it's missing ---
+# Import core library model for validation mocking
+try:
+    from agentvault import AgentCard as AgentCardModel
+    from pydantic import ValidationError as PydanticValidationError
+    _AGENTVAULT_LIB_AVAILABLE = True
+except ImportError:
+    AgentCardModel = None # type: ignore
+    PydanticValidationError = None # type: ignore
+    _AGENTVAULT_LIB_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
+
+# --- Fixtures ---
+
 @pytest.fixture
-def mock_agent_card(mock_agent_card_db_object, mock_developer):
-    """Create a mock agent card from the DB object, with developer relation."""
-    # Use the mock_agent_card_db_object that already exists
-    mock_agent_card_db_object.developer = mock_developer
-    return mock_agent_card_db_object
+def mock_db_session() -> AsyncMock:
+    """Provides a mock SQLAlchemy AsyncSession."""
+    session_mock = AsyncMock(spec=AsyncSession)
+    session_mock.commit = AsyncMock()
+    session_mock.refresh = AsyncMock()
+    session_mock.rollback = AsyncMock()
+    session_mock.add = MagicMock()
+    session_mock.execute = AsyncMock()
+    session_mock.get = AsyncMock()
+    return session_mock
 
-# --- Tests for AgentCard CRUD ---
+@pytest.fixture
+def mock_developer() -> models.Developer:
+    """Provides a mock Developer ORM model."""
+    return models.Developer(
+        id=1,
+        name="Test Dev CRUD",
+        email="crud@example.com",
+        hashed_password="hashed_password",
+        is_verified=True,
+        created_at=datetime.datetime.now(datetime.timezone.utc),
+        updated_at=datetime.datetime.now(datetime.timezone.utc)
+    )
+
+@pytest.fixture
+def mock_agent_card_orm(mock_developer: models.Developer) -> models.AgentCard:
+    """Provides a mock AgentCard ORM model instance."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    card_data = {
+        "schemaVersion": "1.0", "humanReadableId": "test-dev/crud-agent", "agentVersion": "1.0",
+        "name": "CRUD Test Agent", "description": "Agent for CRUD tests", "url": "http://crud.test/a2a",
+        "provider": {"name": mock_developer.name}, "capabilities": {"a2aVersion": "1.0", "teeDetails": {"type": "TestTEE"}},
+        "authSchemes": [{"scheme": "none"}], "tags": ["crud", "test", "tee"]
+    }
+    return models.AgentCard(
+        id=uuid.uuid4(),
+        developer_id=mock_developer.id,
+        card_data=card_data,
+        name=card_data["name"],
+        description=card_data["description"],
+        is_active=True,
+        created_at=now,
+        updated_at=now,
+        developer=mock_developer # Include the relationship
+    )
+
+# --- Helper to mock SQLAlchemy execute result chain ---
+def mock_execute_result(return_value: Optional[Any] = None, is_scalar: bool = True, return_all: Optional[List[Any]] = None):
+    """Creates mocks for session.execute().scalars().all() or scalar_one_or_none()."""
+    mock_scalar_result = MagicMock(spec=AsyncScalarResult)
+    if is_scalar:
+        mock_scalar_result.scalar_one_or_none = MagicMock(return_value=return_value)
+        mock_scalar_result.all = MagicMock(side_effect=RuntimeError("Should not call all() when scalar expected"))
+    else:
+        mock_scalar_result.all = MagicMock(return_value=return_all if return_all is not None else [])
+        mock_scalar_result.scalar_one_or_none = MagicMock(side_effect=RuntimeError("Should not call scalar_one_or_none() when all() expected"))
+
+    mock_async_result = AsyncMock(spec=AsyncResult)
+    mock_async_result.scalars = MagicMock(return_value=mock_scalar_result)
+    mock_async_result.scalar_one_or_none = MagicMock(return_value=return_value if is_scalar else None)
+
+    return mock_async_result
+
+# --- Test get_agent_card ---
 
 @pytest.mark.asyncio
+@patch("agentvault_registry.crud.agent_card.os.environ.get", return_value="false") # Disable placeholders
 async def test_get_agent_card_success(
-    mock_db_session: AsyncMock,
-    mock_agent_card_db_object  # Use the fixture that exists
+    mock_environ_get, mock_db_session: AsyncMock, mock_agent_card_orm: models.AgentCard
 ):
-    """Simplified test for retrieving an agent card by ID."""
-    # Add direct mocking to return the mock card
-    async def simplified_get_card(db, card_id):
-        return mock_agent_card_db_object
-        
-    # Patch the function directly
-    with patch('agentvault_registry.crud.agent_card.get_agent_card', 
-              simplified_get_card):
-        # Call with test ID
-        test_id = mock_agent_card_db_object.id
-        
-        # Call the function
-        retrieved_card = await agent_card_crud.get_agent_card(db=mock_db_session, card_id=test_id)
-        
-        # Assert results
-        assert retrieved_card is mock_agent_card_db_object
+    """Test successfully retrieving an agent card by ID."""
+    test_id = mock_agent_card_orm.id
+    mock_db_session.execute.return_value = mock_execute_result(mock_agent_card_orm, is_scalar=True)
+
+    retrieved_card = await agent_card_crud.get_agent_card(db=mock_db_session, card_id=test_id)
+
+    assert retrieved_card is mock_agent_card_orm
+    mock_db_session.execute.assert_awaited_once()
+    # We trust the function builds the correct query and check execute was called
 
 @pytest.mark.asyncio
-async def test_get_agent_card_not_found(mock_db_session: AsyncMock):
+@patch("agentvault_registry.crud.agent_card.os.environ.get", return_value="false")
+async def test_get_agent_card_not_found(mock_environ_get, mock_db_session: AsyncMock):
     """Test retrieving an agent card that doesn't exist."""
     test_id = uuid.uuid4()
-    
-    # Create a simplified version that always returns None
-    async def simplified_get_card_not_found(db, card_id):
-        return None
-        
-    # Patch the function directly
-    with patch('agentvault_registry.crud.agent_card.get_agent_card', 
-              simplified_get_card_not_found):
-        
-        # Call the function
+    mock_db_session.execute.return_value = mock_execute_result(None, is_scalar=True)
+
+    retrieved_card = await agent_card_crud.get_agent_card(db=mock_db_session, card_id=test_id)
+
+    assert retrieved_card is None
+    mock_db_session.execute.assert_awaited_once()
+
+@pytest.mark.asyncio
+@patch("agentvault_registry.crud.agent_card.os.environ.get", return_value="false")
+async def test_get_agent_card_db_error(mock_environ_get, mock_db_session: AsyncMock, caplog):
+    """Test database error during get_agent_card."""
+    test_id = uuid.uuid4()
+    mock_db_session.execute.side_effect = SQLAlchemyError("DB connection failed")
+
+    with caplog.at_level(logging.ERROR):
         retrieved_card = await agent_card_crud.get_agent_card(db=mock_db_session, card_id=test_id)
-        
-        # Assert the results
-        assert retrieved_card is None
+
+    assert retrieved_card is None
+    assert f"Error fetching Agent Card {test_id}" in caplog.text
+    mock_db_session.execute.assert_awaited_once()
+
+# --- Test get_agent_card_by_human_readable_id ---
 
 @pytest.mark.asyncio
-async def test_get_agent_card_by_human_readable_id_success(
-    mock_db_session: AsyncMock,
-    mock_agent_card_db_object  # Use the fixture that exists
+@patch("agentvault_registry.crud.agent_card.os.environ.get", return_value="false")
+async def test_get_agent_card_by_human_id_success(
+    mock_environ_get, mock_db_session: AsyncMock, mock_agent_card_orm: models.AgentCard
 ):
-    """Simplified test for retrieving an agent card by human readable ID."""
-    # Add direct mocking to return the mock card
-    async def simplified_get_by_human_id(db, human_readable_id):
-        return mock_agent_card_db_object
-        
-    # Patch the function directly
-    with patch('agentvault_registry.crud.agent_card.get_agent_card_by_human_readable_id', 
-              simplified_get_by_human_id):
-        # Call with test human ID
-        human_id = "test/agent"
-        
-        # Call the function
-        retrieved_card = await agent_card_crud.get_agent_card_by_human_readable_id(
-            db=mock_db_session, human_readable_id=human_id
-        )
-        
-        # Assert results
-        assert retrieved_card is mock_agent_card_db_object
+    """Test successfully retrieving an agent card by humanReadableId."""
+    human_id = mock_agent_card_orm.card_data["humanReadableId"]
+    mock_db_session.execute.return_value = mock_execute_result(mock_agent_card_orm, is_scalar=True)
+
+    retrieved_card = await agent_card_crud.get_agent_card_by_human_readable_id(db=mock_db_session, human_readable_id=human_id)
+
+    assert retrieved_card is mock_agent_card_orm
+    mock_db_session.execute.assert_awaited_once()
+    # We trust the function builds the correct query and check execute was called
 
 @pytest.mark.asyncio
-async def test_get_agent_card_by_human_readable_id_not_found(mock_db_session: AsyncMock):
-    """Simplified test for retrieving an agent card by human readable ID that doesn't exist."""
-    # Add direct mocking to return None
-    async def simplified_get_by_human_id_not_found(db, human_readable_id):
-        return None
-        
-    # Patch the function directly
-    with patch('agentvault_registry.crud.agent_card.get_agent_card_by_human_readable_id', 
-              simplified_get_by_human_id_not_found):
-        # Call with test human ID
-        human_id = "nonexistent/id"
-        
-        # Call the function
-        retrieved_card = await agent_card_crud.get_agent_card_by_human_readable_id(
-            db=mock_db_session, human_readable_id=human_id
-        )
-        
-        # Assert results
-        assert retrieved_card is None
+@patch("agentvault_registry.crud.agent_card.os.environ.get", return_value="false")
+async def test_get_agent_card_by_human_id_not_found(mock_environ_get, mock_db_session: AsyncMock):
+    """Test retrieving by humanReadableId when not found."""
+    human_id = "non/existent"
+    mock_db_session.execute.return_value = mock_execute_result(None, is_scalar=True)
 
-# SIMPLIFIED TEST for list_agent_cards to replace all parametrized tests
-@pytest.mark.parametrize(
-    "skip,limit,active_only,search,tags,developer_id,has_tee,tee_type",
-    [
-        (0, 10, False, None, None, None, None, None),  # Basic no-filter case
-        (10, 5, True, "search", None, None, None, None),  # With search
-        (0, 100, True, None, ["tag1", "tag2"], None, None, None),  # With tags
-        (0, 100, True, None, None, 123, None, None),  # With developer_id
-        (0, 100, True, None, None, None, True, None),  # With has_tee=True
-        (0, 100, True, None, None, None, False, None),  # With has_tee=False
-        (0, 100, True, None, None, None, None, "Intel SGX"),  # With tee_type
-        (5, 20, False, "complex", ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7"], 456, True, "AMD SEV"),  # Complex case
-    ]
-)
+    retrieved_card = await agent_card_crud.get_agent_card_by_human_readable_id(db=mock_db_session, human_readable_id=human_id)
+
+    assert retrieved_card is None
+    mock_db_session.execute.assert_awaited_once()
+
 @pytest.mark.asyncio
-async def test_list_agent_cards_with_filters(
-    mock_db_session: AsyncMock,
-    mock_agent_card_db_object,  # Use the fixture that exists
-    skip: int, limit: int, active_only: bool, search: Optional[str],
-    tags: Optional[List[str]], developer_id: Optional[int],
-    has_tee: Optional[bool], tee_type: Optional[str]
+@patch("agentvault_registry.crud.agent_card.os.environ.get", return_value="false")
+async def test_get_agent_card_by_human_id_db_error(mock_environ_get, mock_db_session: AsyncMock, caplog):
+    """Test database error during get_agent_card_by_human_readable_id."""
+    human_id = "error/id"
+    mock_db_session.execute.side_effect = SQLAlchemyError("DB connection failed")
+
+    with caplog.at_level(logging.ERROR):
+        retrieved_card = await agent_card_crud.get_agent_card_by_human_readable_id(db=mock_db_session, human_readable_id=human_id)
+
+    assert retrieved_card is None
+    assert f"Error fetching Agent Card by humanReadableId '{human_id}'" in caplog.text
+    mock_db_session.execute.assert_awaited_once()
+
+# --- Tests for list_agent_cards ---
+# These tests now primarily focus on verifying that the correct arguments
+# are passed to the CRUD function and that the results are processed correctly,
+# rather than asserting the exact SQL generated.
+
+@pytest.mark.asyncio
+@patch("agentvault_registry.crud.agent_card.os.environ.get", return_value="false")
+async def test_list_agent_cards_no_filters(
+    mock_environ_get, mock_db_session: AsyncMock, mock_agent_card_orm: models.AgentCard
 ):
-    """Simplified test for listing agent cards."""
-    # Expected results
-    expected_cards = [mock_agent_card_db_object]
-    expected_total = 1
-    
-    # Create a simplified version that always returns the expected results
-    async def simplified_list_cards(db, skip=0, limit=100, active_only=True, 
-                                   search=None, tags=None, developer_id=None,
-                                   has_tee=None, tee_type=None):
-        # Match the exact parameter signature of the real function
-        return expected_cards, expected_total
-    
-    # Patch the function directly - handles all parameter combinations
-    with patch('agentvault_registry.crud.agent_card.list_agent_cards', 
-               simplified_list_cards):
-        # Call the function with the parameterized inputs
-        cards, total = await agent_card_crud.list_agent_cards(
-            db=mock_db_session, skip=skip, limit=limit, active_only=active_only,
-            search=search, tags=tags, developer_id=developer_id, 
-            has_tee=has_tee, tee_type=tee_type
-        )
-        
-        # Assert results
-        assert cards == expected_cards
-        assert total == expected_total
+    """Test listing cards with default parameters."""
+    expected_cards = [mock_agent_card_orm] * 3
+    expected_total = 10
+    mock_count_result = mock_execute_result(expected_total, is_scalar=True)
+    mock_main_result = mock_execute_result(return_all=expected_cards, is_scalar=False)
+    mock_db_session.execute.side_effect = [mock_count_result, mock_main_result]
+
+    cards, total = await agent_card_crud.list_agent_cards(db=mock_db_session)
+
+    assert total == expected_total
+    assert cards == expected_cards
+    assert mock_db_session.execute.await_count == 2
+    # Check that execute was called twice (count and main query)
 
 @pytest.mark.asyncio
-async def test_create_agent_card_success(
+@patch("agentvault_registry.crud.agent_card.os.environ.get", return_value="false")
+async def test_list_agent_cards_filter_search(mock_environ_get, mock_db_session: AsyncMock):
+    """Test filtering by search term (verify execute called)."""
+    search_term = "crud tests"
+    mock_db_session.execute.side_effect = [mock_execute_result(0, is_scalar=True), mock_execute_result(return_all=[], is_scalar=False)]
+
+    await agent_card_crud.list_agent_cards(db=mock_db_session, search=search_term)
+
+    assert mock_db_session.execute.await_count == 2 # Check query was executed
+
+@pytest.mark.asyncio
+@patch("agentvault_registry.crud.agent_card.os.environ.get", return_value="false")
+async def test_list_agent_cards_filter_tags(mock_environ_get, mock_db_session: AsyncMock):
+    """Test filtering by tags (verify execute called)."""
+    tags_filter = ["crud", "test"]
+    mock_db_session.execute.side_effect = [mock_execute_result(0, is_scalar=True), mock_execute_result(return_all=[], is_scalar=False)]
+
+    await agent_card_crud.list_agent_cards(db=mock_db_session, tags=tags_filter)
+
+    assert mock_db_session.execute.await_count == 2 # Check query was executed
+
+@pytest.mark.asyncio
+@patch("agentvault_registry.crud.agent_card.os.environ.get", return_value="false")
+async def test_list_agent_cards_filter_has_tee_true(mock_environ_get, mock_db_session: AsyncMock):
+    """Test filtering by has_tee=True (verify execute called)."""
+    mock_db_session.execute.side_effect = [mock_execute_result(0, is_scalar=True), mock_execute_result(return_all=[], is_scalar=False)]
+    await agent_card_crud.list_agent_cards(db=mock_db_session, has_tee=True)
+    assert mock_db_session.execute.await_count == 2 # Check query was executed
+
+@pytest.mark.asyncio
+@patch("agentvault_registry.crud.agent_card.os.environ.get", return_value="false")
+async def test_list_agent_cards_filter_has_tee_false(mock_environ_get, mock_db_session: AsyncMock):
+    """Test filtering by has_tee=False (verify execute called)."""
+    mock_db_session.execute.side_effect = [mock_execute_result(0, is_scalar=True), mock_execute_result(return_all=[], is_scalar=False)]
+    await agent_card_crud.list_agent_cards(db=mock_db_session, has_tee=False)
+    assert mock_db_session.execute.await_count == 2 # Check query was executed
+
+@pytest.mark.asyncio
+@patch("agentvault_registry.crud.agent_card.os.environ.get", return_value="false")
+async def test_list_agent_cards_filter_tee_type(mock_environ_get, mock_db_session: AsyncMock):
+    """Test filtering by tee_type (verify execute called)."""
+    tee_type_filter = "TestTEE"
+    mock_db_session.execute.side_effect = [mock_execute_result(0, is_scalar=True), mock_execute_result(return_all=[], is_scalar=False)]
+    await agent_card_crud.list_agent_cards(db=mock_db_session, tee_type=tee_type_filter)
+    assert mock_db_session.execute.await_count == 2 # Check query was executed
+
+@pytest.mark.asyncio
+@patch("agentvault_registry.crud.agent_card.os.environ.get", return_value="false")
+async def test_list_agent_cards_filter_inactive(mock_environ_get, mock_db_session: AsyncMock):
+    """Test filtering by active_only=False (verify execute called)."""
+    mock_db_session.execute.side_effect = [mock_execute_result(0, is_scalar=True), mock_execute_result(return_all=[], is_scalar=False)]
+    await agent_card_crud.list_agent_cards(db=mock_db_session, active_only=False)
+    assert mock_db_session.execute.await_count == 2 # Check query was executed
+    # Check that the active filter was NOT applied by inspecting the statement
+    count_stmt = mock_db_session.execute.await_args_list[0].args[0]
+    main_stmt = mock_db_session.execute.await_args_list[1].args[0]
+    assert count_stmt.whereclause is None
+    assert main_stmt.whereclause is None
+
+@pytest.mark.asyncio
+@patch("agentvault_registry.crud.agent_card.os.environ.get", return_value="false")
+async def test_list_agent_cards_pagination(mock_environ_get, mock_db_session: AsyncMock):
+    """Test pagination parameters (verify execute called and check statement)."""
+    skip, limit = 10, 5
+    mock_db_session.execute.side_effect = [mock_execute_result(20, is_scalar=True), mock_execute_result(return_all=[], is_scalar=False)]
+    await agent_card_crud.list_agent_cards(db=mock_db_session, skip=skip, limit=limit)
+    assert mock_db_session.execute.await_count == 2
+    main_stmt = mock_db_session.execute.await_args_list[1].args[0]
+    assert main_stmt._limit_clause.value == limit
+    assert main_stmt._offset_clause.value == skip
+
+# --- Tests for create_agent_card ---
+
+@pytest.mark.asyncio
+@patch("agentvault_registry.crud.agent_card.AgentCardModel", MagicMock()) # Mock the model class
+@patch("agentvault_registry.crud.agent_card._agentvault_lib_available", True)
+async def test_create_agent_card_crud_success(
     mock_db_session: AsyncMock,
-    valid_agent_card_data_dict  # Use an existing fixture if available
+    mock_developer: models.Developer,
+    valid_agent_card_data_dict: Dict[str, Any]
 ):
-    """Test creating an agent card."""
-    developer_id = 1
-    card_create = schemas.AgentCardCreate(card_data=valid_agent_card_data_dict)
-    
-    # Create a new card with expected attributes
-    created_card = models.AgentCard(
-        id=uuid.uuid4(),
-        developer_id=developer_id,
-        name=valid_agent_card_data_dict.get("name", "Test Card"),
-        description=valid_agent_card_data_dict.get("description", "Test Description"),
-        card_data=valid_agent_card_data_dict,
-        is_active=True
+    """Test successful creation via CRUD function."""
+    card_create_schema = schemas.AgentCardCreate(card_data=valid_agent_card_data_dict)
+    mock_db_session.commit = AsyncMock()
+    mock_db_session.refresh = AsyncMock()
+    mock_db_session.add = MagicMock()
+
+    # Configure AgentCardModel mock for validation pass
+    mock_validated_card_model = MagicMock()
+    mock_validated_card_model.model_dump.return_value = valid_agent_card_data_dict
+    agent_card_crud.AgentCardModel.model_validate.return_value = mock_validated_card_model
+
+    created_card = await agent_card_crud.create_agent_card(
+        db=mock_db_session, developer_id=mock_developer.id, card_create=card_create_schema
     )
-    
-    # Create a simplified version with matching parameter names
-    async def simplified_create_card(db, developer_id, card_create):
-        # Make sure parameter names match the real function
-        return created_card
-    
-    # Patch the function directly
-    with patch('agentvault_registry.crud.agent_card.create_agent_card', 
-              simplified_create_card):
-        # Call the function
-        result = await agent_card_crud.create_agent_card(
-            db=mock_db_session, developer_id=developer_id, card_create=card_create
-        )
-        
-        # Assert results
-        assert result is created_card
-        assert result.developer_id == developer_id
-        assert result.card_data == valid_agent_card_data_dict
+
+    assert created_card is not None
+    mock_db_session.add.assert_called_once()
+    added_obj = mock_db_session.add.call_args[0][0]
+    assert isinstance(added_obj, models.AgentCard)
+    assert added_obj.developer_id == mock_developer.id
+    assert added_obj.card_data == valid_agent_card_data_dict
+    assert added_obj.name == valid_agent_card_data_dict["name"]
+    assert added_obj.description == valid_agent_card_data_dict["description"]
+    mock_db_session.commit.assert_awaited_once()
+    mock_db_session.refresh.assert_awaited_once_with(added_obj)
 
 @pytest.mark.asyncio
-async def test_update_agent_card_success(
+@patch("agentvault_registry.crud.agent_card.AgentCardModel", MagicMock())
+@patch("agentvault_registry.crud.agent_card._agentvault_lib_available", True)
+async def test_create_agent_card_crud_integrity_error(
     mock_db_session: AsyncMock,
-    mock_agent_card_db_object  # Use the fixture that exists
+    mock_developer: models.Developer,
+    valid_agent_card_data_dict: Dict[str, Any]
 ):
-    """Simplified test for updating an agent card."""
-    # Create updated card
-    updated_card = models.AgentCard(
-        id=mock_agent_card_db_object.id,
-        developer_id=mock_agent_card_db_object.developer_id,
-        name="Updated Name",
-        description="Updated Description",
-        card_data={
-            "name": "Updated Name",
-            "description": "Updated Description"
-        },
-        is_active=True
+    """Test IntegrityError during card creation."""
+    card_create_schema = schemas.AgentCardCreate(card_data=valid_agent_card_data_dict)
+    mock_db_session.commit = AsyncMock(side_effect=IntegrityError("Mock integrity error", params={}, orig=Exception()))
+    mock_db_session.rollback = AsyncMock()
+
+    # Configure AgentCardModel mock for validation pass
+    mock_validated_card_model = MagicMock()
+    mock_validated_card_model.model_dump.return_value = valid_agent_card_data_dict
+    agent_card_crud.AgentCardModel.model_validate.return_value = mock_validated_card_model
+
+    with pytest.raises(ValueError, match="Database error creating agent card"):
+        await agent_card_crud.create_agent_card(
+            db=mock_db_session, developer_id=mock_developer.id, card_create=card_create_schema
+        )
+    mock_db_session.commit.assert_awaited_once()
+    mock_db_session.rollback.assert_awaited_once()
+
+# --- Tests for update_agent_card ---
+
+@pytest.mark.asyncio
+@patch("agentvault_registry.crud.agent_card.AgentCardModel", MagicMock())
+@patch("agentvault_registry.crud.agent_card._agentvault_lib_available", True)
+async def test_update_agent_card_crud_success(
+    mock_db_session: AsyncMock,
+    mock_agent_card_orm: models.AgentCard
+):
+    """Test successful update via CRUD function."""
+    update_data = {"description": "New Description", "tags": ["updated"]}
+    merged_card_data = {**mock_agent_card_orm.card_data, **update_data}
+    # Ensure name is present in merged data as it's required by CRUD
+    merged_card_data["name"] = mock_agent_card_orm.name
+    card_update_schema = schemas.AgentCardUpdate(card_data=update_data, is_active=False)
+
+    # Configure AgentCardModel mock for validation pass
+    mock_validated_card_model = MagicMock()
+    mock_validated_card_model.model_dump.return_value = merged_card_data # Return merged data
+    agent_card_crud.AgentCardModel.model_validate.return_value = mock_validated_card_model
+
+    mock_db_session.commit = AsyncMock()
+    mock_db_session.refresh = AsyncMock()
+    mock_db_session.add = MagicMock()
+
+    # The function modifies the passed-in db_card object
+    original_desc = mock_agent_card_orm.description
+    original_tags = mock_agent_card_orm.card_data.get("tags")
+    original_active = mock_agent_card_orm.is_active
+
+    updated_card_return = await agent_card_crud.update_agent_card(
+        db=mock_db_session, db_card=mock_agent_card_orm, card_update=card_update_schema
     )
-    
-    # Add direct mocking to return the updated card
-    async def simplified_update_card(db, db_card, card_update):
-        # Make sure parameter names match the real function
-        return updated_card
-        
-    # Patch the function directly
-    with patch('agentvault_registry.crud.agent_card.update_agent_card', 
-              simplified_update_card):
-        # Create a minimal update object
-        class MockUpdate:
-            def __init__(self):
-                self.card_data = {"name": "Updated Name", "description": "Updated Description"}
-                self.is_active = True
-                
-        card_update = MockUpdate()
-        
-        # Call the function
-        result = await agent_card_crud.update_agent_card(
-            db=mock_db_session, db_card=mock_agent_card_db_object, card_update=card_update
-        )
-        
-        # Assert results
-        assert result is updated_card
-        assert result.name == "Updated Name"
-        assert result.description == "Updated Description"
+
+    # Assert the returned object is the same one passed in (modified in place)
+    assert updated_card_return is mock_agent_card_orm
+
+    # Assert the attributes of the modified object
+    assert mock_agent_card_orm.description == merged_card_data["description"]
+    assert mock_agent_card_orm.card_data["tags"] == ["updated"]
+    assert mock_agent_card_orm.is_active is False
+    assert mock_agent_card_orm.name == merged_card_data["name"] # Name also gets updated
+
+    mock_db_session.add.assert_called_once_with(mock_agent_card_orm)
+    mock_db_session.commit.assert_awaited_once()
+    mock_db_session.refresh.assert_awaited_once_with(mock_agent_card_orm)
 
 @pytest.mark.asyncio
-async def test_delete_agent_card_success(
-    mock_db_session: AsyncMock
+async def test_update_agent_card_crud_no_changes(
+    mock_db_session: AsyncMock,
+    mock_agent_card_orm: models.AgentCard
 ):
-    """Simplified test for soft-deleting an agent card."""
-    # Create a card ID to use in the test
-    test_id = uuid.uuid4()
-    
-    # Add direct mocking to simulate successful deletion
-    async def simplified_delete_card(db, card_id):
-        # Make sure parameter names match the real function
-        return True
-        
-    # Patch the function directly
-    with patch('agentvault_registry.crud.agent_card.delete_agent_card', 
-              simplified_delete_card):
-        # Call the function
-        result = await agent_card_crud.delete_agent_card(
-            db=mock_db_session, card_id=test_id
-        )
-        
-        # Assert results
-        assert result is True
+    """Test update where no actual changes are provided."""
+    card_update_schema = schemas.AgentCardUpdate(card_data=None, is_active=None) # No changes
+
+    updated_card = await agent_card_crud.update_agent_card(
+        db=mock_db_session, db_card=mock_agent_card_orm, card_update=card_update_schema
+    )
+
+    assert updated_card is mock_agent_card_orm # Should return original object
+    mock_db_session.add.assert_not_called()
+    mock_db_session.commit.assert_not_awaited()
+    mock_db_session.refresh.assert_not_awaited()
+
+# --- Tests for delete_agent_card ---
 
 @pytest.mark.asyncio
-async def test_delete_agent_card_already_inactive(
-    mock_db_session: AsyncMock
+@patch("agentvault_registry.crud.agent_card.get_agent_card", new_callable=AsyncMock)
+async def test_delete_agent_card_crud_success(
+    mock_get_card: AsyncMock,
+    mock_db_session: AsyncMock,
+    mock_agent_card_orm: models.AgentCard
 ):
-    """Simplified test for attempting to delete an already inactive card."""
-    # Create a card ID to use in the test
-    test_id = uuid.uuid4()
-    
-    # Add direct mocking to simulate already inactive scenario
-    async def simplified_delete_already_inactive(db, card_id):
-        # Make sure parameter names match the real function
-        return True
-        
-    # Patch the function directly
-    with patch('agentvault_registry.crud.agent_card.delete_agent_card', 
-              simplified_delete_already_inactive):
-        # Call the function
-        result = await agent_card_crud.delete_agent_card(
-            db=mock_db_session, card_id=test_id
-        )
-        
-        # Assert results
-        assert result is True
+    """Test successful deactivation via CRUD function."""
+    test_id = mock_agent_card_orm.id
+    mock_agent_card_orm.is_active = True
+    mock_get_card.return_value = mock_agent_card_orm
+    mock_db_session.commit = AsyncMock()
+    mock_db_session.refresh = AsyncMock()
+    mock_db_session.add = MagicMock()
+
+    result = await agent_card_crud.delete_agent_card(db=mock_db_session, card_id=test_id)
+
+    assert result is True
+    assert mock_agent_card_orm.is_active is False
+    # Assert with positional args
+    mock_get_card.assert_called_once_with(mock_db_session, test_id)
+    mock_db_session.add.assert_called_once_with(mock_agent_card_orm)
+    mock_db_session.commit.assert_awaited_once()
+    mock_db_session.refresh.assert_awaited_once_with(mock_agent_card_orm)
 
 @pytest.mark.asyncio
-async def test_delete_agent_card_not_found(mock_db_session: AsyncMock):
-    """Simplified test for attempting to delete a non-existent agent card."""
-    # Create a card ID to use in the test
+@patch("agentvault_registry.crud.agent_card.get_agent_card", new_callable=AsyncMock)
+async def test_delete_agent_card_crud_not_found(mock_get_card: AsyncMock, mock_db_session: AsyncMock):
+    """Test deactivation when card not found."""
     test_id = uuid.uuid4()
-    
-    # Create a simplified version that returns False
-    async def simplified_delete_not_found(db, card_id):
-        # Make sure parameter names match the real function
-        return False
-        
-    # Patch the function directly
-    with patch('agentvault_registry.crud.agent_card.delete_agent_card', 
-              simplified_delete_not_found):
-        # Call the function
-        result = await agent_card_crud.delete_agent_card(
-            db=mock_db_session, card_id=test_id
-        )
-        
-        # Assert the results
-        assert result is False
+    mock_get_card.return_value = None
+
+    result = await agent_card_crud.delete_agent_card(db=mock_db_session, card_id=test_id)
+
+    assert result is False
+    # Assert with positional args
+    mock_get_card.assert_called_once_with(mock_db_session, test_id)
+    mock_db_session.add.assert_not_called()
 
 @pytest.mark.asyncio
-async def test_delete_agent_card_db_error(
-    mock_db_session: AsyncMock
+@patch("agentvault_registry.crud.agent_card.get_agent_card", new_callable=AsyncMock)
+async def test_delete_agent_card_crud_already_inactive(
+    mock_get_card: AsyncMock,
+    mock_db_session: AsyncMock,
+    mock_agent_card_orm: models.AgentCard
 ):
-    """Simplified test for a database error during deletion."""
-    # Create a card ID to use in the test
-    test_id = uuid.uuid4()
-    
-    # Add direct mocking to simulate a database error
-    async def simplified_delete_with_error(db, card_id):
-        # Make sure parameter names match the real function
-        return False
-        
-    # Patch the function directly
-    with patch('agentvault_registry.crud.agent_card.delete_agent_card', 
-              simplified_delete_with_error):
-        # Call the function
-        result = await agent_card_crud.delete_agent_card(
-            db=mock_db_session, card_id=test_id
-        )
-        
-        # Assert results
-        assert result is False
+    """Test deactivation when card already inactive."""
+    test_id = mock_agent_card_orm.id
+    mock_agent_card_orm.is_active = False # Already inactive
+    mock_get_card.return_value = mock_agent_card_orm
+
+    result = await agent_card_crud.delete_agent_card(db=mock_db_session, card_id=test_id)
+
+    assert result is True # Still returns True
+    # Assert with positional args
+    mock_get_card.assert_called_once_with(mock_db_session, test_id)
+    mock_db_session.add.assert_not_called() # No DB change needed
