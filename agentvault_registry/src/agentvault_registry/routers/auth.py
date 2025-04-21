@@ -35,39 +35,87 @@ router = APIRouter(
 
 @router.post(
     "/register",
-    # --- MODIFIED: Changed response model for error, added 503 response ---
-    # response_model=schemas.RegistrationResponse, # Original success model
-    status_code=status.HTTP_503_SERVICE_UNAVAILABLE, # Return 503
-    summary="Register a new developer account (Temporarily Disabled)",
+    # --- MODIFIED: Changed back to 201 success, updated responses ---
+    response_model=schemas.RegistrationResponse,
+    status_code=status.HTTP_201_CREATED, # Back to 201
+    summary="Register a new developer account",
     responses={
-        status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Registration temporarily disabled"}
+        status.HTTP_201_CREATED: {"description": "Registration successful, verification email sent."},
+        status.HTTP_400_BAD_REQUEST: {"description": "Email already registered."},
+        status.HTTP_409_CONFLICT: {"description": "Username (developer name) already exists."},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Email service not configured."},
     }
     # --- END MODIFIED ---
 )
 async def register_developer(
-    # --- MODIFIED: Keep params for signature, but don't use them yet ---
+    # --- MODIFIED: Parameters are used again ---
     background_tasks: BackgroundTasks,
     developer_in: schemas.DeveloperCreate = Body(...),
     db: AsyncSession = Depends(get_db)
     # --- END MODIFIED ---
 ):
     """
-    Handles new developer registration.
-    **NOTE: This endpoint is temporarily disabled pending email service activation.**
+    Handles new developer registration. Creates account, generates keys, sends verification email.
     """
-    # --- MODIFIED: Raise HTTPException immediately ---
-    logger.warning("Registration endpoint called while temporarily disabled.")
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail="Registration is temporarily disabled pending email service activation. Please check back later."
-    )
-    # --- END MODIFIED ---
+    # --- REMOVED: Temporary Disabling Logic ---
+    # logger.warning("Registration endpoint called while temporarily disabled.")
+    # raise HTTPException(
+    #     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+    #     detail="Registration is temporarily disabled pending email service activation. Please check back later."
+    # )
+    # --- END REMOVED ---
 
-    # --- Original Logic (Commented out or removed for disabling) ---
-    # logger.info(f"Registration attempt for email: {developer_in.email}")
-    # existing_developer = await developer_crud.get_developer_by_email(db, email=developer_in.email)
-    # ... rest of the original registration logic ...
-    # --- End Original Logic ---
+    # --- Reinstated Original Logic ---
+    logger.info(f"Registration attempt for email: {developer_in.email}")
+    existing_developer = await developer_crud.get_developer_by_email(db, email=developer_in.email)
+    if existing_developer:
+        logger.warning(f"Registration failed: Email '{developer_in.email}' already registered.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered.",
+        )
+
+    try:
+        # CRUD function handles hashing, token generation, recovery keys
+        created_developer = await developer_crud.create_developer(db=db, developer=developer_in)
+        plain_recovery_keys = getattr(created_developer, '_plain_recovery_keys', []) # Retrieve keys set by CRUD
+
+        # Send verification email in the background
+        # --- ADDED: Check if email sending is configured ---
+        if settings.MAIL_SERVER and settings.MAIL_USERNAME and settings.MAIL_FROM:
+            background_tasks.add_task(
+                send_verification_email,
+                to_email=created_developer.email,
+                username=created_developer.name,
+                token=created_developer.email_verification_token
+            )
+            message = "Registration successful. Please check your email to verify your account."
+        else:
+            logger.warning("Email settings not configured. Skipping verification email sending.")
+            # Add instructions for manual verification if needed (e.g., admin action or different flow)
+            message = "Registration successful (email verification skipped due to server config). Contact admin if needed."
+        # --- END ADDED ---
+
+        return schemas.RegistrationResponse(
+            message=message,
+            recovery_keys=plain_recovery_keys
+        )
+
+    except IntegrityError: # Catch potential name conflict from DB
+        await db.rollback()
+        logger.warning(f"Registration failed: Username (developer name) '{developer_in.name}' likely already exists.")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, # Use 409 Conflict
+            detail="Username or email already exists.",
+        )
+    except Exception as e:
+        await db.rollback() # Ensure rollback on any other error during creation
+        logger.exception(f"Unexpected error during registration for email {developer_in.email}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred during registration.",
+        )
+    # --- End Reinstated Original Logic ---
 
 
 @router.post("/login", response_model=schemas.Token, summary="Developer Login")
