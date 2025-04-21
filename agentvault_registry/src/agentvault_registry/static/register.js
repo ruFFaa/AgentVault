@@ -12,9 +12,11 @@ const registerButton = document.getElementById('register-button');
 const messageArea = document.getElementById('register-message');
 const recoveryKeysDisplay = document.getElementById('recovery-keys-display');
 const recoveryKeysList = document.getElementById('recovery-keys-list');
-const registrationDisabledMessage = document.getElementById('registration-disabled-message'); // Added
+// --- REMOVED: registrationDisabledMessage variable ---
+// const registrationDisabledMessage = document.getElementById('registration-disabled-message'); // Removed
 
-// ===== ADDED: Disable form on load =====
+// ===== REMOVED: Disable form on load logic =====
+/*
 document.addEventListener('DOMContentLoaded', () => {
     if (registrationDisabledMessage && registrationDisabledMessage.style.display !== 'none') {
         // If the disabled message is visible (meaning we intend to disable)
@@ -25,7 +27,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 });
-// ===== END ADDED =====
+*/
+// ===== END REMOVED =====
 
 if (registerForm) {
     registerForm.addEventListener('submit', handleRegister);
@@ -35,12 +38,14 @@ async function handleRegister(event) {
     event.preventDefault(); // Prevent default form submission
     clearMessages();
 
-    // ===== ADDED: Check if button is disabled before proceeding =====
+    // ===== REMOVED: Check if button is disabled before proceeding =====
+    /*
     if (registerButton && registerButton.disabled) {
         showMessage("Registration is currently disabled.", true);
         return;
     }
-    // ===== END ADDED =====
+    */
+    // ===== END REMOVED =====
 
     setLoading(true);
 
@@ -92,11 +97,12 @@ async function handleRegister(event) {
 
         const responseData = await response.json();
 
-        // ===== MODIFIED: Check for 503 specifically =====
-        if (response.status === 503) {
-            showMessage(responseData.detail || "Registration is temporarily disabled.", true);
-        } else if (response.status === 201) {
-        // ===== END MODIFIED =====
+        // ===== REMOVED: Check for 503 specifically =====
+        // if (response.status === 503) {
+        //    showMessage(responseData.detail || "Registration is temporarily disabled.", true);
+        // } else
+        // ===== END REMOVED =====
+        if (response.status === 201) {
             // Success
             showMessage(responseData.message || "Registration successful! Check your email.", false);
             displayRecoveryKeys(responseData.recovery_keys);
@@ -119,10 +125,11 @@ async function handleRegister(event) {
 
 function setLoading(isLoading) {
     if (registerButton) {
-        // Only modify if not permanently disabled by the banner logic
-        if (!registerButton.hasAttribute('data-permanently-disabled')) {
+        // --- REMOVED: Check for data-permanently-disabled ---
+        // if (!registerButton.hasAttribute('data-permanently-disabled')) {
              registerButton.disabled = isLoading;
-        }
+        // }
+        // --- END REMOVED ---
         registerButton.textContent = isLoading ? 'Registering...' : 'Register';
     }
 }

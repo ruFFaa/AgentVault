@@ -22,47 +22,47 @@
         <section id="register-section" class="auth-form-section">
             <h2>Developer Registration</h2>
 
-            <!-- ===== ADDED: Disabled Message Banner ===== -->
-            <div id="registration-disabled-message" class="message-area error" style="display: block; text-align: center; margin-bottom: 1.5rem;">
+            <!-- ===== REMOVED: Disabled Message Banner ===== -->
+            <!-- <div id="registration-disabled-message" class="message-area error" style="display: block; text-align: center; margin-bottom: 1.5rem;">
                 <strong>Registration Temporarily Disabled</strong><br>
                 We are currently activating the email verification service. Registration will be re-enabled shortly. Please check back later.
-            </div>
-            <!-- ===== END ADDED ===== -->
+            </div> -->
+            <!-- ===== END REMOVED ===== -->
 
             <p>Create an account to manage your agents in the registry.</p>
 
             <form id="register-form">
                 <div class="form-group">
                     <label for="register-name">Developer Name:</label>
-                    <!-- ===== MODIFIED: Added disabled attribute ===== -->
-                    <input type="text" id="register-name" name="name" required minlength="3" maxlength="100" disabled>
-                    <!-- ===== END MODIFIED ===== -->
+                    <!-- ===== REMOVED: disabled attribute ===== -->
+                    <input type="text" id="register-name" name="name" required minlength="3" maxlength="100">
+                    <!-- ===== END REMOVED ===== -->
                 </div>
                 <div class="form-group">
                     <label for="register-email">Email:</label>
-                    <!-- ===== MODIFIED: Added disabled attribute ===== -->
-                    <input type="email" id="register-email" name="email" required disabled>
-                    <!-- ===== END MODIFIED ===== -->
+                    <!-- ===== REMOVED: disabled attribute ===== -->
+                    <input type="email" id="register-email" name="email" required>
+                    <!-- ===== END REMOVED ===== -->
                 </div>
                 <div class="form-group">
                     <label for="register-password">Password:</label>
-                    <!-- ===== MODIFIED: Added disabled attribute ===== -->
-                    <input type="password" id="register-password" name="password" required minlength="8" disabled>
-                    <!-- ===== END MODIFIED ===== -->
+                    <!-- ===== REMOVED: disabled attribute ===== -->
+                    <input type="password" id="register-password" name="password" required minlength="8">
+                    <!-- ===== END REMOVED ===== -->
                     <small>Minimum 8 characters.</small>
                 </div>
                 <div class="form-group">
                     <label for="register-confirm-password">Confirm Password:</label>
-                    <!-- ===== MODIFIED: Added disabled attribute ===== -->
-                    <input type="password" id="register-confirm-password" name="confirm_password" required minlength="8" disabled>
-                    <!-- ===== END MODIFIED ===== -->
+                    <!-- ===== REMOVED: disabled attribute ===== -->
+                    <input type="password" id="register-confirm-password" name="confirm_password" required minlength="8">
+                    <!-- ===== END REMOVED ===== -->
                 </div>
 
                 <div id="register-message" class="message-area"></div>
 
-                <!-- ===== MODIFIED: Added disabled attribute ===== -->
-                <button type="submit" id="register-button" disabled>Register</button>
-                <!-- ===== END MODIFIED ===== -->
+                <!-- ===== REMOVED: disabled attribute ===== -->
+                <button type="submit" id="register-button">Register</button>
+                <!-- ===== END REMOVED ===== -->
             </form>
 
             <div id="recovery-keys-display" style="display: none; margin-top: 20px; padding: 15px; border: 1px solid #ffc107; background-color: #fff3cd; border-radius: 5px;">
