@@ -140,6 +140,12 @@ def verify_recovery_key(plain_recovery_key: str, stored_hash: str) -> bool:
         return False
 # --- END MODIFIED ---
 
+# --- ADDED: Function to generate verification token ---
+def generate_verification_token(length: int = 32) -> str:
+    """Generates a secure, URL-safe token for email verification."""
+    return secrets.token_urlsafe(length)
+# --- END ADDED ---
+
 # --- JWT Creation ---
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Creates a JWT access token."""
