@@ -8,7 +8,9 @@ import datetime
 import asyncio # Import asyncio directly
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+# --- MODIFIED: Added Any ---
 from typing import Optional, Dict, Any, Union, List
+# --- END MODIFIED ---
 
 from .exceptions import InvalidStateTransitionError
 
@@ -19,7 +21,7 @@ try:
         TaskState, A2AEvent, TaskStatusUpdateEvent, TaskMessageEvent,
         TaskArtifactUpdateEvent, Message, Artifact
     )
-    _MODELS_AVAILABLE = True
+    _MODELS_AVAILABLE = True # Define flag based on import success
 except ImportError:
     logging.getLogger(__name__).warning("Core agentvault models not found. Using string/Any placeholders.")
     # Define TaskState as a simple class with string constants if import fails
@@ -30,7 +32,7 @@ except ImportError:
         COMPLETED = "COMPLETED"
         FAILED = "FAILED"
         CANCELED = "CANCELED"
-    # Define placeholders for other models
+    # Define placeholders for other models used in notification tests (even if skipped)
     A2AEvent = Any # type: ignore
     TaskStatusUpdateEvent = Any # type: ignore
     TaskMessageEvent = Any # type: ignore
@@ -42,27 +44,16 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# State Transition Logic
-if _MODELS_AVAILABLE:
-    ALLOWED_TRANSITIONS = {
-        TaskState.SUBMITTED: {TaskState.WORKING, TaskState.CANCELED},
-        TaskState.WORKING: {TaskState.INPUT_REQUIRED, TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELED},
-        TaskState.INPUT_REQUIRED: {TaskState.WORKING, TaskState.CANCELED},
-        TaskState.COMPLETED: {TaskState.COMPLETED},
-        TaskState.FAILED: {TaskState.FAILED},
-        TaskState.CANCELED: {TaskState.CANCELED},
-    }
-    TERMINAL_STATES = {TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELED}
-else:
-    ALLOWED_TRANSITIONS = {
-        "SUBMITTED": {"WORKING", "CANCELED"},
-        "WORKING": {"INPUT_REQUIRED", "COMPLETED", "FAILED", "CANCELED"},
-        "INPUT_REQUIRED": {"WORKING", "CANCELED"},
-        "COMPLETED": {"COMPLETED"},
-        "FAILED": {"FAILED"},
-        "CANCELED": {"CANCELED"},
-    }
-    TERMINAL_STATES = {"COMPLETED", "FAILED", "CANCELED"}
+# State Transition Logic - Use strings for keys
+ALLOWED_TRANSITIONS = {
+    "SUBMITTED": {"WORKING", "CANCELED"},
+    "WORKING": {"INPUT_REQUIRED", "COMPLETED", "FAILED", "CANCELED"},
+    "INPUT_REQUIRED": {"WORKING", "CANCELED"},
+    "COMPLETED": {"COMPLETED"},
+    "FAILED": {"FAILED"},
+    "CANCELED": {"CANCELED"},
+}
+TERMINAL_STATES = {"COMPLETED", "FAILED", "CANCELED"}
 
 
 @dataclass
@@ -84,7 +75,7 @@ class TaskContext:
         current_state_resolved = self.current_state
         new_state_resolved = new_state_input
 
-        # Resolve to enum members if possible
+        # Resolve to enum members if possible (using the flag defined in THIS module)
         if _MODELS_AVAILABLE:
             try:
                 if isinstance(current_state_resolved, str):
@@ -97,24 +88,29 @@ class TaskContext:
 
         logger.debug(f"Attempting state update for task {self.task_id} from {current_state_resolved} to {new_state_resolved}")
 
-        if new_state_resolved == current_state_resolved:
-            logger.debug(f"Task {self.task_id} already in state {new_state_resolved}. Updating timestamp only.")
+        # Use string representation for checks
+        current_state_str = str(current_state_resolved.value if _MODELS_AVAILABLE and isinstance(current_state_resolved, TaskState) else current_state_resolved)
+        new_state_str = str(new_state_resolved.value if _MODELS_AVAILABLE and isinstance(new_state_resolved, TaskState) else new_state_resolved)
+
+
+        if new_state_str == current_state_str:
+            logger.debug(f"Task {self.task_id} already in state {new_state_str}. Updating timestamp only.")
             self.updated_at = datetime.datetime.now(datetime.timezone.utc)
             return
 
-        if current_state_resolved in TERMINAL_STATES:
-            msg = f"Task {self.task_id} is already in a terminal state ({current_state_resolved}) and cannot transition to {new_state_resolved}."
+        if current_state_str in TERMINAL_STATES:
+            msg = f"Task {self.task_id} is already in a terminal state ({current_state_str}) and cannot transition to {new_state_str}."
             logger.warning(msg)
-            raise InvalidStateTransitionError(self.task_id, str(current_state_resolved), str(new_state_resolved), msg)
+            raise InvalidStateTransitionError(self.task_id, current_state_str, new_state_str, msg)
 
-        allowed_next_states = ALLOWED_TRANSITIONS.get(current_state_resolved)
-        if allowed_next_states is None or new_state_resolved not in allowed_next_states:
-            msg = f"Invalid state transition for task {self.task_id}: Cannot move from {current_state_resolved} to {new_state_resolved}."
+        allowed_next_states = ALLOWED_TRANSITIONS.get(current_state_str)
+        if allowed_next_states is None or new_state_str not in allowed_next_states:
+            msg = f"Invalid state transition for task {self.task_id}: Cannot move from {current_state_str} to {new_state_str}."
             logger.warning(msg)
-            raise InvalidStateTransitionError(self.task_id, str(current_state_resolved), str(new_state_resolved), msg)
+            raise InvalidStateTransitionError(self.task_id, current_state_str, new_state_str, msg)
 
         logger.debug(f"Valid state transition for task {self.task_id}. Updating state to {new_state_resolved}.")
-        self.current_state = new_state_resolved
+        self.current_state = new_state_resolved # Store the original input type (Enum or str)
         self.updated_at = datetime.datetime.now(datetime.timezone.utc)
 
 
@@ -132,7 +128,7 @@ class BaseTaskStore(ABC):
         pass
 
     @abstractmethod
-    async def update_task_state(self, task_id: str, new_state: Union[TaskState, str]) -> Optional[TaskContext]:
+    async def update_task_state(self, task_id: str, new_state: Union[TaskState, str], message: Optional[str] = None) -> Optional[TaskContext]: # Added message
         """Update the state of an existing task."""
         pass
 
@@ -207,23 +203,30 @@ class InMemoryTaskStore(BaseTaskStore):
             return self._tasks[task_id]
 
         logger.info(f"Creating new task '{task_id}' in InMemoryTaskStore.")
-        new_task_context = TaskContext(task_id=task_id, current_state=TaskState.SUBMITTED)
+        # Use string state if models unavailable (using SDK's flag)
+        initial_state = TaskState.SUBMITTED if _MODELS_AVAILABLE else "SUBMITTED"
+        new_task_context = TaskContext(task_id=task_id, current_state=initial_state)
         self._tasks[task_id] = new_task_context
         self._listeners[task_id] = [] # Initialize listener list
+        # Notify initial state
+        await self.notify_status_update(task_id, new_task_context.current_state)
         return new_task_context
 
-    async def update_task_state(self, task_id: str, new_state: Union[TaskState, str]) -> Optional[TaskContext]:
+    async def update_task_state(self, task_id: str, new_state: Union[TaskState, str], message: Optional[str] = None) -> Optional[TaskContext]: # Added message
         task_context = self._tasks.get(task_id)
         if task_context:
             try:
                 original_state = task_context.current_state
                 task_context.update_state(new_state) # Calls context update (which includes validation)
                 try:
-                    await self.notify_status_update(task_id, task_context.current_state)
+                    # Pass message to notify
+                    await self.notify_status_update(task_id, task_context.current_state, message=message)
                 except Exception as notify_err:
                     logger.error(f"Failed to notify listeners for task '{task_id}' state change from {original_state} to {new_state}: {notify_err}", exc_info=True)
                 return task_context
             except InvalidStateTransitionError as e:
+                 # Log the error but return None as the update failed
+                 logger.warning(f"Invalid state transition prevented for task '{task_id}': {e}")
                  return None
             except ValueError as e:
                  logger.error(f"Invalid state value '{new_state}' provided for task '{task_id}'.")
@@ -233,7 +236,6 @@ class InMemoryTaskStore(BaseTaskStore):
             return None
 
     async def delete_task(self, task_id: str) -> bool:
-        # --- MODIFIED: Correctly remove from both dicts ---
         task_deleted = self._tasks.pop(task_id, None) is not None
         listeners_deleted = self._listeners.pop(task_id, None) is not None
         if task_deleted:
@@ -244,7 +246,6 @@ class InMemoryTaskStore(BaseTaskStore):
         else:
             logger.warning(f"Task '{task_id}' not found for deletion.")
             return False
-        # --- END MODIFIED ---
 
     # --- Listener Management Implementation ---
     async def add_listener(self, task_id: str, listener_queue: asyncio.Queue):
@@ -300,17 +301,30 @@ class InMemoryTaskStore(BaseTaskStore):
         message: Optional[str] = None
     ):
         """Notify listeners about a task status change."""
+        # --- MODIFIED: Re-introduce _MODELS_AVAILABLE check ---
         if not _MODELS_AVAILABLE:
-            logger.warning("Cannot notify status update: Core models not available.")
-            return
+            logger.warning("Cannot create TaskStatusUpdateEvent: Core models not available.")
+            return # Cannot create the specific event object
+        # --- END MODIFIED ---
 
         event = None
         try:
-            state_value = new_state if isinstance(new_state, TaskState) else TaskState(new_state)
+            # Ensure state_value is the correct type (Enum or string)
+            state_value = new_state
+            if _MODELS_AVAILABLE and isinstance(new_state, str):
+                try:
+                    state_value = TaskState(new_state)
+                except ValueError:
+                    logger.error(f"Invalid state string '{new_state}' passed to notify_status_update for task '{task_id}'.")
+                    return # Don't proceed if state is invalid
+            elif not _MODELS_AVAILABLE and not isinstance(new_state, str):
+                 state_value = str(new_state) # Fallback to string
+
             now = datetime.datetime.now(datetime.timezone.utc)
             logger.debug(f"Creating TaskStatusUpdateEvent with: task_id='{task_id}', state='{state_value}', timestamp='{now}', message='{message}'")
+            # Use the imported (or placeholder) class
             event = TaskStatusUpdateEvent(
-                task_id=task_id,
+                taskId=task_id, # Use alias
                 state=state_value,
                 timestamp=now,
                 message=message
@@ -329,15 +343,18 @@ class InMemoryTaskStore(BaseTaskStore):
         message: Message
     ):
         """Notify listeners about a new message added to the task."""
+        # --- MODIFIED: Re-introduce _MODELS_AVAILABLE check ---
         if not _MODELS_AVAILABLE:
-            logger.warning("Cannot notify message event: Core models not available.")
+            logger.warning("Cannot create TaskMessageEvent: Core models not available.")
             return
+        # --- END MODIFIED ---
         event = None
         try:
             now = datetime.datetime.now(datetime.timezone.utc)
             logger.debug(f"Creating TaskMessageEvent with: task_id='{task_id}', message='{message!r}', timestamp='{now}'")
+            # Use the imported (or placeholder) class
             event = TaskMessageEvent(
-                task_id=task_id,
+                taskId=task_id, # Use alias
                 message=message,
                 timestamp=now
             )
@@ -355,15 +372,18 @@ class InMemoryTaskStore(BaseTaskStore):
         artifact: Artifact
     ):
         """Notify listeners about a new or updated artifact."""
+        # --- MODIFIED: Re-introduce _MODELS_AVAILABLE check ---
         if not _MODELS_AVAILABLE:
-            logger.warning("Cannot notify artifact event: Core models not available.")
+            logger.warning("Cannot create TaskArtifactUpdateEvent: Core models not available.")
             return
+        # --- END MODIFIED ---
         event = None
         try:
             now = datetime.datetime.now(datetime.timezone.utc)
             logger.debug(f"Creating TaskArtifactUpdateEvent with: task_id='{task_id}', artifact='{artifact!r}', timestamp='{now}'")
+            # Use the imported (or placeholder) class
             event = TaskArtifactUpdateEvent(
-                task_id=task_id,
+                taskId=task_id, # Use alias
                 artifact=artifact,
                 timestamp=now
             )

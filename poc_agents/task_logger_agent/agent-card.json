@@ -1,0 +1,30 @@
+{
+    "schemaVersion": "1.0",
+    "humanReadableId": "local-poc/task-logger",
+    "agentVersion": "0.1.0",
+    "name": "Task Logger Agent",
+    "description": "An agent that logs messages to a PostgreSQL database with timestamps.",
+    "url": "http://localhost:8002/a2a",
+    "provider": {
+      "name": "AgentVault Dev1"
+    },
+    "capabilities": {
+      "a2aVersion": "1.0",
+      "supportedMessageParts": ["text"]
+    },
+    "authSchemes": [
+      {
+        "scheme": "none",
+        "description": "No authentication required for this agent."
+      }
+    ],
+    "skills": [
+      {
+        "id": "log_message",
+        "name": "Message Logger",
+        "description": "Logs a text message to a PostgreSQL database with timestamp."
+      }
+    ],
+    "tags": ["agentvault", "poc", "database", "logging", "postgresql"]
+  }
+  

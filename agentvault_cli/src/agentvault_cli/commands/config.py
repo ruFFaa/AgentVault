@@ -105,8 +105,8 @@ async def set_key(
         utils.display_info(f"Attempting to store API key for '{service_id}' in the OS keyring.")
         try:
             # Prompt securely for the API key
-            # --- MODIFIED: Added await back ---
-            api_key = await click.prompt(
+            # --- MODIFIED: Removed await ---
+            api_key = click.prompt(
                 f"Enter API key for '{service_id}'",
                 hide_input=True,
                 confirmation_prompt=True # Ask user to enter it twice
@@ -164,16 +164,16 @@ async def set_key(
                  # --- END MODIFIED ---
 
             # Prompt for Client ID
-            # --- MODIFIED: Added await back ---
-            client_id = await click.prompt(f"Enter OAuth Client ID for '{service_id}'", hide_input=False)
+            # --- MODIFIED: Removed await ---
+            client_id = click.prompt(f"Enter OAuth Client ID for '{service_id}'", hide_input=False)
             # --- END MODIFIED ---
             if not client_id:
                 utils.display_error("Client ID cannot be empty.")
                 ctx.exit(1) # Keep exit for validation failure
 
             # Prompt securely for Client Secret
-            # --- MODIFIED: Added await back ---
-            client_secret = await click.prompt(
+            # --- MODIFIED: Removed await ---
+            client_secret = click.prompt(
                 f"Enter OAuth Client Secret for '{service_id}'",
                 hide_input=True,
                 confirmation_prompt=True

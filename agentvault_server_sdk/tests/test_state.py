@@ -343,7 +343,7 @@ async def test_update_task_state_triggers_notify(task_store: InMemoryTaskStore):
     with patch.object(task_store, 'notify_status_update', wraps=task_store.notify_status_update) as mock_notify:
         await task_store.update_task_state(task_id, TaskState.WORKING)
         # --- MODIFIED: Correct assertion ---
-        mock_notify.assert_awaited_once_with(task_id, TaskState.WORKING) # Removed None
+        mock_notify.assert_awaited_once_with(task_id, TaskState.WORKING, message=None)
         # --- END MODIFIED ---
 
     # Check the queue still received the event via the wrapped call

@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "query_and_log_agent"
+version = "0.1.0"
+description = "An orchestrator agent that demonstrates agent-to-agent communication by querying one agent and logging results with another."
+authors = ["Raphael Jeziorny <AgentVault@proton.me>"]
+license = "Apache-2.0"
+readme = "README.md"
+packages = [{include = "query_and_log_agent", from = "src"}]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.12"
+fastapi = ">=0.111,<0.112"
+uvicorn = {extras = ["standard"], version = ">=0.29,<0.35"}
+agentvault-server-sdk = ">=0.1.0,<0.2.0"
+agentvault = ">=0.2.0,<0.3.0"  # Client library for agent-to-agent communication - updated to match server-sdk requirement
+httpx = "*"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.0,<9.0"
+pytest-asyncio = ">=0.23,<0.24"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

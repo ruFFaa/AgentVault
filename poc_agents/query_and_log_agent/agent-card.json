@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0",
+  "humanReadableId": "local-poc/query-and-log",
+  "agentVersion": "0.1.0",
+  "name": "Query And Log Agent",
+  "description": "An orchestrator agent that demonstrates agent-to-agent communication by querying one agent and logging results with another.",
+  "url": "http://localhost:8004/a2a",
+  "provider": {
+    "name": "AgentVault Dev1"
+  },
+  "capabilities": {
+    "a2aVersion": "1.0",
+    "supportedMessageParts": ["text"]
+  },
+  "authSchemes": [
+    {
+      "scheme": "none",
+      "description": "No authentication required for this agent."
+    }
+  ],
+  "skills": [
+    {
+      "id": "orchestrate_query_log",
+      "name": "Query and Log Orchestration",
+      "description": "Takes a search term, queries one agent, and logs the results with another agent."
+    }
+  ],
+  "tags": ["agentvault", "poc", "orchestrator", "multi-agent", "workflow"]
+}

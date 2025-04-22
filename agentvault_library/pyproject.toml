@@ -1,12 +1,17 @@
+# agentvault_library/pyproject.toml
 # Using standard PEP 621 [project] table primarily
 [project]
     name = "agentvault"
+    # --- USE THE VERSION FROM THE LOCK FILE ---
     version = "0.2.1"
+    # --- END ---
     description = "Core Python client library for A2A protocol, MCP, and secure local key management."
     authors = [{ name = "Raphael Zbigniew Jeziorny", email = "AgentVault@proton.me" }]
-    license = { text = "Apache-2.0" } # Standard license expression
-    readme = "README.md"
+    license = { text = "Apache-2.0" }
+    readme = "README.md" # Add README.md if it doesn't exist
+    # --- ENSURE THIS CONSTRAINT IS PRESENT AND CORRECT ---
     requires-python = ">=3.10,<3.12"
+    # --- END ---
     keywords = ["ai", "agent", "a2a", "mcp", "security", "api", "llm", "interoperability", "key-management", "python", "library", "client", "sdk"]
     classifiers = [
         "Development Status :: 3 - Alpha",
@@ -22,56 +27,47 @@
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
         "Typing :: Typed",
     ]
-
-    # Core Dependencies defined directly
     dependencies = [
-        # --- MODIFIED: Align httpx strictly with CLI/pytest-httpx ---
-        "httpx[http2,brotli]>=0.26.0,<0.27.0",
-        # --- END MODIFIED ---
+        # --- KEEP CONSISTENT WITH ROOT LOCK (0.26.* for now) ---
+        "httpx[http2,brotli]>=0.26.0,<0.27.0", # Keep this for now, poetry lock will manage final
+        # --- END ---
         "pydantic>=2.0,<3.0",
         "python-dotenv>=1.0,<2.0",
-        # keyring is optional
     ]
-
-    # Optional dependencies defined using standard syntax
     [project.optional-dependencies]
     os_keyring = ["keyring>=24,<25"]
     dev = [
         "pytest>=7.0,<9.0",
-        "pytest-asyncio>=0.23,<0.24", # Keep this for library tests for now
+        "pytest-asyncio>=0.23,<0.24",
         "pytest-mock>=3.12,<4.0",
         "respx>=0.20,<0.21",
-        "agentvault-testing-utils" # Version/path handled by Poetry below
     ]
-
-# Build System (unchanged)
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
 
-# Poetry Specific Configuration (Minimal - Only what's needed beyond [project])
 [tool.poetry]
-version = "0.2.1" # Keep consistent with [project] for poetry commands
+name = "agentvault"
+# --- USE THE VERSION FROM THE LOCK FILE ---
+version = "0.2.1"
+# --- END ---
+description = ""
+authors = ["Raphael Zbigniew Jeziorny <AgentVault@proton.me>"]
 packages = [{include = "agentvault", from = "src"}]
-
-# Dependencies defined here are used by Poetry's resolver but [project] is canonical
+# --- ENSURE THIS CONSTRAINT IS PRESENT AND CORRECT ---
 [tool.poetry.dependencies]
 python = ">=3.10,<3.12"
-# --- MODIFIED: Align httpx strictly with CLI/pytest-httpx ---
+# --- END ---
+# --- KEEP CONSISTENT WITH ROOT LOCK ---
 httpx = {version = ">=0.26.0,<0.27.0", extras = ["http2", "brotli"]}
-# --- END MODIFIED ---
+# --- END ---
 pydantic = ">=2.0,<3.0"
 python-dotenv = ">=1.0,<2.0"
 keyring = {version = ">=24,<25", optional = true}
-
-# Extras defined here are used by Poetry but [project.optional-dependencies] is canonical
 [tool.poetry.extras]
 os_keyring = ["keyring"]
-
-# Dev dependencies defined here are used by Poetry but [project.optional-dependencies] is canonical
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.0,<9.0"
-pytest-asyncio = ">=0.23,<0.24" # Keep this for library tests for now
+pytest-asyncio = ">=0.23,<0.24"
 pytest-mock = ">=3.12,<4.0"
 respx = ">=0.20,<0.21"
-agentvault-testing-utils = {path = "../agentvault_testing_utils", develop = true}

@@ -1,7 +1,7 @@
 import pytest
 import pathlib
-# --- MODIFIED: Added AsyncMock ---
-from unittest.mock import patch, MagicMock, ANY, call, AsyncMock
+# --- MODIFIED: Only import MagicMock, ANY, call ---
+from unittest.mock import patch, MagicMock, ANY, call
 # --- END MODIFIED ---
 from pytest_mock import MockerFixture
 # --- MODIFIED: Import asyncclick runner and exceptions ---
@@ -70,16 +70,14 @@ async def test_config_set_file_guidance(runner: CliRunner, mocker: MockerFixture
     mock_display_info.assert_any_call(f"  Or in '{key_file}' (.json format):")
     mock_display_info.assert_any_call('    "my-service": {')
 
+# === CORRECTED TEST 1 ===
 @pytest.mark.asyncio
 async def test_config_set_keyring_success(runner: CliRunner, mocker: MockerFixture):
     """Test 'config set --keyring' successfully sets key."""
     mock_display_success = mocker.patch('agentvault_cli.commands.config.utils.display_success')
-    # Patch KeyManager where it's imported/used in config.py
     mock_key_manager_cls = mocker.patch('agentvault_cli.commands.config.key_manager.KeyManager')
-    # Patch prompt where it's used in config.py
-    # --- MODIFIED: Added AsyncMock ---
-    mock_prompt = mocker.patch('agentvault_cli.commands.config.click.prompt', new_callable=AsyncMock, side_effect=["test-api-key", "test-api-key"])
-    # --- END MODIFIED ---
+    # --- Use standard MagicMock for synchronous prompt ---
+    mock_prompt = mocker.patch('agentvault_cli.commands.config.click.prompt', new_callable=MagicMock, side_effect=["test-api-key", "test-api-key"])
 
     mock_manager_instance = MagicMock()
     mock_manager_instance.use_keyring = True
@@ -89,24 +87,29 @@ async def test_config_set_keyring_success(runner: CliRunner, mocker: MockerFixtu
     result = await runner.invoke(
         config_group,
         ['set', 'keyring-service', '--keyring']
-        # Input is handled by mocked prompt now
     )
 
     assert result.exit_code == 0, f"CLI Error: {result.output}"
     mock_display_success.assert_called_once_with("API key for 'keyring-service' stored successfully in keyring.")
-    # --- MODIFIED: Assert await_count == 1 ---
-    assert mock_prompt.await_count == 1 # Check async mock was awaited once
-    # --- END MODIFIED ---
+    # --- Assert call_count == 1 ---
+    assert mock_prompt.call_count == 1 # Check sync mock was called once
+    # Check arguments of the call
+    mock_prompt.assert_called_with(
+        "Enter API key for 'keyring-service'",
+        hide_input=True,
+        confirmation_prompt=True
+    )
     mock_key_manager_cls.assert_called_once_with(use_keyring=True)
     mock_manager_instance.set_key_in_keyring.assert_called_once_with('keyring-service', 'test-api-key')
+# === END CORRECTED TEST 1 ===
 
 @pytest.mark.asyncio
 async def test_config_set_keyring_error(runner: CliRunner, mocker: MockerFixture):
     """Test 'config set --keyring' handles KeyManagementError."""
     mock_display_error = mocker.patch('agentvault_cli.commands.config.utils.display_error')
     mock_key_manager_cls = mocker.patch('agentvault_cli.commands.config.key_manager.KeyManager')
-    # --- MODIFIED: Added AsyncMock ---
-    mock_prompt = mocker.patch('agentvault_cli.commands.config.click.prompt', new_callable=AsyncMock, side_effect=["test-api-key", "test-api-key"])
+    # --- MODIFIED: Use standard MagicMock ---
+    mock_prompt = mocker.patch('agentvault_cli.commands.config.click.prompt', new_callable=MagicMock, side_effect=["test-api-key", "test-api-key"])
     # --- END MODIFIED ---
 
     mock_manager_instance = MagicMock()
@@ -115,21 +118,17 @@ async def test_config_set_keyring_error(runner: CliRunner, mocker: MockerFixture
     mock_manager_instance.set_key_in_keyring.side_effect = av_exceptions.KeyManagementError(error_message)
     mock_key_manager_cls.return_value = mock_manager_instance
 
-    # --- MODIFIED: Assert mock call, check exception details ---
     result = await runner.invoke(
         config_group,
         ['set', 'keyring-service', '--keyring'],
         catch_exceptions=True # Catch the exit
     )
     mock_display_error.assert_any_call(f"Failed to set API key in keyring: {error_message}")
-    # Assert exception type and code if possible (might still fail with ValueError)
     if result.exception:
         assert isinstance(result.exception, SystemExit)
         assert result.exception.code == 1
     else:
-        # If exception is None (due to ValueError), at least check exit code if available
         assert result.exit_code == 1, "Command should have indicated failure (exit code 1)"
-    # --- END MODIFIED ---
     mock_manager_instance.set_key_in_keyring.assert_called_once()
 
 @pytest.mark.asyncio
@@ -139,23 +138,21 @@ async def test_config_set_keyring_lib_missing(runner: CliRunner, mocker: MockerF
      # Patch the import check flag within the config module
      mocker.patch('agentvault_cli.commands.config._agentvault_lib_imported', False)
 
-     # --- MODIFIED: Check exit code and exception ---
      result = await runner.invoke(config_group, ['set', 'keyring-service', '--keyring'], catch_exceptions=True)
      assert result.exit_code == 1, "Command should have failed due to missing library" # Check exit code
      assert isinstance(result.exception, SystemExit) # Check it exited via SystemExit
      assert result.exception.code == 1
-     # --- END MODIFIED ---
      mock_display_error.assert_called_once_with("Cannot use --keyring or --oauth-configure: Failed to import the 'agentvault' library.")
 
 # --- Tests for --oauth-configure ---
+# === CORRECTED TEST 2 ===
 @pytest.mark.asyncio
 async def test_config_set_oauth_configure_success(runner: CliRunner, mocker: MockerFixture):
     """Test 'config set --oauth-configure' successfully stores credentials."""
     mock_display_success = mocker.patch('agentvault_cli.commands.config.utils.display_success')
     mock_key_manager_cls = mocker.patch('agentvault_cli.commands.config.key_manager.KeyManager')
-    # --- MODIFIED: Added AsyncMock ---
-    mock_prompt = mocker.patch('agentvault_cli.commands.config.click.prompt', new_callable=AsyncMock, side_effect=["test-client-id", "test-secret", "test-secret"])
-    # --- END MODIFIED ---
+    # --- Use standard MagicMock for synchronous prompt ---
+    mock_prompt = mocker.patch('agentvault_cli.commands.config.click.prompt', new_callable=MagicMock, side_effect=["test-client-id", "test-secret", "test-secret"])
 
     mock_manager_instance = MagicMock()
     mock_manager_instance.use_keyring = True
@@ -168,12 +165,18 @@ async def test_config_set_oauth_configure_success(runner: CliRunner, mocker: Moc
     )
 
     assert result.exit_code == 0, f"CLI Error: {result.output}"
-    # --- MODIFIED: Assert await_count == 2 ---
-    assert mock_prompt.await_count == 2 # Check async mock was awaited twice
-    # --- END MODIFIED ---
+    # --- Assert call_count == 2 ---
+    assert mock_prompt.call_count == 2 # Check sync mock was called twice
+    # Check arguments of the calls (optional, but good practice)
+    expected_calls = [
+        call("Enter OAuth Client ID for 'oauth-service'", hide_input=False),
+        call("Enter OAuth Client Secret for 'oauth-service'", hide_input=True, confirmation_prompt=True)
+    ]
+    mock_prompt.assert_has_calls(expected_calls)
     mock_display_success.assert_called_once_with("OAuth credentials for 'oauth-service' stored successfully in keyring.")
     mock_key_manager_cls.assert_called_once_with(use_keyring=True)
     mock_manager_instance.set_oauth_creds_in_keyring.assert_called_once_with('oauth-service', 'test-client-id', 'test-secret')
+# === END CORRECTED TEST 2 ===
 
 @pytest.mark.asyncio
 async def test_config_set_oauth_configure_keyring_unavailable(runner: CliRunner, mocker: MockerFixture, capsys):
@@ -187,20 +190,15 @@ async def test_config_set_oauth_configure_keyring_unavailable(runner: CliRunner,
     mock_manager_instance.set_oauth_creds_in_keyring = MagicMock()
     mock_key_manager_cls.return_value = mock_manager_instance
 
-    # --- MODIFIED: Assert mock call, check exception ---
-    # Disable capsys to potentially avoid the ValueError, but focus on asserting the mock call
     with capsys.disabled():
         result = await runner.invoke(
             config_group,
             ['set', 'oauth-service', '--oauth-configure'],
             catch_exceptions=True # Still catch exit
         )
-    # Assert the specific error message was displayed
     mock_display_error.assert_any_call("Keyring support is not available or functional. Cannot securely store OAuth credentials.")
-    # Check the exception caught by the runner (should be SystemExit now)
     assert isinstance(result.exception, SystemExit)
     assert result.exception.code == 1
-    # --- END MODIFIED ---
     mock_display_info.assert_any_call("Hint: Check keyring documentation for backend setup or install 'keyrings.alt'.")
     mock_manager_instance.set_oauth_creds_in_keyring.assert_not_called()
 
@@ -209,8 +207,8 @@ async def test_config_set_oauth_configure_storage_error(runner: CliRunner, mocke
     """Test 'config set --oauth-configure' handles KeyManagementError during storage."""
     mock_display_error = mocker.patch('agentvault_cli.commands.config.utils.display_error')
     mock_key_manager_cls = mocker.patch('agentvault_cli.commands.config.key_manager.KeyManager')
-    # --- MODIFIED: Added AsyncMock ---
-    mock_prompt = mocker.patch('agentvault_cli.commands.config.click.prompt', new_callable=AsyncMock, side_effect=["test-id", "test-secret", "test-secret"])
+    # --- MODIFIED: Use standard MagicMock ---
+    mock_prompt = mocker.patch('agentvault_cli.commands.config.click.prompt', new_callable=MagicMock, side_effect=["test-id", "test-secret", "test-secret"])
     # --- END MODIFIED ---
 
     mock_manager_instance = MagicMock()
@@ -219,7 +217,6 @@ async def test_config_set_oauth_configure_storage_error(runner: CliRunner, mocke
     mock_manager_instance.set_oauth_creds_in_keyring.side_effect = av_exceptions.KeyManagementError(error_message)
     mock_key_manager_cls.return_value = mock_manager_instance
 
-    # --- MODIFIED: Check exit code and exception ---
     result = await runner.invoke(
         config_group,
         ['set', 'oauth-service', '--oauth-configure'],
@@ -228,11 +225,10 @@ async def test_config_set_oauth_configure_storage_error(runner: CliRunner, mocke
     assert result.exit_code == 1, "Command should have failed due to KeyManagementError" # Check exit code
     assert isinstance(result.exception, SystemExit)
     assert result.exception.code == 1
-    # --- END MODIFIED ---
     mock_display_error.assert_any_call(f"Failed to set OAuth credentials in keyring: {error_message}")
     mock_manager_instance.set_oauth_creds_in_keyring.assert_called_once()
 
-# --- MODIFIED: Split into two tests ---
+# === CORRECTED TEST 3 ===
 @pytest.mark.asyncio
 async def test_config_set_oauth_configure_empty_client_id(runner: CliRunner, mocker: MockerFixture):
     """Test 'config set --oauth-configure' handles empty client ID."""
@@ -241,9 +237,8 @@ async def test_config_set_oauth_configure_empty_client_id(runner: CliRunner, moc
     mock_manager_instance = MagicMock()
     mock_manager_instance.use_keyring = True
     mock_key_manager_cls.return_value = mock_manager_instance
-    # --- MODIFIED: Added AsyncMock ---
-    mock_prompt = mocker.patch('agentvault_cli.commands.config.click.prompt', new_callable=AsyncMock, side_effect=["", "test-secret", "test-secret"]) # Empty first prompt
-    # --- END MODIFIED ---
+    # --- Use standard MagicMock for synchronous prompt ---
+    mock_prompt = mocker.patch('agentvault_cli.commands.config.click.prompt', new_callable=MagicMock, side_effect=["", "test-secret", "test-secret"]) # Empty first prompt
 
     result = await runner.invoke(
         config_group,
@@ -251,12 +246,13 @@ async def test_config_set_oauth_configure_empty_client_id(runner: CliRunner, moc
         catch_exceptions=True
     )
     assert result.exit_code == 1, f"CLI Error (Empty ID): {result.output}"
-    # --- MODIFIED: Use assert_any_call ---
     mock_display_error.assert_any_call("Client ID cannot be empty.")
-    # --- END MODIFIED ---
     mock_manager_instance.set_oauth_creds_in_keyring.assert_not_called()
-    mock_prompt.assert_awaited_once()
+    # --- Assert call_count == 1 ---
+    mock_prompt.assert_called_once() # Should only be called once for the client ID
+# === END CORRECTED TEST 3 ===
 
+# === CORRECTED TEST 4 ===
 @pytest.mark.asyncio
 async def test_config_set_oauth_configure_empty_secret(runner: CliRunner, mocker: MockerFixture):
     """Test 'config set --oauth-configure' handles empty client secret."""
@@ -265,9 +261,8 @@ async def test_config_set_oauth_configure_empty_secret(runner: CliRunner, mocker
     mock_manager_instance = MagicMock()
     mock_manager_instance.use_keyring = True
     mock_key_manager_cls.return_value = mock_manager_instance
-    # --- MODIFIED: Added AsyncMock ---
-    mock_prompt = mocker.patch('agentvault_cli.commands.config.click.prompt', new_callable=AsyncMock, side_effect=["test-id", "", ""]) # Empty second prompt
-    # --- END MODIFIED ---
+    # --- Use standard MagicMock for synchronous prompt ---
+    mock_prompt = mocker.patch('agentvault_cli.commands.config.click.prompt', new_callable=MagicMock, side_effect=["test-id", "", ""]) # Empty second prompt
 
     result = await runner.invoke(
         config_group,
@@ -275,19 +270,17 @@ async def test_config_set_oauth_configure_empty_secret(runner: CliRunner, mocker
         catch_exceptions=True
     )
     assert result.exit_code == 1, f"CLI Error (Empty Secret): {result.output}"
-    # --- MODIFIED: Use assert_any_call ---
     mock_display_error.assert_any_call("Client Secret cannot be empty.")
-    # --- END MODIFIED ---
     mock_manager_instance.set_oauth_creds_in_keyring.assert_not_called()
-    assert mock_prompt.await_count == 2
-# --- END MODIFIED ---
+    # --- Assert call_count == 2 ---
+    assert mock_prompt.call_count == 2 # Called for ID and Secret
+# === END CORRECTED TEST 4 ===
 
 @pytest.mark.asyncio
 async def test_config_set_mutual_exclusivity(runner: CliRunner, mocker: MockerFixture):
     """Test error when multiple source flags are provided."""
     mock_display_error = mocker.patch('agentvault_cli.commands.config.utils.display_error')
 
-    # --- MODIFIED: Check exit code ---
     result1 = await runner.invoke(config_group, ['set', 'my-service', '--env', '--keyring'], catch_exceptions=True)
     assert result1.exit_code == 1
     mock_display_error.assert_called_once_with("Please specify exactly one configuration method: --env, --file <path>, --keyring, or --oauth-configure.")
@@ -301,7 +294,6 @@ async def test_config_set_mutual_exclusivity(runner: CliRunner, mocker: MockerFi
     result3 = await runner.invoke(config_group, ['set', 'my-service'], catch_exceptions=True)
     assert result3.exit_code == 1
     mock_display_error.assert_called_once_with("Please specify exactly one configuration method: --env, --file <path>, --keyring, or --oauth-configure.")
-    # --- END MODIFIED ---
 
 
 # --- Test 'config get' ---
@@ -478,7 +470,7 @@ async def test_config_list_empty(runner: CliRunner, mocker: MockerFixture):
     mock_display_info.assert_any_call("No credentials found configured via environment variables or specified key files.")
     mock_display_table.assert_not_called()
     mock_display_info.assert_any_call("(Credentials stored only in the OS keyring will not be listed here unless previously accessed.)")
-# --- END MODIFIED ---
+
 
 # --- ADDED TESTS ---
 
@@ -496,14 +488,14 @@ async def test_config_set_file_guidance_includes_oauth(runner: CliRunner, mocker
     mock_display_info.assert_any_call("    AGENTVAULT_OAUTH_my-service_CLIENT_SECRET=<your_client_secret>")
     mock_display_info.assert_any_call('      "oauth": { "clientId": "<your_client_id>", "clientSecret": "<your_client_secret>" }')
 
-
+# === CORRECTED TEST 5 ===
 @pytest.mark.asyncio
 async def test_config_set_keyring_empty_input(runner: CliRunner, mocker: MockerFixture):
     """Test 'config set --keyring' handles empty API key input."""
     mock_display_error = mocker.patch('agentvault_cli.commands.config.utils.display_error')
     mock_key_manager_cls = mocker.patch('agentvault_cli.commands.config.key_manager.KeyManager')
-    # Mock prompt to return empty string first time
-    mock_prompt = mocker.patch('agentvault_cli.commands.config.click.prompt', new_callable=AsyncMock, return_value="")
+    # --- Use standard MagicMock for synchronous prompt ---
+    mock_prompt = mocker.patch('agentvault_cli.commands.config.click.prompt', new_callable=MagicMock, return_value="")
 
     mock_manager_instance = MagicMock()
     mock_manager_instance.use_keyring = True # Assume keyring backend *is* functional initially
@@ -518,19 +510,21 @@ async def test_config_set_keyring_empty_input(runner: CliRunner, mocker: MockerF
     assert result.exit_code == 1, f"CLI Error: {result.output}"
     assert isinstance(result.exception, SystemExit)
     assert result.exception.code == 1
-    mock_prompt.assert_awaited_once() # Prompt was called once
+    # --- Assert call_count == 1 ---
+    mock_prompt.assert_called_once() # Prompt was called once
     mock_display_error.assert_called_once_with("API key cannot be empty.")
     mock_manager_instance.set_key_in_keyring.assert_not_called()
+# === END CORRECTED TEST 5 ===
 
-
+# === CORRECTED TEST 6 ===
 @pytest.mark.asyncio
 async def test_config_set_keyring_backend_not_functional(runner: CliRunner, mocker: MockerFixture, capsys):
     """Test 'config set --keyring' when keyring backend is not functional."""
     mock_display_error = mocker.patch('agentvault_cli.commands.config.utils.display_error')
     mock_display_info = mocker.patch('agentvault_cli.commands.config.utils.display_info')
     mock_key_manager_cls = mocker.patch('agentvault_cli.commands.config.key_manager.KeyManager')
-    # Mock prompt to provide valid input if it were called
-    mock_prompt = mocker.patch('agentvault_cli.commands.config.click.prompt', new_callable=AsyncMock, side_effect=["test-api-key", "test-api-key"])
+    # --- Use standard MagicMock for synchronous prompt ---
+    mock_prompt = mocker.patch('agentvault_cli.commands.config.click.prompt', new_callable=MagicMock, side_effect=["test-api-key", "test-api-key"])
 
     mock_manager_instance = MagicMock()
     # Simulate KeyManager init succeeding but use_keyring being False afterwards
@@ -552,8 +546,10 @@ async def test_config_set_keyring_backend_not_functional(runner: CliRunner, mock
     # Check the exception caught by the runner (should be SystemExit now)
     assert isinstance(result.exception, SystemExit)
     assert result.exception.code == 1
-    mock_prompt.assert_awaited_once() # Prompt is called before the check
+    # --- Assert call_count == 1 ---
+    mock_prompt.assert_called_once() # Prompt is called before the check
     mock_manager_instance.set_key_in_keyring.assert_not_called()
+# === END CORRECTED TEST 6 ===
 
 
 @pytest.mark.asyncio

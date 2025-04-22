@@ -7,7 +7,9 @@ import logging
 import json
 import inspect
 import asyncio
+# --- MODIFIED: Added List ---
 from typing import Any, Dict, Optional, Union, AsyncGenerator, Callable, TypeVar, List
+# --- END MODIFIED ---
 
 import pydantic
 # --- MODIFIED: Import ValidationError from pydantic_core ---
@@ -15,7 +17,9 @@ from pydantic_core import ValidationError
 # --- END MODIFIED ---
 
 
+# --- MODIFIED: Added Depends ---
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+# --- END MODIFIED ---
 # --- MODIFIED: Import StreamingResponse directly ---
 from fastapi.responses import StreamingResponse, JSONResponse
 # --- END MODIFIED ---
@@ -26,6 +30,7 @@ from .state import BaseTaskStore, InMemoryTaskStore, TaskContext
 from agentvault_server_sdk.exceptions import AgentServerError, TaskNotFoundError
 
 
+# --- RE-ADDED: Import block with fallback for models needed HERE ---
 # Import necessary models from the core library
 try:
     from agentvault.models import (
@@ -35,9 +40,9 @@ try:
         TaskStatusUpdateEvent, TaskMessageEvent, TaskArtifactUpdateEvent, Artifact
     )
     from agentvault.exceptions import A2AError, A2ARemoteAgentError, A2AMessageError
-    _AGENTVAULT_IMPORTED = True
+    _INTEGRATION_MODELS_AVAILABLE = True # Use a unique name for this module's flag
 except ImportError:
-    logging.getLogger(__name__).error("Failed to import from 'agentvault' library. FastAPI integration may not function correctly.")
+    logging.getLogger(__name__).error("Failed to import from 'agentvault' library in fastapi_integration. FastAPI integration may not function correctly.")
     # Define placeholders if import fails
     class Message: pass # type: ignore
     class Task: pass # type: ignore
@@ -56,7 +61,8 @@ except ImportError:
     class TaskMessageEvent: pass # type: ignore
     class TaskArtifactUpdateEvent: pass # type: ignore
     class Artifact: pass # type: ignore
-    _AGENTVAULT_IMPORTED = False
+    _INTEGRATION_MODELS_AVAILABLE = False
+# --- END RE-ADDED ---
 
 
 logger = logging.getLogger(__name__)
@@ -130,24 +136,32 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
 def _format_sse_event_bytes(event: A2AEvent) -> Optional[bytes]:
     """Helper to format an A2AEvent into SSE message bytes."""
     event_type: Optional[str] = None
-    if _AGENTVAULT_IMPORTED:
+
+    # --- MODIFIED: Use _INTEGRATION_MODELS_AVAILABLE flag defined in *this* module ---
+    if _INTEGRATION_MODELS_AVAILABLE:
         if isinstance(event, TaskStatusUpdateEvent): event_type = "task_status"
         elif isinstance(event, TaskMessageEvent): event_type = "task_message"
         elif isinstance(event, TaskArtifactUpdateEvent): event_type = "task_artifact"
-    else: # Fallback
+    else: # Fallback using string checks if import failed
+        # This block should ideally not be needed if the placeholders are defined correctly
         if "TaskStatusUpdateEvent" in str(type(event)): event_type = "task_status"
         elif "TaskMessageEvent" in str(type(event)): event_type = "task_message"
         elif "TaskArtifactUpdateEvent" in str(type(event)): event_type = "task_artifact"
+    # --- END MODIFIED ---
 
     if event_type is None:
         logger.warning(f"Cannot format unknown event type: {type(event)}")
         return None
 
     try:
-        if _AGENTVAULT_IMPORTED and hasattr(event, 'model_dump_json'):
+        # --- MODIFIED: Use _INTEGRATION_MODELS_AVAILABLE flag defined in *this* module ---
+        # Use hasattr to check for pydantic method defensively
+        if _INTEGRATION_MODELS_AVAILABLE and hasattr(event, 'model_dump_json'):
              json_data = event.model_dump_json(by_alias=True)
         else:
+             # Fallback for non-pydantic objects or if import failed
              json_data = json.dumps(event if isinstance(event, dict) else {"data": str(event)})
+        # --- END MODIFIED ---
         sse_message = f"event: {event_type}\ndata: {json_data}\n\n"
         return sse_message.encode("utf-8")
     except Exception as e:
@@ -180,13 +194,15 @@ async def _sse_stream_wrapper(
         logger.debug(f"SSE stream wrapper finished for task {task_id}")
 # --- END ADDED ---
 
+# --- MODIFIED: Added dependencies parameter to function signature ---
 def create_a2a_router(
     agent: BaseA2AAgent,
     prefix: str = "",
     tags: Optional[list[str]] = None,
     task_store: Optional[BaseTaskStore] = None,
-    dependencies: Optional[List[Depends]] = None
+    dependencies: Optional[List[Depends]] = None # <<< ADDED THIS PARAMETER
 ) -> APIRouter:
+# --- END MODIFIED ---
     """ Creates a FastAPI APIRouter that exposes A2A methods... """
     if tags is None: tags = ["A2A Protocol"]
     if task_store is None:
@@ -194,7 +210,9 @@ def create_a2a_router(
         task_store = InMemoryTaskStore()
     final_task_store = task_store
 
+    # --- MODIFIED: Pass dependencies to APIRouter constructor ---
     router = APIRouter(prefix=prefix, tags=tags, dependencies=dependencies or [])
+    # --- END MODIFIED ---
     logger.info(f"Creating A2A router for agent: {agent.__class__.__name__} with prefix '{prefix}' using task store: {final_task_store.__class__.__name__}")
 
     # Inspect agent for decorated methods
@@ -318,21 +336,19 @@ def create_a2a_router(
                 task_id = params.get("id")
                 if not isinstance(task_id, str) or not task_id: raise ValueError("'id' parameter is required.")
 
-                # --- MODIFIED: Check task existence BEFORE calling handler ---
+                # Check task existence BEFORE calling handler
                 task_context = await task_store_dep.get_task(task_id)
                 if task_context is None:
                     logger.warning(f"Task '{task_id}' not found for subscription.")
                     raise TaskNotFoundError(task_id=task_id) # Raise specific error
-                # --- END MODIFIED ---
 
-                # --- MODIFIED: Call handler, wrap generator, return StreamingResponse ---
+                # Call handler, wrap generator, return StreamingResponse
                 event_generator = agent_instance.handle_subscribe_request(task_id=task_id)
                 # Wrap the agent's generator to handle errors and format bytes
                 sse_byte_stream = _sse_stream_wrapper(task_id, event_generator)
 
                 logger.info(f"Subscription request successful for task {task_id}. Starting SSE stream.")
                 return StreamingResponse(content=sse_byte_stream, media_type="text/event-stream")
-                # --- END MODIFIED ---
 
             # Final fallback for unknown methods
             else:

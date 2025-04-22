@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0",
+  "humanReadableId": "local-poc/simple-summary",
+  "agentVersion": "0.1.0",
+  "name": "Simple Summary Agent",
+  "description": "An agent that generates summaries of text using a local LLM (LM Studio).",
+  "url": "http://localhost:8003/a2a",
+  "provider": {
+    "name": "AgentVault Dev1"
+  },
+  "capabilities": {
+    "a2aVersion": "1.0",
+    "supportedMessageParts": ["text"]
+  },
+  "authSchemes": [
+    {
+      "scheme": "none",
+      "description": "No authentication required for this agent."
+    }
+  ],
+  "skills": [
+    {
+      "id": "text_summarization",
+      "name": "Text Summarization",
+      "description": "Provides concise summaries of input text using the configured LLM model."
+    }
+  ],
+  "tags": ["agentvault", "poc", "llm", "summarization", "lm-studio"]
+}
