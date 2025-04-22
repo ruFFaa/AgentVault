@@ -195,25 +195,45 @@ class TaskLoggerAgent(BaseA2AAgent):
             return False
 
     async def handle_subscribe_request(self, task_id: str) -> AsyncGenerator[A2AEvent, None]:
-        """Handles SSE subscription request (relies on store notifications)."""
+        """Handles SSE subscription request by streaming events from the task store's listener queue."""
         logger.info(f"TaskLoggerAgent handling subscribe request: task_id={task_id}")
         task_context = await self.task_store.get_task(task_id)
         if task_context is None: 
             raise TaskNotFoundError(task_id=task_id)
 
-        # Keep connection open while task is running
-        terminal_states_str = {"COMPLETED", "FAILED", "CANCELED"}
-        current_state_str = str(task_context.current_state.value if isinstance(task_context.current_state, TaskState) else task_context.current_state)
-
-        while current_state_str not in terminal_states_str:
-            await asyncio.sleep(1) # Check periodically
-            task_context = await self.task_store.get_task(task_id)
-            if task_context is None: 
-                break
+        # Create a queue to receive events
+        event_queue = asyncio.Queue()
+        
+        # Add the listener to the task store
+        await self.task_store.add_listener(task_id, event_queue)
+        
+        try:
+            # Terminal states where we should stop listening
+            terminal_states_str = {"COMPLETED", "FAILED", "CANCELED"}
             current_state_str = str(task_context.current_state.value if isinstance(task_context.current_state, TaskState) else task_context.current_state)
-
-        logger.info(f"Subscription stream ending for task {task_id}")
-        if False: yield # pragma: no cover
+            
+            # Continue listening until task reaches terminal state
+            while current_state_str not in terminal_states_str:
+                try:
+                    # Wait for events with a timeout
+                    event = await asyncio.wait_for(event_queue.get(), timeout=30.0)
+                    logger.info(f"Yielding event for task {task_id}: {event}")
+                    yield event
+                    
+                    # Update current state if it's a status event
+                    if isinstance(event, TaskStatusUpdateEvent):
+                        current_state_str = str(event.state.value if isinstance(event.state, TaskState) else event.state)
+                except asyncio.TimeoutError:
+                    # Check if task is still active
+                    task_context = await self.task_store.get_task(task_id)
+                    if task_context:
+                        current_state_str = str(task_context.current_state.value if isinstance(task_context.current_state, TaskState) else task_context.current_state)
+                    else:
+                        break
+        finally:
+            # Always remove the listener
+            await self.task_store.remove_listener(task_id, event_queue)
+            logger.info(f"Subscription stream ending for task {task_id}")
 
     async def close(self):
         """Clean up resources when the agent shuts down."""

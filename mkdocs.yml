@@ -33,14 +33,13 @@ theme:
 plugins:
   - search # Enable search plugin
 
-# --- MODIFIED: Added Vision and Use Cases (placeholder) to Nav ---
 nav:
   - Home: index.md
-  - Vision: vision.md # Added Vision page prominently
+  - Vision: vision.md
   - Introduction:
     - Concepts: concepts.md
     - Architecture: architecture.md
-    - Use Cases: use_cases.md # Added Use Cases page link
+    - Use Cases: use_cases.md
   - Installation: installation.md
   - Examples:
       - Overview: examples.md
@@ -58,6 +57,9 @@ nav:
     - Testing Utilities (`agentvault-testing-utils`): developer_guide/testing.md
   - Protocols:
     - A2A Profile v0.2: a2a_profile_v0.2.md
+    # --- ADDED MCP LINK ---
+    - MCP Profile (Concept): mcp.md
+    # --- END ADDED ---
     - TEE Profile: tee_profile.md
   - Project & Policies:
     - Contributing: CONTRIBUTING.md
@@ -68,7 +70,6 @@ nav:
     - Terms of Service: TERMS_OF_SERVICE.md
     - Privacy Policy: privacy_policy.md
     - Roadmap: ROADMAP.md
-# --- END MODIFIED ---
 
 # Source directory for markdown files
 docs_dir: 'docs'
@@ -94,4 +95,4 @@ markdown_extensions:
   - md_in_html # Allows markdown processing inside HTML blocks
 
 # Copyright notice (optional)
-# copyright: Copyright &copy; 2025 AgentVault Contributors
+# copyright: Copyright © 2025 AgentVault Contributors

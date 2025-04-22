@@ -26,7 +26,7 @@ A live instance of the AgentVault Registry API and its associated Web UI is host
 
 The AgentVault monorepo contains the following key components:
 
-*   **`agentvault_library`**: ([Developer Guide](developer_guide/library.md)) Core Python client library for interacting with A2A agents, managing keys, and handling protocols (A2A, MCP).
+*   **`agentvault_library`**: ([Developer Guide](developer_guide/library.md)) Core Python client library for interacting with A2A agents, managing keys, and handling protocols (A2A, [MCP](mcp.md)).
 *   **`agentvault_cli`**: ([User Guide](user_guide/cli.md)) Command-line interface for users and developers to manage credentials, discover agents, and run tasks.
 *   **`agentvault_registry`**: ([Developer Guide](developer_guide/registry.md)) Backend API server (FastAPI) acting as the central discovery point for registered agents. Also serves a **Web UI** for public discovery (`/ui`) and developer management (`/ui/developer`). *(Live instance available above)*
 *   **`agentvault_server_sdk`**: ([Developer Guide](developer_guide/server_sdk.md)) Python SDK to help developers build A2A-compliant agent servers easily, integrating with frameworks like FastAPI. Includes packaging tools.
@@ -34,6 +34,11 @@ The AgentVault monorepo contains the following key components:
 *   **`examples/`**: Contains practical examples demonstrating how to use the SDK and library (e.g., basic A2A server, LangChain integration). See the [Examples Overview](examples.md).
 *   **`automation_scripts/`**: Scripts to automate common workflows like agent packaging and deployment.
 *   **`docs/`**: Source files for this documentation website (built with MkDocs).
+
+## Key Protocols
+
+*   **[Agent-to-Agent (A2A) Profile v0.2](a2a_profile_v0.2.md):** Defines the core communication patterns, task lifecycle, and event streaming via JSON-RPC and SSE.
+*   **[Model Context Protocol (MCP) Profile (Concept)](mcp.md):** Specifies how to embed richer context (like tool requests or user profiles) within standard A2A messages.
 
 ## Installation
 
